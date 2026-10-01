@@ -19,6 +19,15 @@ public enum DurationText {
         return .milliseconds(Int64((seconds * 1000).rounded()))
     }
 
+    /// A duration flag's value; a `usage` error naming the flag when it can't be read.
+    public static func option(_ text: String?, flag: String) throws -> Duration? {
+        guard let text else { return nil }
+        guard let duration = parse(text) else {
+            throw XcdError(.usage, "\(flag) \(text) is not a duration", next: "use a duration like 30s, 5m, or 1h")
+        }
+        return duration
+    }
+
     public static func seconds(_ duration: Duration) -> Double {
         Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
     }

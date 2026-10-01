@@ -6,23 +6,33 @@ public struct Services: Sendable {
     public let globalPaths: GlobalPaths
     public let currentDirectory: String
     public let environment: [String: String]
+    /// One-line progress messages for long operations. The CLI writes them to stderr.
+    public let progress: @Sendable (String) -> Void
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, currentDirectory: String,
-                environment: [String: String]) {
+                environment: [String: String], progress: @escaping @Sendable (String) -> Void = { _ in }) {
         self.runner = runner
         self.globalPaths = globalPaths
         self.currentDirectory = currentDirectory
         self.environment = environment
+        self.progress = progress
     }
 
     public static func live() -> Services {
         let environment = ProcessInfo.processInfo.environment
         return Services(runner: SystemProcessRunner(), globalPaths: .live(environment: environment),
-                        currentDirectory: FileManager.default.currentDirectoryPath, environment: environment)
+                        currentDirectory: FileManager.default.currentDirectoryPath, environment: environment,
+                        progress: { FileHandle.standardError.write(Data("xcd: \($0)\n".utf8)) })
     }
 
     public var worktrees: WorktreeService { WorktreeService(runner: runner, globalPaths: globalPaths) }
     public var provisioner: DeviceProvisioner { DeviceProvisioner(runner: runner, globalPaths: globalPaths) }
+    public var builds: BuildService { BuildService(runner: runner, provisioner: provisioner, progress: progress) }
+    public var tests: TestService { TestService(builds: builds) }
+    public var apps: RunService {
+        RunService(builds: builds, watcher: CrashWatcher(probe: SystemProcessProbe(), locator: CrashReportLocator()))
+    }
+    public var logs: LogService { LogService(runner: runner, provisioner: provisioner) }
 
     /// Opens the worktree; `xcode` is a one-off `--xcode` override that is never pinned.
     public func open(worktree: String?, xcode: String? = nil) async throws -> WorktreeContext {

@@ -9,7 +9,9 @@ struct Xcd: AsyncParsableCommand {
         abstract: "One entry point for agents doing Apple-platform development.",
         discussion: "Each git worktree gets its own simulators and build folders. Run commands from inside a project that has a .xcdev.yml.",
         version: XcdevVersion.current,
-        subcommands: [WorktreeCommand.self, SimCommand.self, ConfigCommand.self, ContextCommand.self]
+        subcommands: [BuildCommand.self, TestCommand.self, RunCommand.self, LogsCommand.self, CleanCommand.self,
+                      InstallCommand.self, UninstallCommand.self, LaunchCommand.self, TerminateCommand.self,
+                      WorktreeCommand.self, SimCommand.self, ConfigCommand.self, ContextCommand.self]
     )
 
     /// Parse errors become `usage` failures (exit 2, JSON envelope with --json / XCD_OUTPUT=json).

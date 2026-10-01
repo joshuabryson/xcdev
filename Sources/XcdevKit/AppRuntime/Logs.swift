@@ -174,3 +174,26 @@ public struct LogService: Sendable {
                           file: launch.appLog, worktree: ctx.state.name)
     }
 }
+
+extension LogOptions {
+    /// From `xcd logs` flags. `--follow` streams for `--for`, or by default for 30s but never longer than
+    /// `maxFollow` (logs.maxFollow). An explicit `--for` is kept as given; LogService rejects one over the cap.
+    /// `--for` without `--follow` is a mistake.
+    public static func commandLine(device: String?, since: String, level: String, grep: String?, follow: Bool,
+                                   duration: String?, system: Bool, limit: Int, app: Bool,
+                                   maxFollow: Duration = .seconds(300)) throws -> LogOptions {
+        guard let sinceDuration = try DurationText.option(since, flag: "--since") else {
+            throw XcdError(.usage, "--since needs a value", next: "use a duration like 30s, 5m, or 1h")
+        }
+        guard let logLevel = LogLevel(rawValue: level) else {
+            throw XcdError(.usage, "--level \(level) is not one of: default, info, debug", next: "pass --level info or --level debug")
+        }
+        if let duration, !follow {
+            throw XcdError(.usage, "--for only applies with --follow", next: "pass --follow --for \(duration)")
+        }
+        guard limit >= 1 else { throw XcdError(.usage, "--limit must be at least 1", next: "pass --limit 200") }
+        let followFor = follow ? (try DurationText.option(duration, flag: "--for") ?? min(.seconds(30), maxFollow)) : nil
+        return LogOptions(device: device, since: sinceDuration, level: logLevel, grep: grep, follow: followFor,
+                          includeSystem: system, limit: limit, appOutput: app)
+    }
+}

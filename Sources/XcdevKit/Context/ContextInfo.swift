@@ -1,4 +1,4 @@
-/// The context contract. XCD_APP_PATH, XCD_BUNDLE_ID, and XCD_OUTPUT come later.
+/// The context contract. XCD_OUTPUT comes later.
 public struct ContextInfo: Reportable {
     public let projectRoot: String
     public let worktree: String
@@ -7,14 +7,18 @@ public struct ContextInfo: Reportable {
     public let udid: String?
     public let runtime: String?
     public let derivedData: String
+    public let appPath: String?
+    public let bundleId: String?
     public let developerDir: String?
 
-    /// Reports only already-provisioned devices; building context never clones.
+    /// Reports only already-provisioned devices and already-built apps; building context never clones or builds.
     public static func build(ctx: WorktreeContext, device: String?) -> ContextInfo {
         let provisioned = device.flatMap { ctx.state.devices[$0] }
+        let product = device.flatMap { try? AppStateStore.load(ctx.paths).builds[$0]?.product }
         return ContextInfo(projectRoot: ctx.location.projectRoot, worktree: ctx.location.worktreeRoot,
                            worktreeName: ctx.state.name, device: device, udid: provisioned?.udid,
                            runtime: provisioned?.runtime, derivedData: ctx.paths.derivedData,
+                           appPath: product?.path, bundleId: product?.bundleId,
                            developerDir: ctx.xcode?.developerDir)
     }
 
@@ -28,6 +32,8 @@ public struct ContextInfo: Reportable {
         env["XCD_DEVICE"] = device
         env["XCD_UDID"] = udid
         env["XCD_RUNTIME"] = runtime
+        env["XCD_APP_PATH"] = appPath
+        env["XCD_BUNDLE_ID"] = bundleId
         env["DEVELOPER_DIR"] = developerDir
         return env
     }
