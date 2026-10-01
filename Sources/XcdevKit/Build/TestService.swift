@@ -48,7 +48,8 @@ public struct TestService: Sendable {
                 (buildErrors, logTail) = BuildService.fallbackErrors(logFile: run.log, exitCode: run.output.exitCode)
             }
         } else if !run.output.succeeded {
-            outcome = .buildFailed
+            // The build succeeded yet no test ran (e.g. the test host crashed at launch): not a build failure.
+            outcome = run.buildResults?.succeeded == true ? .failed : .buildFailed
             (buildErrors, logTail) = BuildService.fallbackErrors(logFile: run.log, exitCode: run.output.exitCode)
         } else {
             outcome = .noTests

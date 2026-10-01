@@ -90,6 +90,18 @@ import XcdevTestSupport
         #expect(report.text.contains("\npassed=3 failed=0 skipped=0\nerror: The test runner exited with code -1 before finishing.\n"))
     }
 
+    @Test func aBuiltRunThatRanNoTestsIsATestFailureNotABuildFailure() async throws {
+        defer { worktree.remove() }
+        let (report, _) = try await run(.init(exitCode: 65,
+                                              log: "Testing started\nxcodebuild: error: The test runner exited with code -1 before finishing.\n** TEST FAILED **\n",
+                                              buildResults: #"{"status":"succeeded","errors":[],"warnings":[]}"#,
+                                              testSummary: Fixture.string("test-results-summary-empty.json")))
+        #expect(report.outcome == .failed)
+        #expect(report.failure?.code == .testFailed)
+        #expect(report.failure?.message == "the test run failed without a failing test")
+        #expect(report.buildErrors.map(\.message) == ["The test runner exited with code -1 before finishing."])
+    }
+
     @Test func aFailedRunWithoutFailingTestsOrErrorsShowsTheLogTail() async throws {
         defer { worktree.remove() }
         let (report, _) = try await run(.init(exitCode: 65, log: "Testing started\nRestarting after unexpected exit\n** TEST FAILED **\n",
