@@ -52,6 +52,20 @@ import Testing
         #expect(results.failures[0].file == nil)
     }
 
+    @Test func nestedFailuresAreKeptAlongsideDirectOnes() throws {
+        let results = try TestResults.parse(summary: data("test-results-summary-nested.json"),
+                                            tests: data("test-results-tests-nested.json"))
+        #expect(results.failures.map(\.test) == ["SampleAppTests/direct()", "SampleAppTests/parameterized(value:)"])
+        #expect(results.failures[1].file == "/Users/dev/My Apps/SampleApp/SampleAppTests/A.swift" && results.failures[1].line == 12)
+    }
+
+    @Test func summaryFailureMissingFromTheTreeIsStillListed() throws {
+        let tree = #"{"testNodes":[{"name":"P","nodeType":"Test Plan","children":[{"name":"direct()","nodeType":"Test Case","result":"Failed","nodeIdentifierURL":"test://com.apple.xcode/SampleApp/SampleAppTests/direct()","children":[{"name":"x","nodeType":"Failure Message","sourceLocation":{"filePath":"/a.swift","lineNumber":1}}]}]}]}"#
+        let results = try TestResults.parse(summary: data("test-results-summary-nested.json"), tests: Data(tree.utf8))
+        #expect(results.failures.map(\.test) == ["SampleAppTests/direct()", "SampleAppTests/parameterized(value:)"])
+        #expect(results.failures[1].file == nil)
+    }
+
     @Test func filterThatMatchedNothingHasZeroTests() throws {
         let results = try TestResults.parse(summary: data("test-results-summary-empty.json"), tests: nil)
         #expect(results.counts.total == 0 && results.failures.isEmpty)

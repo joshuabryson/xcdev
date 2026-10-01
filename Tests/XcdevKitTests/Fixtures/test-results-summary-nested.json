@@ -1,0 +1,14 @@
+{
+  "_comment": "Hand-built from the xcresulttool summary schema, not recorded; pairs with test-results-tests-nested.json.",
+  "expectedFailures": 0,
+  "failedTests": 2,
+  "passedTests": 0,
+  "skippedTests": 0,
+  "totalTestCount": 2,
+  "testFailures": [
+    { "failureText": "Expectation failed: 1 == 2", "testIdentifierString": "direct()",
+      "testIdentifierURL": "test://com.apple.xcode/SampleApp/SampleAppTests/direct()" },
+    { "failureText": "Expectation failed: value < 3", "testIdentifierString": "parameterized(value:)",
+      "testIdentifierURL": "test://com.apple.xcode/SampleApp/SampleAppTests/parameterized(value:)" }
+  ]
+}

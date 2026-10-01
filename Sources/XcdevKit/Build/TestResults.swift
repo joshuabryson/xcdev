@@ -58,10 +58,12 @@ public struct TestResults: Sendable, Equatable {
         let counts = TestCounts(total: raw.totalTestCount ?? 0, passed: raw.passedTests ?? 0, failed: raw.failedTests ?? 0,
                                 skipped: raw.skippedTests ?? 0, expectedFailures: raw.expectedFailures ?? 0)
         var failures = tests.flatMap(treeFailures) ?? []
-        if failures.isEmpty {
-            failures = (raw.testFailures ?? []).map { failure in
-                TestFailure(test: failure.testIdentifierURL.map(testIdentifier(fromURL:)) ?? failure.testIdentifierString ?? "?",
-                            message: failure.failureText, file: nil, line: nil)
+        // The tree has locations; the summary is authoritative about which tests failed.
+        let inTree = Set(failures.map(\.test))
+        for failure in raw.testFailures ?? [] {
+            let test = failure.testIdentifierURL.map(testIdentifier(fromURL:)) ?? failure.testIdentifierString ?? "?"
+            if !inTree.contains(test) {
+                failures.append(TestFailure(test: test, message: failure.failureText, file: nil, line: nil))
             }
         }
         return TestResults(counts: counts, failures: failures)
@@ -83,7 +85,8 @@ public struct TestResults: Sendable, Equatable {
         struct Location: Decodable { let filePath: String?; let lineNumber: Int? }
     }
 
-    /// One failure per "Failure Message" under a failed "Test Case", with its source location.
+    /// One failure per "Failure Message" anywhere under a failed "Test Case" (arguments, repetitions and
+    /// test-case runs may sit in between), with its source location.
     private static func treeFailures(_ data: Data) -> [TestFailure]? {
         struct Tree: Decodable { let testNodes: [Node] }
         guard let tree = try? JSONDecoder().decode(Tree.self, from: data) else { return nil }
@@ -91,10 +94,18 @@ public struct TestResults: Sendable, Equatable {
         func walk(_ node: Node) {
             if node.nodeType == "Test Case", node.result == "Failed" {
                 let id = node.nodeIdentifierURL.map(testIdentifier(fromURL:)) ?? node.name ?? "?"
-                for message in (node.children ?? []) where message.nodeType == "Failure Message" {
-                    failures.append(TestFailure(test: id, message: message.name ?? "",
-                                                file: message.sourceLocation?.filePath, line: message.sourceLocation?.lineNumber))
+                func collect(_ node: Node) {
+                    for child in node.children ?? [] {
+                        if child.nodeType == "Failure Message" {
+                            failures.append(TestFailure(test: id, message: child.name ?? "",
+                                                        file: child.sourceLocation?.filePath, line: child.sourceLocation?.lineNumber))
+                        } else {
+                            collect(child)
+                        }
+                    }
                 }
+                collect(node)
+                return
             }
             node.children?.forEach(walk)
         }

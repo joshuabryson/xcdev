@@ -1,0 +1,46 @@
+{
+  "_comment" : "Hand-built from the xcresulttool tests schema, not recorded: one direct failure and one failure under an Arguments level.",
+  "testNodes" : [
+    {
+      "children" : [
+        {
+          "children" : [
+            {
+              "children" : [
+                { "name" : "Expectation failed: 1 == 2", "nodeType" : "Failure Message",
+                  "sourceLocation" : { "filePath" : "/Users/dev/My Apps/SampleApp/SampleAppTests/A.swift", "lineNumber" : 5 } }
+              ],
+              "name" : "direct()",
+              "nodeIdentifierURL" : "test://com.apple.xcode/SampleApp/SampleAppTests/direct()",
+              "nodeType" : "Test Case",
+              "result" : "Failed"
+            },
+            {
+              "children" : [
+                {
+                  "children" : [
+                    { "name" : "Expectation failed: value < 3", "nodeType" : "Failure Message",
+                      "sourceLocation" : { "filePath" : "/Users/dev/My Apps/SampleApp/SampleAppTests/A.swift", "lineNumber" : 12 } }
+                  ],
+                  "name" : "3",
+                  "nodeType" : "Arguments",
+                  "result" : "Failed"
+                }
+              ],
+              "name" : "parameterized(value:)",
+              "nodeIdentifierURL" : "test://com.apple.xcode/SampleApp/SampleAppTests/parameterized(value:)",
+              "nodeType" : "Test Case",
+              "result" : "Failed"
+            }
+          ],
+          "name" : "SampleAppTests",
+          "nodeType" : "Unit test bundle",
+          "result" : "Failed"
+        }
+      ],
+      "name" : "SampleApp",
+      "nodeType" : "Test Plan",
+      "result" : "Failed"
+    }
+  ]
+}
