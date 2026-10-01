@@ -1,0 +1,102 @@
+import Foundation
+import Testing
+import XcdevTestSupport
+@testable import XcdevKit
+
+@Suite struct TestServiceTests {
+    let worktree = FakeWorktree(prefix: "xcd test")
+    var fake: FakeProcessRunner { worktree.runner }
+    static let passingSummary = #"{"result":"Passed","totalTestCount":3,"passedTests":3,"failedTests":0,"skippedTests":0,"expectedFailures":0,"testFailures":[]}"#
+
+    func run(_ outcome: FakeXcodebuild.Outcome, _ options: TestOptions = TestOptions()) async throws -> (TestReport, FakeXcodebuild) {
+        _ = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        let xcodebuild = FakeXcodebuild(runner: fake)
+        xcodebuild.onRun(outcome)
+        var ctx = try worktree.context(BuildServiceTests.config, container: "App.xcodeproj")
+        let builds = BuildService(runner: fake, provisioner: worktree.provisioner,
+                                  now: { Date(timeIntervalSince1970: 1_790_040_000) })
+        return (try await TestService(builds: builds).test(options, in: &ctx), xcodebuild)
+    }
+
+    @Test func failingTestsAreReportedWithARerunCommand() async throws {
+        defer { worktree.remove() }
+        let (report, xcodebuild) = try await run(.init(exitCode: 65, log: "** TEST FAILED **\n",
+                                                       buildResults: #"{"status":"succeeded","errors":[],"warnings":[]}"#,
+                                                       testSummary: Fixture.string("test-results-summary-failed.json"),
+                                                       testTree: Fixture.string("test-results-tests-failed.json")))
+        #expect(report.outcome == .failed)
+        #expect(report.counts.failed == 1 && report.counts.passed == 2 && report.counts.skipped == 1)
+        #expect(report.failure?.code == .testFailed)
+        #expect(report.failure?.message == "1 test failed")
+        #expect(report.failure?.next == "fix the failing tests, then re-run them with `xcd test --only 'SampleAppTests/failsOnPurpose()'`")
+        let args = try #require(xcodebuild.runs.first).arguments
+        #expect(args.starts(with: ["xcodebuild", "test"]))
+        #expect(args.contains("AppTests"))                         // schemes.test
+        #expect(report.text.hasPrefix("tests failed  scheme=AppTests device=iphone (iPhone 18 Pro, iOS 27.0)  0.0s\npassed=2 failed=1 skipped=1\n/Users/dev/My Apps/SampleApp/SampleAppTests/SampleAppTests.swift:9: error: SampleAppTests/failsOnPurpose(): Expectation failed"))
+    }
+
+    @Test func filtersArePassedAndAPassingRunSucceeds() async throws {
+        defer { worktree.remove() }
+        let (report, xcodebuild) = try await run(.init(testSummary: Self.passingSummary),
+                                                 TestOptions(only: ["AppTests/works()"], skip: ["AppTests/Slow"]))
+        #expect(report.outcome == .passed && report.failure == nil)
+        let args = try #require(xcodebuild.runs.first).arguments
+        #expect(args.contains("-only-testing:AppTests/works()") && args.contains("-skip-testing:AppTests/Slow"))
+        #expect(report.text.contains("\npassed=3 failed=0 skipped=0\n"))
+    }
+
+    @Test func aFilterThatMatchesNothingIsNotAPass() async throws {
+        defer { worktree.remove() }
+        let (report, _) = try await run(.init(log: "** TEST SUCCEEDED **\n",
+                                              testSummary: Fixture.string("test-results-summary-empty.json")),
+                                        TestOptions(only: ["AppTests/works"]))
+        #expect(report.outcome == .noTests)
+        #expect(report.failure?.code == .testFailed)
+        #expect(report.failure?.message == "no tests ran")
+        #expect(report.failure?.next == "check the --only/--skip identifiers; Swift Testing names need parentheses, e.g. `AppTests/works()`")
+        #expect(report.text.hasPrefix("no tests ran  scheme=AppTests"))
+    }
+
+    @Test func compileErrorsInTestsAreBuildFailures() async throws {
+        defer { worktree.remove() }
+        let (report, _) = try await run(.init(exitCode: 65, buildResults: Fixture.string("build-results-failed.json"),
+                                              testSummary: Fixture.string("test-results-summary-empty.json")))
+        #expect(report.outcome == .buildFailed)
+        #expect(report.buildErrors.count == 2)
+        #expect(report.failure?.code == .buildFailed)
+        #expect(report.failure?.next == "fix the errors and re-run `xcd test`")
+    }
+
+    @Test func unknownTestTargetPassesTheXcodebuildErrorThrough() async throws {
+        defer { worktree.remove() }
+        let (report, _) = try await run(.init(exitCode: 70, log: "xcodebuild: error: Failed to build project App with scheme AppTests.: Tests in the target “Nope” can’t be run because “Nope” isn’t a member of the specified test plan or scheme.\n"),
+                                        TestOptions(only: ["Nope"]))
+        #expect(report.outcome == .buildFailed)
+        #expect(report.buildErrors.first?.message.hasPrefix("Failed to build project App with scheme AppTests.: Tests in the target “Nope”") == true)
+    }
+
+    @Test func aFailedRunWithoutFailingTestsShowsXcodebuildsErrors() async throws {
+        defer { worktree.remove() }
+        let (report, _) = try await run(.init(exitCode: 65,
+                                              log: "Testing started\nxcodebuild: error: The test runner exited with code -1 before finishing.\n** TEST FAILED **\n",
+                                              buildResults: #"{"status":"succeeded","errors":[],"warnings":[]}"#,
+                                              testSummary: Self.passingSummary))
+        #expect(report.outcome == .failed)
+        #expect(report.failure?.code == .testFailed)
+        #expect(report.failure?.message == "the test run failed without a failing test")
+        #expect(report.failure?.next == "read the errors above and the log, then re-run `xcd test`")
+        #expect(report.buildErrors.map(\.message) == ["The test runner exited with code -1 before finishing."])
+        #expect(report.logTail == nil)
+        #expect(report.text.contains("\npassed=3 failed=0 skipped=0\nerror: The test runner exited with code -1 before finishing.\n"))
+    }
+
+    @Test func aFailedRunWithoutFailingTestsOrErrorsShowsTheLogTail() async throws {
+        defer { worktree.remove() }
+        let (report, _) = try await run(.init(exitCode: 65, log: "Testing started\nRestarting after unexpected exit\n** TEST FAILED **\n",
+                                              testSummary: Self.passingSummary))
+        #expect(report.outcome == .failed)
+        #expect(report.failure?.message == "the test run failed without a failing test")
+        #expect(report.buildErrors.first?.message == "xcodebuild failed (exit 65) without reporting an error; the log's last lines follow")
+        #expect(report.logTail == ["Testing started", "Restarting after unexpected exit", "** TEST FAILED **"])
+    }
+}

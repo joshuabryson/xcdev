@@ -56,25 +56,23 @@ public struct BuildService: Sendable {
 
     public func build(_ options: BuildOptions, in ctx: inout WorktreeContext) async throws -> BuildReport {
         let plan = try await plan(device: options.device, scheme: options.scheme, role: .app, in: &ctx)
-        let started = now()
         let paths = ctx.paths
-        let log = paths.newArtifact(in: paths.logs, kind: "build", ext: "log", now: started)
-        let bundle = paths.newArtifact(in: paths.results, kind: "build", ext: "xcresult", now: started)
-        let request = XcodebuildRequest(actions: options.clean ? [.clean, .build] : [.build], container: plan.container,
-                                        scheme: plan.scheme, destination: plan.target.destination,
-                                        configuration: options.configuration, paths: paths, resultBundle: bundle)
-        progress("building \(plan.scheme) for \(plan.target.summary)  log: \(log)")
-        let output = try await runXcodebuild(request, xcode: plan.xcode, log: log, timeout: options.timeout)
-        let results = await buildResults(bundle: bundle, xcode: plan.xcode)
+        let run = try await runWithResultBundle(plan, kind: "build", paths: paths, timeout: options.timeout,
+                                                progress: "building \(plan.scheme) for \(plan.target.summary)") { bundle in
+            XcodebuildRequest(actions: options.clean ? [.clean, .build] : [.build], container: plan.container,
+                              scheme: plan.scheme, destination: plan.target.destination,
+                              configuration: options.configuration, paths: paths, resultBundle: bundle)
+        }
+        let results = run.buildResults
 
         var errors = results?.errors ?? []
         var logTail: [String]?
-        if !output.succeeded && errors.isEmpty {
-            (errors, logTail) = Self.fallbackErrors(logFile: log, exitCode: output.exitCode)
+        if !run.output.succeeded && errors.isEmpty {
+            (errors, logTail) = Self.fallbackErrors(logFile: run.log, exitCode: run.output.exitCode)
         }
         var product: AppProduct?
-        if output.succeeded {
-            let settings = try await runner.runChecked(request.buildSettingsInvocation(developerDir: plan.xcode.developerDir),
+        if run.output.succeeded {
+            let settings = try await runner.runChecked(run.request.buildSettingsInvocation(developerDir: plan.xcode.developerDir),
                                                        next: "run `xcodebuild -showBuildSettings` to see why")
             product = try BuildSettings.app(from: settings.stdout, preferredTarget: plan.scheme)
             var state = try AppStateStore.load(paths)
@@ -82,12 +80,11 @@ public struct BuildService: Sendable {
                                                          product: product, finishedAt: now())
             try AppStateStore.save(state, paths)
         }
-        return BuildReport(succeeded: output.succeeded, scheme: plan.scheme, target: plan.target.name,
-                           targetSummary: plan.target.summary, seconds: now().timeIntervalSince(started), errors: errors,
-                           warningCount: results?.warningCount ?? 0,
-                           warnings: options.showWarnings ? (results?.warnings ?? []) : nil, product: product, log: log,
-                           resultBundle: FileManager.default.fileExists(atPath: bundle) ? bundle : nil, logTail: logTail,
-                           worktree: ctx.state.name)
+        return BuildReport(succeeded: run.output.succeeded, scheme: plan.scheme, target: plan.target.name,
+                           targetSummary: plan.target.summary, seconds: now().timeIntervalSince(run.started),
+                           errors: errors, warningCount: results?.warningCount ?? 0,
+                           warnings: options.showWarnings ? (results?.warnings ?? []) : nil, product: product,
+                           log: run.log, resultBundle: run.resultBundle, logTail: logTail, worktree: ctx.state.name)
     }
 
     /// `xcodebuild clean` for the app scheme (no destination, so nothing is cloned), or with `deep`,
@@ -129,6 +126,36 @@ public struct BuildService: Sendable {
         let available = listed.map { Schemes.parseList($0.stdout) } ?? []
         if available.count == 1 { return available[0] }
         throw Schemes.missing(role: role, available: available)
+    }
+
+    /// One xcodebuild run that writes a log and a result bundle, with the bundle's build results.
+    struct ResultBundleRun: Sendable {
+        let started: Date
+        let request: XcodebuildRequest
+        let log: String
+        let bundle: String
+        let output: ProcessOutput
+        /// nil when the bundle is missing or unreadable.
+        let buildResults: BuildResults?
+
+        /// The bundle's path if xcodebuild wrote it.
+        var resultBundle: String? { FileManager.default.fileExists(atPath: bundle) ? bundle : nil }
+    }
+
+    /// Creates the timestamped `<kind>` log and result bundle paths, reports `progress` with the log path,
+    /// runs the request `makeRequest` builds for that bundle, and reads the bundle's build results.
+    func runWithResultBundle(_ plan: BuildPlan, kind: String, paths: WorktreePaths, timeout: Duration,
+                             progress message: String,
+                             makeRequest: (_ resultBundle: String) -> XcodebuildRequest) async throws -> ResultBundleRun {
+        let started = now()
+        let log = paths.newArtifact(in: paths.logs, kind: kind, ext: "log", now: started)
+        let bundle = paths.newArtifact(in: paths.results, kind: kind, ext: "xcresult", now: started)
+        let request = makeRequest(bundle)
+        progress("\(message)  log: \(log)")
+        let output = try await runXcodebuild(request, xcode: plan.xcode, log: log, timeout: timeout)
+        let results = await buildResults(bundle: bundle, xcode: plan.xcode)
+        return ResultBundleRun(started: started, request: request, log: log, bundle: bundle, output: output,
+                               buildResults: results)
     }
 
     /// Runs xcodebuild with output going to `log`. A timeout error also names the log.
