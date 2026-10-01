@@ -64,6 +64,10 @@ public enum ConfigLoader {
                     issues.append(ConfigIssue(path: "devices.\(name).pairWith", message: "'\(partner)' is not a key under devices"))
                 } else if devices[partner]?.isMac == true {
                     issues.append(ConfigIssue(path: "devices.\(name).pairWith", message: "'\(partner)' is a macOS device and cannot be paired"))
+                } else if devices[partner]?.pairWith != nil {
+                    // Covers cycles (a↔b) and chains; provisioning pairs one level only.
+                    issues.append(ConfigIssue(path: "devices.\(name).pairWith",
+                                              message: "'\(partner)' also has pairWith; pairing chains are not supported"))
                 }
             }
         }

@@ -85,6 +85,22 @@ import Testing
         ])
     }
 
+    @Test func pairWithCycleIsRejected() {
+        let yaml = """
+        version: 1
+        project: A.xcodeproj
+        devices:
+          a: { type: A, pairWith: b }
+          b: { type: B, pairWith: a }
+        """
+        let error = #expect(throws: XcdError.self) { try ConfigLoader.parse(main: yaml) }
+        #expect(error?.code == .configInvalid)
+        #expect(error?.details == [
+            "devices.a.pairWith: 'b' also has pairWith; pairing chains are not supported",
+            "devices.b.pairWith: 'a' also has pairWith; pairing chains are not supported",
+        ])
+    }
+
     @Test func invalidPlatformValue() {
         let yaml = "version: 1\nproject: A.xcodeproj\ndevices:\n  m: { platform: linux }\n"
         let error = #expect(throws: XcdError.self) { try ConfigLoader.parse(main: yaml) }
