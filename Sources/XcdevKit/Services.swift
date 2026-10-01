@@ -24,7 +24,10 @@ public struct Services: Sendable {
     public var worktrees: WorktreeService { WorktreeService(runner: runner, globalPaths: globalPaths) }
     public var provisioner: DeviceProvisioner { DeviceProvisioner(runner: runner, globalPaths: globalPaths) }
 
-    public func open(worktree: String?) async throws -> WorktreeContext {
-        try await worktrees.open(from: currentDirectory, worktreeName: worktree)
+    /// Opens the worktree; `xcode` is a one-off `--xcode` override that is never pinned.
+    public func open(worktree: String?, xcode: String? = nil) async throws -> WorktreeContext {
+        var ctx = try await worktrees.open(from: currentDirectory, worktreeName: worktree)
+        if let xcode { ctx.xcodeOverride = try await XcodeDiscovery(runner: runner).resolve(spec: xcode) }
+        return ctx
     }
 }

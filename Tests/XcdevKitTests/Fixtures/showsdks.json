@@ -1,0 +1,79 @@
+[
+  {
+    "canonicalName": "driverkit27.0",
+    "displayName": "DriverKit 27.0",
+    "platform": "driverkit",
+    "platformVersion": "27.0",
+    "sdkVersion": "27.0"
+  },
+  {
+    "canonicalName": "iphoneos27.0",
+    "displayName": "iOS 27.0",
+    "platform": "iphoneos",
+    "platformVersion": "27.0",
+    "sdkVersion": "27.0"
+  },
+  {
+    "canonicalName": "iphonesimulator27.0",
+    "displayName": "Simulator - iOS 27.0",
+    "platform": "iphonesimulator",
+    "platformVersion": "27.0",
+    "sdkVersion": "27.0"
+  },
+  {
+    "canonicalName": "macosx27.0",
+    "displayName": "macOS 27.0",
+    "platform": "macosx",
+    "platformVersion": "27.0",
+    "sdkVersion": "27.0"
+  },
+  {
+    "canonicalName": "macosx27.0",
+    "displayName": "macOS 27.0",
+    "platform": "macosx",
+    "platformVersion": "27.0",
+    "sdkVersion": "27.0"
+  },
+  {
+    "canonicalName": "appletvos27.0",
+    "displayName": "tvOS 27.0",
+    "platform": "appletvos",
+    "platformVersion": "27.0",
+    "sdkVersion": "27.0"
+  },
+  {
+    "canonicalName": "appletvsimulator27.0",
+    "displayName": "Simulator - tvOS 27.0",
+    "platform": "appletvsimulator",
+    "platformVersion": "27.0",
+    "sdkVersion": "27.0"
+  },
+  {
+    "canonicalName": "xros27.0",
+    "displayName": "visionOS 27.0",
+    "platform": "xros",
+    "platformVersion": "27.0",
+    "sdkVersion": "27.0"
+  },
+  {
+    "canonicalName": "xrsimulator27.0",
+    "displayName": "Simulator - visionOS 27.0",
+    "platform": "xrsimulator",
+    "platformVersion": "27.0",
+    "sdkVersion": "27.0"
+  },
+  {
+    "canonicalName": "watchos27.0",
+    "displayName": "watchOS 27.0",
+    "platform": "watchos",
+    "platformVersion": "27.0",
+    "sdkVersion": "27.0"
+  },
+  {
+    "canonicalName": "watchsimulator27.0",
+    "displayName": "Simulator - watchOS 27.0",
+    "platform": "watchsimulator",
+    "platformVersion": "27.0",
+    "sdkVersion": "27.0"
+  }
+]

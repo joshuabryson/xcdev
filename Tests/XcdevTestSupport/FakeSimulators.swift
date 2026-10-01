@@ -48,7 +48,11 @@ public final class FakeSimulators: Sendable {
     public func device(named name: String) -> Device? { devices.first { $0.name == name } }
     public func deleteExternally(udid: String) { state.withLock { $0.devices.removeAll { $0.udid == udid } } }
 
+    /// `xcodebuild -showsdks -json` for an Xcode whose simulator SDKs are all 27.0 (matches simctl-list.json).
+    public static let sdksJSON = #"[{"platform":"iphonesimulator","sdkVersion":"27.0"},{"platform":"watchsimulator","sdkVersion":"27.0"},{"platform":"appletvsimulator","sdkVersion":"27.0"},{"platform":"xrsimulator","sdkVersion":"27.0"}]"#
+
     private func install(on runner: FakeProcessRunner) {
+        runner.stub(["xcrun", "xcodebuild", "-showsdks", "-json"]) { _ in ProcessOutput(stdout: Self.sdksJSON) }
         runner.stub(["xcrun", "simctl", "list", "-j"]) { [self] _ in ProcessOutput(stdout: listJSON()) }
 
         runner.stub(["xcrun", "simctl", "create"]) { [self] inv in

@@ -15,7 +15,7 @@ public struct ContextInfo: Reportable {
         return ContextInfo(projectRoot: ctx.location.projectRoot, worktree: ctx.location.worktreeRoot,
                            worktreeName: ctx.state.name, device: device, udid: provisioned?.udid,
                            runtime: provisioned?.runtime, derivedData: ctx.paths.derivedData,
-                           developerDir: ctx.state.xcode?.developerDir)
+                           developerDir: ctx.xcode?.developerDir)
     }
 
     public var environment: [String: String] {

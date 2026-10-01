@@ -2,11 +2,13 @@ public struct DeviceProvisioner: Sendable {
     public let runner: any ProcessRunning
     public let globalPaths: GlobalPaths
     public let discovery: XcodeDiscovery
+    public let sdks: SDKStore
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, discovery: XcodeDiscovery? = nil) {
         self.runner = runner
         self.globalPaths = globalPaths
         self.discovery = discovery ?? XcodeDiscovery(runner: runner)
+        self.sdks = SDKStore(runner: runner, cacheDirectory: globalPaths.cacheDirectory)
     }
 
     /// `--device` value, else `defaultDevice`, else the only configured device.
@@ -29,6 +31,7 @@ public struct DeviceProvisioner: Sendable {
 
     /// Resolves the configured Xcode once per worktree and pins it in worktree.json.
     public func ensureXcode(_ ctx: inout WorktreeContext) async throws -> XcodeInstall {
+        if let override = ctx.xcodeOverride { return override }
         if let pinned = ctx.state.xcode { return pinned }
         let xcode = try await discovery.resolve(spec: ctx.config.xcode)
         ctx.state.xcode = xcode
@@ -37,7 +40,7 @@ public struct DeviceProvisioner: Sendable {
     }
 
     public func simctl(for ctx: WorktreeContext) -> SimctlClient {
-        SimctlClient(runner: runner, developerDir: ctx.state.xcode?.developerDir)
+        SimctlClient(runner: runner, developerDir: ctx.xcode?.developerDir)
     }
 
     /// This worktree's clone for `name`, cloning (and pairing) it on first use or if it was deleted.
@@ -49,16 +52,21 @@ public struct DeviceProvisioner: Sendable {
         guard !spec.isMac else {
             throw XcdError(.usage, "device '\(name)' is a macOS device and has no simulator")
         }
-        _ = try await ensureXcode(&ctx)
+        let xcode = try await ensureXcode(&ctx)
         let simctl = simctl(for: ctx)
         let catalog = try await simctl.catalog()
+        let compatibility = RuntimeCompatibility(xcode: xcode, sdks: try await sdks.sdks(for: xcode))
         if let existing = ctx.state.devices[name], catalog.device(udid: existing.udid)?.isAvailable == true {
+            if let runtime = catalog.runtimes.first(where: { $0.identifier == existing.runtimeIdentifier }) {
+                try compatibility.check(runtime, device: name, installed: catalog.runtimes,
+                                        deviceType: catalog.deviceTypes.first { $0.identifier == existing.deviceTypeIdentifier })
+            }
             return try await pairIfNeeded(name, spec: spec, in: &ctx)
         }
 
         var effective = spec
         if let pinned = ctx.state.devices[name] { effective.runtime = pinned.runtimeIdentifier }
-        let resolved = try DeviceResolver.resolve(name: name, spec: effective, catalog: catalog)
+        let resolved = try DeviceResolver.resolve(name: name, spec: effective, catalog: catalog, compatibility: compatibility)
         let template = try await TemplateStore(simctl: simctl, locksDirectory: globalPaths.locksDirectory)
             .ensureTemplate(for: resolved)
         let cloneName = SimNaming.clone(project: ctx.state.project, worktree: ctx.state.name, device: name)

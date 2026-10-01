@@ -61,4 +61,45 @@ import Testing
         }
         #expect(error?.code == .usage)
     }
+
+    func compatibility(iOS sdk: String) -> RuntimeCompatibility {
+        RuntimeCompatibility(xcode: XcodeInstall(path: "/Applications/Xcode-26.5.app", version: "26.5", build: "26F1"),
+                             sdks: SimulatorSDKs(versions: ["iOS": sdk]))
+    }
+
+    @Test func latestIsCappedAtTheXcodeSDK() throws {
+        let r = try DeviceResolver.resolve(name: "iphone", spec: DeviceSpec(type: "iPhone 16"), catalog: catalog,
+                                           compatibility: compatibility(iOS: "26.5"))
+        #expect(r.runtime.name == "iOS 26.5")
+    }
+
+    @Test func explicitRuntimeNewerThanXcodeIsAMismatch() {
+        let error = #expect(throws: XcdError.self) {
+            try DeviceResolver.resolve(name: "iphone", spec: DeviceSpec(type: "iPhone 16", runtime: "iOS 27.0"),
+                                       catalog: catalog, compatibility: compatibility(iOS: "26.5"))
+        }
+        #expect(error?.code == .xcodeRuntimeMismatch)
+        #expect(error?.message == "iOS 27.0 (devices.iphone) is newer than Xcode 26.5 (26F1) supports; its newest iOS simulator SDK is 26.5")
+        #expect(error?.next == "set devices.iphone.runtime to one of: iOS 18.0, iOS 26.5, or use a newer Xcode via `xcode:` or --xcode")
+    }
+
+    @Test func latestWithOnlyTooNewRuntimesIsAMismatch() {
+        let error = #expect(throws: XcdError.self) {
+            try DeviceResolver.resolve(name: "iphone", spec: DeviceSpec(type: "iPhone 18 Pro"), catalog: catalog,
+                                       compatibility: compatibility(iOS: "26.5"))
+        }
+        #expect(error?.code == .xcodeRuntimeMismatch)
+        #expect(error?.message.hasPrefix("iOS 27.0 (devices.iphone) is newer than Xcode 26.5") == true)
+    }
+
+    @Test func suggestedRuntimesSupportTheDeviceType() {
+        let error = #expect(throws: XcdError.self) {
+            try DeviceResolver.resolve(name: "iphone", spec: DeviceSpec(type: "iPhone 18 Pro", runtime: "iOS 27.0"),
+                                       catalog: catalog, compatibility: compatibility(iOS: "26.5"))
+        }
+        #expect(error?.code == .xcodeRuntimeMismatch)
+        // iOS 18.0 and 26.5 are installed and within the SDK, but neither supports iPhone 18 Pro.
+        #expect(error?.next == "set `xcode:` in .xcdev.yml (or pass --xcode) to an Xcode that supports iOS 27.0")
+        #expect(error?.details.isEmpty == true)
+    }
 }

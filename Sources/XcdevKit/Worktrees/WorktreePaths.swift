@@ -12,6 +12,7 @@ public struct GlobalPaths: Sendable, Equatable {
     }
 
     public var registryFile: String { base + "/registry.json" }
+    public var cacheDirectory: String { base + "/cache" }
     public var locksDirectory: String { base + "/locks" }
 }
 

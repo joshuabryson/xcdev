@@ -4,14 +4,19 @@ public struct WorktreeContext: Sendable {
     public let location: ProjectLocation
     public let config: XcdevConfig
     public var state: WorktreeState
+    /// `--xcode` for this command only. Never written to worktree.json.
+    public var xcodeOverride: XcodeInstall?
 
-    public init(location: ProjectLocation, config: XcdevConfig, state: WorktreeState) {
+    public init(location: ProjectLocation, config: XcdevConfig, state: WorktreeState, xcodeOverride: XcodeInstall? = nil) {
         self.location = location
         self.config = config
         self.state = state
+        self.xcodeOverride = xcodeOverride
     }
 
     public var paths: WorktreePaths { WorktreePaths(root: location.worktreeRoot) }
+    /// The Xcode this command uses: the override, else the worktree's pinned one.
+    public var xcode: XcodeInstall? { xcodeOverride ?? state.xcode }
 }
 
 public struct WorktreeService: Sendable {

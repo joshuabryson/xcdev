@@ -4,7 +4,8 @@ public struct ResolvedDevice: Sendable, Equatable {
 }
 
 public enum DeviceResolver {
-    public static func resolve(name: String, spec: DeviceSpec, catalog: SimCatalog) throws -> ResolvedDevice {
+    public static func resolve(name: String, spec: DeviceSpec, catalog: SimCatalog,
+                               compatibility: RuntimeCompatibility? = nil) throws -> ResolvedDevice {
         guard let typeQuery = spec.type, !spec.isMac else {
             throw XcdError(.usage, "device '\(name)' is a macOS device and has no simulator")
         }
@@ -25,8 +26,13 @@ public enum DeviceResolver {
         let query = spec.runtime ?? "latest"
         let runtime: SimRuntime?
         if query.lowercased() == "latest" {
-            runtime = candidates.filter { $0.supports(type) }
-                .max { (Version($0.version) ?? .zero) < (Version($1.version) ?? .zero) }
+            let supported = candidates.filter { $0.supports(type) }
+            let usable = compatibility.map { c in supported.filter { c.sdks.supports($0) } } ?? supported
+            runtime = usable.max { (Version($0.version) ?? .zero) < (Version($1.version) ?? .zero) }
+            if runtime == nil, let compatibility,
+               let newest = supported.max(by: { (Version($0.version) ?? .zero) < (Version($1.version) ?? .zero) }) {
+                throw compatibility.mismatch(newest, device: name, installed: catalog.runtimes, deviceType: type)
+            }
         } else {
             runtime = candidates.first {
                 $0.name.caseInsensitiveCompare(query) == .orderedSame || $0.version == query || $0.identifier == query
@@ -42,6 +48,7 @@ public enum DeviceResolver {
                            next: "set devices.\(name).runtime to \"latest\" or a runtime that supports \(type.name)",
                            details: installed)
         }
+        try compatibility?.check(runtime, device: name, installed: catalog.runtimes, deviceType: type)
         return ResolvedDevice(deviceType: type, runtime: runtime)
     }
 }

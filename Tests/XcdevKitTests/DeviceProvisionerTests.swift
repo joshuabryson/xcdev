@@ -179,4 +179,37 @@ import XcdevTestSupport
         #expect(unprovisioned.environment["XCD_UDID"] == nil)
         #expect(unprovisioned.environment["XCD_DEVICE"] == "old")
     }
+
+    @Test func xcodeOverrideIsUsedButNeverPinned() async throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        _ = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        var ctx = try context()
+        ctx.state.xcode = nil
+        let beta = XcodeInstall(path: "/Applications/Xcode-beta.app", version: "27.1", build: "27B5")
+        ctx.xcodeOverride = beta
+        #expect(try await provisioner.ensureXcode(&ctx) == beta)
+        _ = try await provisioner.ensure("iphone", in: &ctx)
+        #expect(ctx.state.xcode == nil)
+        #expect(try WorktreeStateStore.load(ctx.paths)?.xcode == nil)
+        #expect(fake.calls.filter { $0.argv[0] == "xcrun" }.allSatisfy {
+            $0.environment["DEVELOPER_DIR"] == "/Applications/Xcode-beta.app/Contents/Developer"
+        })
+    }
+
+    @Test func pinnedCloneTooNewForOverrideIsAMismatch() async throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        _ = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        var ctx = try context()
+        _ = try await provisioner.ensure("iphone", in: &ctx)          // clones on iOS 27.0 with Xcode 27.0
+        let old = XcodeInstall(path: "/Applications/Xcode-26.5.app", version: "26.5", build: "26F1")
+        fake.stub(["xcrun", "xcodebuild", "-showsdks", "-json"]) { inv in
+            ProcessOutput(stdout: inv.environment["DEVELOPER_DIR"] == old.developerDir
+                ? #"[{"platform":"iphonesimulator","sdkVersion":"26.5"}]"#
+                : FakeSimulators.sdksJSON)
+        }
+        ctx.xcodeOverride = old
+        let error = await #expect(throws: XcdError.self) { try await provisioner.ensure("iphone", in: &ctx) }
+        #expect(error?.code == .xcodeRuntimeMismatch)
+        #expect(error?.message.hasPrefix("iOS 27.0 (devices.iphone) is newer than Xcode 26.5") == true)
+    }
 }
