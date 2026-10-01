@@ -1,6 +1,7 @@
 public protocol ProcessRunning: Sendable {
     /// Runs to completion. A non-zero exit is returned, not thrown.
-    /// Throws `.timeout` when the invocation's timeout elapses, `.subprocessFailed` if it cannot launch.
+    /// Throws `.timeout` when the invocation's timeout elapses (or, with `stopAtTimeout`, returns with
+    /// `stoppedAtDeadline` set), and `.subprocessFailed` if it cannot launch.
     func run(_ invocation: Invocation) async throws -> ProcessOutput
 }
 

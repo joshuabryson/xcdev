@@ -46,6 +46,9 @@ public struct ProcessOutput: Sendable, Equatable {
     public var exitCode: Int32
     public var stdout: Data
     public var stderr: Data
+    /// True when an invocation with `stopAtTimeout` was ended at its deadline. `exitCode` is then the
+    /// signal's status (for example 15), so callers that expect the stop should check this, not `succeeded`.
+    public var stoppedAtDeadline = false
 
     public init(exitCode: Int32 = 0, stdout: String = "", stderr: String = "") {
         self.init(exitCode: exitCode, stdoutData: Data(stdout.utf8), stderrData: Data(stderr.utf8))

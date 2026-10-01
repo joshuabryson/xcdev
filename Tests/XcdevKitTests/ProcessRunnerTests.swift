@@ -107,7 +107,26 @@ import XcdevTestSupport
         let out = try await runner.run(Invocation("/bin/sh", ["-c", "echo started; exec sleep 10"],
                                                   timeout: .milliseconds(500), stopAtTimeout: true))
         #expect(out.stdoutString == "started\n")
+        #expect(out.stoppedAtDeadline && !out.succeeded)
         #expect(ContinuousClock.now - start < .seconds(4))
+    }
+
+    @Test func aProcessThatEndsBeforeItsDeadlineWasNotStopped() async throws {
+        let out = try await runner.run(Invocation("/bin/sh", ["-c", "exit 3"], timeout: .seconds(5), stopAtTimeout: true))
+        #expect(out.exitCode == 3 && !out.stoppedAtDeadline)
+    }
+
+    @Test func fakeRunnerKeepsTheDeadlineStopWithAnOutputFile() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xcd-fake-\(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let fake = FakeProcessRunner()
+        fake.stub(["log", "stream"]) { _ in
+            var output = ProcessOutput(exitCode: 15, stdout: "line\n")
+            output.stoppedAtDeadline = true
+            return output
+        }
+        let out = try await fake.run(Invocation("/usr/bin/log", ["stream"], outputFile: dir + "/s.log", stopAtTimeout: true))
+        #expect(out.stoppedAtDeadline && out.exitCode == 15 && out.stdout.isEmpty)
     }
 
     @Test func fakeRunnerHonorsOutputFile() async throws {

@@ -58,8 +58,11 @@ public struct SystemProcessRunner: ProcessRunning {
         let (out, err) = await (outData, errData)
 
         if timedOut.isSet {
-            let output = ProcessOutput(exitCode: status, stdoutData: out, stderrData: err)
-            if invocation.stopAtTimeout { return output }
+            var output = ProcessOutput(exitCode: status, stdoutData: out, stderrData: err)
+            if invocation.stopAtTimeout {
+                output.stoppedAtDeadline = true
+                return output
+            }
             var error = XcdError.subprocess(invocation, output, code: .timeout,
                                             message: "`\(invocation.argv.prefix(3).joined(separator: " "))` timed out after \(invocation.timeout)",
                                             next: "re-run with a larger --timeout, or run `xcd doctor` if a simulator is stuck")

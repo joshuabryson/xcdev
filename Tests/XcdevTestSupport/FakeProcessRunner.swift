@@ -39,7 +39,9 @@ public final class FakeProcessRunner: ProcessRunning {
         let handle = try SystemProcessRunner.appendHandle(for: file)
         defer { try? handle.close() }
         handle.write(output.stdout + output.stderr)
-        return ProcessOutput(exitCode: output.exitCode, stdoutData: Data(), stderrData: Data())
+        var captured = ProcessOutput(exitCode: output.exitCode, stdoutData: Data(), stderrData: Data())
+        captured.stoppedAtDeadline = output.stoppedAtDeadline
+        return captured
     }
 }
 
