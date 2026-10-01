@@ -6,11 +6,19 @@ public enum ConfigLoader {
     public static let localFileName = ".xcdev.local.yml"
 
     public static func parse(main: String, local: String? = nil) throws -> XcdevConfig {
-        var node = try compose(main, file: fileName)
-        if let local { node = NodeMerge.merge(node, try compose(local, file: localFileName)) }
+        let mainNode = try compose(main, file: fileName)
+        var node = mainNode
+
+        // Validate and merge local file separately to attribute errors correctly
+        if let local {
+            let localNode = try compose(local, file: localFileName)
+            let localIssues = SchemaValidator.validate(localNode, against: ConfigSchema.v1, checkRequired: false)
+            guard localIssues.isEmpty else { throw invalid(localIssues, file: localFileName) }
+            node = NodeMerge.merge(mainNode, localNode)
+        }
 
         let structural = SchemaValidator.validate(node, against: ConfigSchema.v1)
-        guard structural.isEmpty else { throw invalid(structural) }
+        guard structural.isEmpty else { throw invalid(structural, file: local != nil ? "\(fileName) + \(localFileName)" : fileName) }
 
         let config: XcdevConfig
         do {
@@ -19,7 +27,7 @@ public enum ConfigLoader {
             throw XcdError(.configInvalid, "\(fileName) could not be decoded", details: ["\(error)"])
         }
         let semantic = semanticIssues(config)
-        guard semantic.isEmpty else { throw invalid(semantic) }
+        guard semantic.isEmpty else { throw invalid(semantic, file: local != nil ? "\(fileName) + \(localFileName)" : fileName) }
         return config
     }
 
@@ -71,8 +79,9 @@ public enum ConfigLoader {
         }
     }
 
-    private static func invalid(_ issues: [ConfigIssue]) -> XcdError {
-        XcdError(.configInvalid, "\(fileName) is invalid (\(issues.count) problem\(issues.count == 1 ? "" : "s"))",
-                 next: "fix \(fileName), then run `xcd config show`", details: issues.map(\.line))
+    private static func invalid(_ issues: [ConfigIssue], file: String = ConfigLoader.fileName) -> XcdError {
+        let nextMsg = "fix \(file), then run `xcd config show`"
+        return XcdError(.configInvalid, "\(file) is invalid (\(issues.count) problem\(issues.count == 1 ? "" : "s"))",
+                 next: nextMsg, details: issues.map(\.line))
     }
 }

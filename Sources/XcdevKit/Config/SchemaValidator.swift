@@ -7,7 +7,7 @@ public struct ConfigIssue: Sendable, Equatable {
 }
 
 public enum SchemaValidator {
-    public static func validate(_ node: Node, against schema: SchemaNode, path: String = "") -> [ConfigIssue] {
+    public static func validate(_ node: Node, against schema: SchemaNode, path: String = "", checkRequired: Bool = true) -> [ConfigIssue] {
         switch schema {
         case .string(_, let allowed):
             guard let value = node.scalar?.string else { return [ConfigIssue(path: path, message: "expected a string")] }
@@ -41,7 +41,7 @@ public enum SchemaValidator {
                 let key = keyNode.string ?? ""
                 let keyPath = join(path, key)
                 if let field = fields.first(where: { $0.name == key }) {
-                    issues += validate(value, against: field.node, path: keyPath)
+                    issues += validate(value, against: field.node, path: keyPath, checkRequired: checkRequired)
                 } else if path.isEmpty, ConfigSchema.reservedTopLevelKeys.contains(key) {
                     issues.append(ConfigIssue(path: keyPath, message: "is reserved for a future version of xcd and not supported yet"))
                 } else {
@@ -50,15 +50,17 @@ public enum SchemaValidator {
                 }
             }
             let present = Set(mapping.keys.compactMap(\.string))
-            for field in fields where field.required && !present.contains(field.name) {
-                issues.append(ConfigIssue(path: join(path, field.name), message: "is required"))
+            if checkRequired {
+                for field in fields where field.required && !present.contains(field.name) {
+                    issues.append(ConfigIssue(path: join(path, field.name), message: "is required"))
+                }
             }
             return issues
 
         case .map(_, let valueSchema):
             guard let mapping = node.mapping else { return [ConfigIssue(path: path, message: "expected a mapping")] }
             return mapping.flatMap { key, value in
-                validate(value, against: valueSchema, path: join(path, key.string ?? "?"))
+                validate(value, against: valueSchema, path: join(path, key.string ?? "?"), checkRequired: checkRequired)
             }
         }
     }

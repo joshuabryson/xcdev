@@ -122,4 +122,53 @@ import Testing
         try "xcode: beta\n".write(toFile: dir + "/.xcdev.local.yml", atomically: true, encoding: .utf8)
         #expect(try ConfigLoader.load(worktreeRoot: dir, projectRoot: dir).xcode == "beta")
     }
+
+    @Test func versionTypeError() {
+        let error = #expect(throws: XcdError.self) { try ConfigLoader.parse(main: "version: one\nproject: A.xcodeproj\n") }
+        #expect(error?.details == ["version: expected an integer"])
+    }
+
+    @Test func projectTypeError() {
+        let error = #expect(throws: XcdError.self) { try ConfigLoader.parse(main: "version: 1\nproject: [a]\n") }
+        #expect(error?.details == ["project: expected a string"])
+    }
+
+    @Test func presetsArgsTypeError() {
+        let yaml = "version: 1\nproject: A.xcodeproj\npresets:\n  p:\n    args: \"x\"\n"
+        let error = #expect(throws: XcdError.self) { try ConfigLoader.parse(main: yaml) }
+        #expect(error?.details == ["presets.p.args: expected a list of strings"])
+    }
+
+    @Test func presetsArgsListIndexError() {
+        let yaml = "version: 1\nproject: A.xcodeproj\npresets:\n  p:\n    args: [a, [b]]\n"
+        let error = #expect(throws: XcdError.self) { try ConfigLoader.parse(main: yaml) }
+        #expect(error?.details == ["presets.p.args[1]: expected a string"])
+    }
+
+    @Test func devicesTypeError() {
+        let error = #expect(throws: XcdError.self) { try ConfigLoader.parse(main: "version: 1\nproject: A.xcodeproj\ndevices: [x]\n") }
+        #expect(error?.details == ["devices: expected a mapping"])
+    }
+
+    @Test func localFileTypoIsAttributedCorrectly() {
+        let error = #expect(throws: XcdError.self) {
+            try ConfigLoader.parse(main: "version: 1\nproject: A.xcodeproj\n", local: "devics: {}\n")
+        }
+        #expect(error?.code == .configInvalid)
+        #expect(error?.message.contains(".xcdev.local.yml") == true)
+        #expect(error?.details == ["devics: unknown key (did you mean 'devices'?)"])
+    }
+
+    @Test func localFileOnlyPartialConfigDoesNotRequiredMissingFields() throws {
+        let main = """
+        version: 1
+        project: A.xcodeproj
+        devices:
+          ipad: { type: "iPad" }
+        """
+        let local = "defaultDevice: ipad\n"
+        let config = try ConfigLoader.parse(main: main, local: local)
+        #expect(config.defaultDevice == "ipad")
+        #expect(config.project == "A.xcodeproj")
+    }
 }
