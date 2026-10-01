@@ -2,32 +2,45 @@ import Foundation
 import Synchronization
 
 public struct SystemProcessRunner: ProcessRunning {
-    public init() {}
+    /// The environment children inherit, before each invocation's own is merged over it.
+    private let inheritedEnvironment: [String: String]
+
+    public init(inheritedEnvironment: [String: String] = ProcessInfo.processInfo.environment) {
+        self.inheritedEnvironment = inheritedEnvironment
+    }
 
     public func run(_ invocation: Invocation) async throws -> ProcessOutput {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: invocation.executable)
         process.arguments = invocation.arguments
-        process.environment = ProcessInfo.processInfo.environment.merging(invocation.environment) { $1 }
+        process.environment = ContextInfo.childEnvironment(inherited: inheritedEnvironment,
+                                                          overrides: invocation.environment)
         if let directory = invocation.workingDirectory {
             process.currentDirectoryURL = URL(fileURLWithPath: directory)
         }
         let pipes: (out: Pipe, err: Pipe)?
         let logHandle: FileHandle?
-        if let file = invocation.outputFile {
+        if invocation.passthrough {
+            pipes = nil
+            logHandle = nil
+            process.standardInput = FileHandle.standardInput
+            process.standardOutput = FileHandle.standardOutput
+            process.standardError = FileHandle.standardError
+        } else if let file = invocation.outputFile {
             logHandle = try Self.appendHandle(for: file)
             pipes = nil
             process.standardOutput = logHandle
             process.standardError = logHandle
+            process.standardInput = FileHandle.nullDevice
         } else {
             let captured = (out: Pipe(), err: Pipe())
             pipes = captured
             logHandle = nil
             process.standardOutput = captured.out
             process.standardError = captured.err
+            process.standardInput = FileHandle.nullDevice
         }
         defer { try? logHandle?.close() }
-        process.standardInput = FileHandle.nullDevice
 
         let exit = ExitSignal()
         process.terminationHandler = { exit.finish($0.terminationStatus) }

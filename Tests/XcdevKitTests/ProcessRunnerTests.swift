@@ -129,6 +129,42 @@ import XcdevTestSupport
         #expect(out.stoppedAtDeadline && out.exitCode == 15 && out.stdout.isEmpty)
     }
 
+    @Test func passthroughSharesStdioAndReturnsTheExitCode() async throws {
+        let out = try await runner.run(Invocation("/bin/sh", ["-c", "exit 7"], passthrough: true))
+        #expect(out.exitCode == 7)
+        #expect(out.stdout.isEmpty && out.stderr.isEmpty)
+    }
+
+    @Test func passthroughWinsOverAnOutputFile() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("xcd-pass-\(UUID().uuidString).log").path
+        defer { try? FileManager.default.removeItem(atPath: file) }
+        _ = try await runner.run(Invocation("/usr/bin/true", [], outputFile: file, passthrough: true))
+        #expect(!FileManager.default.fileExists(atPath: file))
+    }
+
+    /// A nested xcd (inside a project command, plugin, or hook) inherits its parent's context; a variable that
+    /// doesn't apply to this child must be unset, not the parent's stale value.
+    @Test func inheritedContextVariablesDoNotLeakIntoAChild() async throws {
+        let inherited = ["PATH": "/usr/bin:/bin", "XCD_UDID": "STALE-UDID", "XCD_APP_PATH": "/stale/App.app",
+                         "XCD_WORKTREE_NAME": "parent", "XCD_OUTPUT": "json", "DEVELOPER_DIR": "/Inherited.app",
+                         "XCD_UNRELATED": "kept"]
+        let state = WorktreeState(id: "id", name: "feat", project: "App", projectRoot: "/p", path: "/p/wt", branch: "feat",
+                                  xcode: nil, devices: [:], status: .ready, createdAt: Date())
+        let context = ContextInfo.worktree(state).environment
+        let script = #"for v in XCD_UDID XCD_APP_PATH XCD_OUTPUT XCD_WORKTREE_NAME DEVELOPER_DIR XCD_UNRELATED; do eval "printf '%s=%s\n' $v \"\${$v-unset}\""; done"#
+        let out = try await SystemProcessRunner(inheritedEnvironment: inherited)
+            .run(Invocation("/bin/sh", ["-c", script], environment: context))
+        #expect(out.stdoutString == """
+            XCD_UDID=unset
+            XCD_APP_PATH=unset
+            XCD_OUTPUT=unset
+            XCD_WORKTREE_NAME=feat
+            DEVELOPER_DIR=/Inherited.app
+            XCD_UNRELATED=kept
+
+            """)
+    }
+
     @Test func fakeRunnerHonorsOutputFile() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xcd-fake-\(UUID().uuidString)").path
         defer { try? FileManager.default.removeItem(atPath: dir) }

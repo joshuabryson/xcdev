@@ -79,4 +79,25 @@ import Testing
         #expect(env["XCD_APP_PATH"] == "/dd/App.app")
         #expect(env["XCD_BUNDLE_ID"] == "dev.x.App")
     }
+
+    @Test func contextCarriesTheOutputFormat() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xcd-ctx-\(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let state = WorktreeState(id: "id", name: "feat", project: "App", projectRoot: dir, path: dir, branch: "feat",
+                                  xcode: nil, devices: [:], status: .ready, createdAt: Date())
+        let ctx = WorktreeContext(location: ProjectLocation(projectRoot: dir, worktreeRoot: dir),
+                                  config: try ConfigLoader.parse(main: BuildServiceTests.config), state: state)
+        #expect(ContextInfo.build(ctx: ctx, device: nil).environment["XCD_OUTPUT"] == nil)
+        #expect(ContextInfo.build(ctx: ctx, device: nil, output: .json).environment["XCD_OUTPUT"] == "json")
+        let worktree = ContextInfo.worktree(state, output: .text).environment
+        #expect(worktree["XCD_WORKTREE_NAME"] == "feat" && worktree["XCD_OUTPUT"] == "text")
+        #expect(worktree["XCD_DERIVED_DATA"] == dir + "/.xcdev/DerivedData" && worktree["XCD_DEVICE"] == nil)
+    }
+
+    @Test func servicesTakeTheOutputFormatFromTheEnvironment() {
+        let paths = GlobalPaths(base: "/tmp/xcd-none")
+        #expect(Services(runner: SystemProcessRunner(), globalPaths: paths, currentDirectory: "/", environment: [:]).output == .text)
+        #expect(Services(runner: SystemProcessRunner(), globalPaths: paths, currentDirectory: "/",
+                         environment: ["XCD_OUTPUT": "json"]).output == .json)
+    }
 }

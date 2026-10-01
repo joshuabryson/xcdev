@@ -3,7 +3,8 @@ import Foundation
 public struct Invocation: Sendable, Equatable {
     public var executable: String
     public var arguments: [String]
-    /// Merged over the inherited environment.
+    /// Merged over the inherited environment, from which the context contract's XCD_* variables are removed first
+    /// (see `ContextInfo.childEnvironment`).
     public var environment: [String: String]
     public var workingDirectory: String?
     public var timeout: Duration
@@ -11,10 +12,13 @@ public struct Invocation: Sendable, Equatable {
     public var outputFile: String?
     /// When true, reaching `timeout` ends the process and returns normally instead of throwing `.timeout`.
     public var stopAtTimeout: Bool
+    /// When true, the process shares xcd's stdin, stdout, and stderr (project commands and plugins), so the
+    /// returned output is empty. Takes precedence over `outputFile`.
+    public var passthrough: Bool
 
     public init(_ executable: String, _ arguments: [String], environment: [String: String] = [:],
                 workingDirectory: String? = nil, timeout: Duration = .seconds(120),
-                outputFile: String? = nil, stopAtTimeout: Bool = false) {
+                outputFile: String? = nil, stopAtTimeout: Bool = false, passthrough: Bool = false) {
         self.executable = executable
         self.arguments = arguments
         self.environment = environment
@@ -22,6 +26,7 @@ public struct Invocation: Sendable, Equatable {
         self.timeout = timeout
         self.outputFile = outputFile
         self.stopAtTimeout = stopAtTimeout
+        self.passthrough = passthrough
     }
 
     /// argv with argv[0] = executable basename. Used for display and stub matching.

@@ -36,11 +36,11 @@ extension DeviceProvisioner {
 
 extension ContextInfo {
     /// An explicit device must be valid; without one, use the default if there is one, else report no device.
-    public static func resolve(ctx: WorktreeContext, requestedDevice: String?,
-                               provisioner: DeviceProvisioner) throws -> ContextInfo {
+    public static func resolve(ctx: WorktreeContext, requestedDevice: String?, provisioner: DeviceProvisioner,
+                               output: OutputFormat? = nil) throws -> ContextInfo {
         let name = requestedDevice != nil
             ? try provisioner.deviceName(requestedDevice, config: ctx.config)
             : try? provisioner.deviceName(nil, config: ctx.config)
-        return build(ctx: ctx, device: name)
+        return build(ctx: ctx, device: name, output: output)
     }
 }

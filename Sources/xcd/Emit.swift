@@ -6,8 +6,9 @@ enum Emit {
     /// A result that carries a task failure is printed in full, then exits with that failure's code.
     static func run<R: Reportable>(_ command: String, _ options: GlobalOptions,
                                    _ body: (Services) async throws -> R) async throws {
-        let services = Services.live()
+        var services = Services.live()
         let format = OutputFormat.resolve(jsonFlag: options.json, environment: services.environment)
+        services.output = format
         do {
             let result = try await body(services)
             print(Renderer.report(result, command: command, format: format))

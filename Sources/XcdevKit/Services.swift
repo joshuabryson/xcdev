@@ -8,14 +8,18 @@ public struct Services: Sendable {
     public let environment: [String: String]
     /// One-line progress messages for long operations. The CLI writes them to stderr.
     public let progress: @Sendable (String) -> Void
+    /// The output format of this invocation, passed to extensions as XCD_OUTPUT. The CLI sets it from --json.
+    public var output: OutputFormat
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, currentDirectory: String,
-                environment: [String: String], progress: @escaping @Sendable (String) -> Void = { _ in }) {
+                environment: [String: String], progress: @escaping @Sendable (String) -> Void = { _ in },
+                output: OutputFormat? = nil) {
         self.runner = runner
         self.globalPaths = globalPaths
         self.currentDirectory = currentDirectory
         self.environment = environment
         self.progress = progress
+        self.output = output ?? OutputFormat.resolve(jsonFlag: false, environment: environment)
     }
 
     public static func live() -> Services {

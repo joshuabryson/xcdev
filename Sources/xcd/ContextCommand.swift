@@ -11,7 +11,8 @@ struct ContextCommand: AsyncParsableCommand {
     func run() async throws {
         try await Emit.run("context", options) { services in
             let ctx = try await services.open(worktree: options.worktree)
-            return try ContextInfo.resolve(ctx: ctx, requestedDevice: device, provisioner: services.provisioner)
+            return try ContextInfo.resolve(ctx: ctx, requestedDevice: device, provisioner: services.provisioner,
+                                           output: services.output)
         }
     }
 }
