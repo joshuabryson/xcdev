@@ -139,4 +139,61 @@ import XcdevTestSupport
         let error = await #expect(throws: XcdError.self) { try await svc.open(from: project.root, worktreeName: "nope") }
         #expect(error?.code == .worktreeNotFound)
     }
+
+    @Test func createNeverRemovesPreexistingWorktree() async throws {
+        let project = try TempProject.make(config: Self.config)
+        defer { project.remove() }
+        let target = project.base + "/Sample App.worktrees/foo"
+        try TempProject.git(["worktree", "add", "-b", "foo", target], in: project.root)
+        try "keep".write(toFile: target + "/marker.txt", atomically: true, encoding: .utf8)
+        let svc = service(project)
+        let main = try await svc.open(from: project.root)
+        let error = await #expect(throws: XcdError.self) { try await svc.create(name: "foo", in: main) }
+        #expect(error?.code == .subprocessFailed)
+        #expect(FileManager.default.fileExists(atPath: target + "/marker.txt"))
+        #expect(try svc.list(projectRoot: project.root).map(\.name) == ["main"])
+    }
+
+    @Test func failedCreateLeavesNoDirectoryOrBranch() async throws {
+        let project = try TempProject.make(config: Self.config)
+        defer { project.remove() }
+        let svc = service(project)
+        let main = try await svc.open(from: project.root)
+        _ = await #expect(throws: XcdError.self) { try await svc.create(name: "feat", from: "no-such-ref", in: main) }
+        #expect(!FileManager.default.fileExists(atPath: project.base + "/Sample App.worktrees/feat"))
+        let branch = try await SystemProcessRunner().run(.git(["rev-parse", "--verify", "--quiet", "refs/heads/feat"], in: project.root))
+        #expect(!branch.succeeded)
+    }
+
+    @Test func concurrentCreateOfSameNameIsSafe() async throws {
+        let project = try TempProject.make(config: Self.config)
+        defer { project.remove() }
+        let svc = service(project)
+        let main = try await svc.open(from: project.root)
+        let results = try await withThrowingTaskGroup(of: (id: String, created: Bool).self) { group in
+            for _ in 0..<2 {
+                group.addTask {
+                    let r = try await svc.create(name: "feat", in: main)
+                    return (r.state.id, r.created)
+                }
+            }
+            var all: [(id: String, created: Bool)] = []
+            for try await r in group { all.append(r) }
+            return all
+        }
+        #expect(results.count == 2)
+        #expect(Set(results.map(\.id)).count == 1)
+        #expect(results.filter(\.created).count == 1)
+    }
+
+    @Test func createFromRefRejectedWhenBranchExists() async throws {
+        let project = try TempProject.make(config: Self.config)
+        defer { project.remove() }
+        try TempProject.git(["branch", "existing"], in: project.root)
+        let svc = service(project)
+        let main = try await svc.open(from: project.root)
+        let error = await #expect(throws: XcdError.self) { try await svc.create(name: "existing", from: "main", in: main) }
+        #expect(error?.code == .usage)
+        #expect(try svc.list(projectRoot: project.root).map(\.name) == ["main"])
+    }
 }

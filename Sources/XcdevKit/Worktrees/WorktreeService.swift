@@ -65,32 +65,48 @@ public struct WorktreeService: Sendable {
     }
 
     /// Creates `<worktrees root>/<name>` on branch `<name>` (reusing the branch if it exists).
-    /// Never clones simulators. Idempotent.
+    /// Never clones simulators. Idempotent, and serialized per project across processes.
     public func create(name: String, from ref: String? = nil,
                        in ctx: WorktreeContext) async throws -> (state: WorktreeState, created: Bool) {
         try Self.validate(name: name)
         let projectRoot = ctx.location.projectRoot
-        if let existing = try registry.entries().first(where: { $0.projectRoot == projectRoot && $0.name == name }) {
-            if existing.status == .ready, FileManager.default.fileExists(atPath: existing.path) {
-                if let state = try WorktreeStateStore.load(WorktreePaths(root: existing.path)) { return (state, false) }
-                return (try await open(from: existing.path).state, false)
-            }
-            try await discardAttempt(existing, projectRoot: projectRoot)
+        let key = String(projectRoot.map { $0.isLetter || $0.isNumber ? $0 : "-" })
+        return try await FileLock.withLock(at: globalPaths.locksDirectory + "/worktrees-" + key + ".lock") {
+            try await createLocked(name: name, from: ref, in: ctx)
         }
+    }
+
+    private func createLocked(name: String, from ref: String?,
+                              in ctx: WorktreeContext) async throws -> (state: WorktreeState, created: Bool) {
+        let projectRoot = ctx.location.projectRoot
+        let existing = try registry.entries().first(where: { $0.projectRoot == projectRoot && $0.name == name })
+        if let existing, existing.status == .ready, FileManager.default.fileExists(atPath: existing.path) {
+            if let state = try WorktreeStateStore.load(WorktreePaths(root: existing.path)) { return (state, false) }
+            return (try await open(from: existing.path).state, false)
+        }
+        let branchExists = try await runner.run(
+            .git(["rev-parse", "--verify", "--quiet", "refs/heads/\(name)"], in: projectRoot)).succeeded
+        if ref != nil, branchExists {
+            throw XcdError(.usage, "branch '\(name)' already exists, so --from can't be applied",
+                           next: "drop --from to reuse the branch, or pick another name")
+        }
+        if let existing { try await discardStale(existing, projectRoot: projectRoot) }
 
         let path = worktreesDirectory(for: ctx) + "/" + name
         var state = WorktreeState(id: UUID().uuidString, name: name, project: ctx.location.projectName,
                                   projectRoot: projectRoot, path: path, branch: name, xcode: nil, devices: [:],
                                   status: .incomplete, createdAt: Date())
         try await registry.upsert(RegistryEntry(state))
+        var worktreeAdded = false
+        var branchCreated = false
         do {
-            let branchExists = try await runner.run(
-                .git(["rev-parse", "--verify", "--quiet", "refs/heads/\(name)"], in: projectRoot)).succeeded
             let args = branchExists
                 ? ["worktree", "add", path, name]
                 : ["worktree", "add", "-b", name, path, ref ?? "HEAD"]
             try await runner.runChecked(.git(args, in: projectRoot),
                                         next: "check that the --from ref exists and the branch isn't checked out elsewhere")
+            worktreeAdded = true
+            branchCreated = !branchExists
             state.path = Paths.canonical(path)
             let paths = WorktreePaths(root: state.path)
             try WorktreeStateStore.save(state, paths)
@@ -104,7 +120,15 @@ public struct WorktreeService: Sendable {
             try await registry.upsert(RegistryEntry(state))
             return (state, true)
         } catch {
-            try? await discardAttempt(RegistryEntry(state), projectRoot: projectRoot)
+            // Undo only what this attempt created; never touch a checkout that was already there.
+            if worktreeAdded {
+                _ = try? await runner.run(.git(["worktree", "remove", "--force", path], in: projectRoot))
+            }
+            if branchCreated {
+                _ = try? await runner.run(.git(["branch", "-D", name], in: projectRoot))
+            }
+            _ = try? await runner.run(.git(["worktree", "prune"], in: projectRoot))
+            try? await registry.remove(id: state.id)
             throw error
         }
     }
@@ -117,9 +141,21 @@ public struct WorktreeService: Sendable {
         return entry
     }
 
-    /// Removes an interrupted or broken creation attempt. Never called for a ready worktree that exists on disk.
-    func discardAttempt(_ entry: RegistryEntry, projectRoot: String) async throws {
+    /// Clears a stale registry entry left by an interrupted creation. The checkout on disk is removed only
+    /// when it is provably xcd's (matching state id) and clean; otherwise only the entry is dropped.
+    func discardStale(_ entry: RegistryEntry, projectRoot: String) async throws {
         if FileManager.default.fileExists(atPath: entry.path) {
+            let stored = try? WorktreeStateStore.load(WorktreePaths(root: entry.path))
+            var clean = false
+            if stored?.id == entry.id,
+               let status = try? await runner.run(.git(["status", "--porcelain"], in: entry.path)), status.succeeded {
+                clean = status.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            guard clean else {
+                try await registry.remove(id: entry.id)
+                throw XcdError(.usage, "'\(entry.name)' was left half-created at \(entry.path) and has changes or isn't xcd's",
+                               next: "inspect it, then remove it with `git worktree remove \(Shell.quote(entry.path))` and re-run `xcd wt create \(entry.name)`")
+            }
             _ = try? await runner.run(.git(["worktree", "remove", "--force", entry.path], in: projectRoot))
         }
         _ = try? await runner.run(.git(["worktree", "prune"], in: projectRoot))
