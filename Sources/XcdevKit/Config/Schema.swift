@@ -53,6 +53,9 @@ public enum ConfigSchema {
         SchemaField("worktrees", .object("Worktree settings.", [
             SchemaField("root", .string("Directory for new worktrees, relative to the project root. {project} expands to the project directory name. Default: ../{project}.worktrees")),
         ])),
+        SchemaField("logs", .object("Log settings.", [
+            SchemaField("maxFollow", .string("Longest time `xcd logs --follow --for` may run, e.g. \"5m\". Keeps agents from blocking on a log stream. Default: 5m")),
+        ])),
     ])
 
     /// Top-level keys defined later. Present keys get a clear "not supported yet" error.

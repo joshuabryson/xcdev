@@ -71,6 +71,10 @@ public enum ConfigLoader {
                 }
             }
         }
+        if let maxFollow = config.logs?.maxFollow, DurationText.parse(maxFollow) == nil {
+            issues.append(ConfigIssue(path: "logs.maxFollow",
+                                      message: "'\(maxFollow)' is not a duration like \"30s\", \"5m\", or \"1h\""))
+        }
         return issues
     }
 

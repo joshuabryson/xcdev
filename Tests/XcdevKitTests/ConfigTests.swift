@@ -187,4 +187,18 @@ import Testing
         #expect(config.defaultDevice == "ipad")
         #expect(config.project == "A.xcodeproj")
     }
+
+    @Test func logsMaxFollowDefaultsAndParses() throws {
+        #expect(try ConfigLoader.parse(main: "version: 1\nproject: A.xcodeproj").maxLogFollow == .seconds(300))
+        let config = try ConfigLoader.parse(main: "version: 1\nproject: A.xcodeproj\nlogs: { maxFollow: 90s }")
+        #expect(config.maxLogFollow == .seconds(90))
+    }
+
+    @Test func logsMaxFollowMustBeADuration() {
+        let error = #expect(throws: XcdError.self) {
+            try ConfigLoader.parse(main: "version: 1\nproject: A.xcodeproj\nlogs: { maxFollow: forever }")
+        }
+        #expect(error?.code == .configInvalid)
+        #expect(error?.details.contains { $0.contains("logs.maxFollow") && $0.contains("forever") } == true)
+    }
 }

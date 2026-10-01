@@ -7,6 +7,7 @@ public struct XcdevConfig: Codable, Sendable, Equatable {
     public var devices: [String: DeviceSpec]?
     public var presets: [String: LaunchPreset]?
     public var worktrees: WorktreeSettings?
+    public var logs: LogSettings?
 
     public struct Schemes: Codable, Sendable, Equatable {
         public var app: String?
@@ -17,8 +18,15 @@ public struct XcdevConfig: Codable, Sendable, Equatable {
         public var root: String?
     }
 
+    public struct LogSettings: Codable, Sendable, Equatable {
+        public var maxFollow: String?
+    }
+
     public var allDevices: [String: DeviceSpec] { devices ?? [:] }
     public var worktreesRoot: String { worktrees?.root ?? "../{project}.worktrees" }
+
+    /// Longest `xcd logs --follow --for` allowed, so an agent can never block for long. Default 5 minutes.
+    public var maxLogFollow: Duration { logs?.maxFollow.flatMap(DurationText.parse) ?? .seconds(300) }
 }
 
 public struct DeviceSpec: Codable, Sendable, Equatable {
