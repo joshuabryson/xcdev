@@ -101,3 +101,18 @@ private struct FailedSample: Reportable {
         #expect(ErrorCode.timeout.exitCode == 3)
     }
 }
+
+@Suite struct ErrorsReportTests {
+    @Test func hookFailedIsATaskFailure() {
+        #expect(ErrorCode.hookFailed.rawValue == "hook_failed")
+        #expect(ErrorCode.hookFailed.exitCode == 1)
+    }
+
+    @Test func listsEveryCodeOnce() {
+        let report = ErrorsReport()
+        #expect(report.errors.map(\.code) == ErrorCode.allCases.map(\.rawValue))
+        #expect(Set(report.errors.map(\.code)).count == report.errors.count)
+        #expect(report.errors.allSatisfy { !$0.summary.isEmpty })
+        #expect(report.text.contains("\nhook_failed             1  A hook from .xcdev.yml exited non-zero; the error names the hook and its log.\n"))
+    }
+}
