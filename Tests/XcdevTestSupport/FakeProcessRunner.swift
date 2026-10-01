@@ -59,5 +59,6 @@ public final class Counter: Sendable {
     private let count = Mutex(0)
     public init() {}
     @discardableResult public func increment() -> Int { count.withLock { $0 += 1; return $0 } }
+    @discardableResult public func decrement() -> Int { count.withLock { $0 -= 1; return $0 } }
     public var value: Int { count.withLock { $0 } }
 }
