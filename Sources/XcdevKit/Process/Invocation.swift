@@ -1,0 +1,56 @@
+import Foundation
+
+public struct Invocation: Sendable, Equatable {
+    public var executable: String
+    public var arguments: [String]
+    /// Merged over the inherited environment.
+    public var environment: [String: String]
+    public var workingDirectory: String?
+    public var timeout: Duration
+
+    public init(_ executable: String, _ arguments: [String], environment: [String: String] = [:],
+                workingDirectory: String? = nil, timeout: Duration = .seconds(120)) {
+        self.executable = executable
+        self.arguments = arguments
+        self.environment = environment
+        self.workingDirectory = workingDirectory
+        self.timeout = timeout
+    }
+
+    /// argv with argv[0] = executable basename. Used for display and stub matching.
+    public var argv: [String] { [URL(fileURLWithPath: executable).lastPathComponent] + arguments }
+
+    public var commandLine: String { argv.map(Shell.quote).joined(separator: " ") }
+
+    public static func git(_ args: [String], in directory: String) -> Invocation {
+        Invocation("/usr/bin/git", ["-C", directory] + args, timeout: .seconds(120))
+    }
+
+    /// `DEVELOPER_DIR` selects Xcode for this subprocess only. xcd never runs `xcode-select -s`.
+    public static func xcrun(_ args: [String], developerDir: String?,
+                             timeout: Duration = .seconds(120)) -> Invocation {
+        Invocation("/usr/bin/xcrun", args,
+                   environment: developerDir.map { ["DEVELOPER_DIR": $0] } ?? [:],
+                   timeout: timeout)
+    }
+}
+
+public struct ProcessOutput: Sendable, Equatable {
+    public var exitCode: Int32
+    public var stdout: Data
+    public var stderr: Data
+
+    public init(exitCode: Int32 = 0, stdout: String = "", stderr: String = "") {
+        self.init(exitCode: exitCode, stdoutData: Data(stdout.utf8), stderrData: Data(stderr.utf8))
+    }
+
+    public init(exitCode: Int32, stdoutData: Data, stderrData: Data) {
+        self.exitCode = exitCode
+        self.stdout = stdoutData
+        self.stderr = stderrData
+    }
+
+    public var stdoutString: String { String(decoding: stdout, as: UTF8.self) }
+    public var stderrString: String { String(decoding: stderr, as: UTF8.self) }
+    public var succeeded: Bool { exitCode == 0 }
+}
