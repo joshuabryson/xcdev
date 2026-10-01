@@ -37,11 +37,16 @@ public struct XcodeDiscovery: Sendable {
 
     public func resolve(spec: String?) async throws -> XcodeInstall {
         var all = await installs()
-        if let spec, spec.hasPrefix("/"), !all.contains(where: { $0.path == spec }),
-           let explicit = Self.readInstall(atPath: spec) {
-            all.append(explicit)
+        var resolveSpec = spec
+        if let spec, spec.hasPrefix("/") {
+            let normalizedPath = URL(fileURLWithPath: spec).standardizedFileURL.path
+            if !all.contains(where: { $0.path == normalizedPath }),
+               let explicit = Self.readInstall(atPath: normalizedPath) {
+                all.append(explicit)
+            }
+            resolveSpec = normalizedPath
         }
-        return try XcodeResolver.resolve(spec: spec, installs: all, selectedDeveloperDir: await selectedDeveloperDir())
+        return try XcodeResolver.resolve(spec: resolveSpec, installs: all, selectedDeveloperDir: await selectedDeveloperDir())
     }
 
     public static func readInstall(atPath path: String) -> XcodeInstall? {

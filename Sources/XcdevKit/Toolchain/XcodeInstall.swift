@@ -1,3 +1,5 @@
+import Foundation
+
 public struct XcodeInstall: Codable, Sendable, Equatable {
     public var path: String
     public var version: String
@@ -11,6 +13,6 @@ public struct XcodeInstall: Codable, Sendable, Equatable {
 
     public var developerDir: String { path + "/Contents/Developer" }
     /// Betas are recognized by bundle name (Xcode-beta.app), since beta Info.plist versions have no marker.
-    public var isBeta: Bool { path.lowercased().contains("beta") }
+    public var isBeta: Bool { URL(fileURLWithPath: path).lastPathComponent.lowercased().contains("beta") }
     public var summary: String { "Xcode \(version) (\(build)) \(path)" }
 }

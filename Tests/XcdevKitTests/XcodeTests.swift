@@ -73,6 +73,33 @@ import XcdevTestSupport
         #expect(chosen.developerDir == apps + "/Xcode.app/Contents/Developer")
     }
 
+    @Test func explicitXcodePathWithTrailingSlash() async throws {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        defer { try? FileManager.default.removeItem(atPath: temp) }
+        try Self.makeFakeXcode(at: temp + "/Xcode.app", version: "27.0", build: "27A266a")
+
+        let fake = FakeProcessRunner()
+        fake.stub(["mdfind"], stdout: "")
+        fake.stub(["xcode-select", "-p"], stdout: "/Applications/Xcode.app/Contents/Developer\n")
+        let discovery = XcodeDiscovery(runner: fake, applicationsDirectories: [])
+
+        // Resolve with trailing slash
+        let chosen1 = try await discovery.resolve(spec: temp + "/Xcode.app/")
+        #expect(chosen1.version == "27.0")
+        #expect(chosen1.build == "27A266a")
+
+        // Resolve without trailing slash
+        let chosen2 = try await discovery.resolve(spec: temp + "/Xcode.app")
+        #expect(chosen2.version == "27.0")
+        #expect(chosen2.build == "27A266a")
+    }
+
+    @Test func betaDetectionByBundleNameOnly() {
+        #expect(XcodeInstall(path: "/Volumes/betabuilds/Xcode.app", version: "27.0", build: "x").isBeta == false)
+        #expect(XcodeInstall(path: "/Applications/Xcode-beta.app", version: "27.0", build: "x").isBeta == true)
+        #expect(XcodeInstall(path: "/Volumes/beta/Xcode.app", version: "27.0", build: "x").isBeta == false)
+    }
+
     static func makeFakeXcode(at path: String, version: String, build: String) throws {
         try FileManager.default.createDirectory(atPath: path + "/Contents", withIntermediateDirectories: true)
         (["CFBundleShortVersionString": version] as NSDictionary).write(toFile: path + "/Contents/Info.plist", atomically: true)
