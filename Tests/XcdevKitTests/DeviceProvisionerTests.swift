@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 import XcdevTestSupport
 @testable import XcdevKit
@@ -70,6 +71,41 @@ import XcdevTestSupport
         let watch = try await provisioner.ensure("watch", in: &ctx)
         let phone = try #require(ctx.state.devices["iphone"])
         #expect(sims.pairs == [[watch.udid, phone.udid]])
+    }
+
+    @Test func failedPairingIsRetried() async throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        let attempts = Counter()
+        let paired = Mutex<[[String]]>([])
+        fake.stub(["xcrun", "simctl", "pair"]) { inv in
+            if attempts.increment() == 1 { return ProcessOutput(exitCode: 1, stderr: "pair failed") }
+            paired.withLock { $0.append([inv.arguments[2], inv.arguments[3]]) }
+            return ProcessOutput()
+        }
+        var ctx = try context()
+        await #expect(throws: (any Error).self) { try await provisioner.ensure("watch", in: &ctx) }
+        #expect(ctx.state.devices["watch"]?.pairedWith == nil)
+        let clonesAfterFailure = sims.cloneCount
+        let watch = try await provisioner.ensure("watch", in: &ctx)
+        let phone = try #require(ctx.state.devices["iphone"])
+        #expect(paired.withLock { $0 } == [[watch.udid, phone.udid]])
+        #expect(watch.pairedWith == phone.udid)
+        #expect(sims.cloneCount == clonesAfterFailure)
+    }
+
+    @Test func watchIsRepairedWhenPhoneIsRecloned() async throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        var ctx = try context()
+        _ = try await provisioner.ensure("watch", in: &ctx)
+        let oldPhone = try #require(ctx.state.devices["iphone"])
+        sims.deleteExternally(udid: oldPhone.udid)
+        let watch = try await provisioner.ensure("watch", in: &ctx)
+        let newPhone = try #require(ctx.state.devices["iphone"])
+        #expect(newPhone.udid != oldPhone.udid)
+        #expect(watch.pairedWith == newPhone.udid)
+        #expect(sims.pairs.count == 2)
     }
 
     @Test func macDeviceIsRejected() async throws {

@@ -53,7 +53,7 @@ public struct DeviceProvisioner: Sendable {
         let simctl = simctl(for: ctx)
         let catalog = try await simctl.catalog()
         if let existing = ctx.state.devices[name], catalog.device(udid: existing.udid)?.isAvailable == true {
-            return existing
+            return try await pairIfNeeded(name, spec: spec, in: &ctx)
         }
 
         var effective = spec
@@ -72,9 +72,26 @@ public struct DeviceProvisioner: Sendable {
         ctx.state.devices[name] = device
         try WorktreeStateStore.save(ctx.state, ctx.paths)
 
-        if let partner = spec.pairWith {
-            let phone = try await ensure(partner, in: &ctx)
-            try await simctl.pair(watch: udid, phone: phone.udid)
+        return try await pairIfNeeded(name, spec: spec, in: &ctx)
+    }
+
+    /// Pairs a watch with its phone until the pairing is recorded, and again if the phone was re-cloned.
+    private func pairIfNeeded(_ name: String, spec: DeviceSpec, in ctx: inout WorktreeContext) async throws -> ProvisionedDevice {
+        guard let partner = spec.pairWith, let device = ctx.state.devices[name] else {
+            return try requireDevice(name, in: ctx)
+        }
+        let phone = try await ensure(partner, in: &ctx)
+        if device.pairedWith != phone.udid {
+            try await simctl(for: ctx).pair(watch: device.udid, phone: phone.udid)
+            ctx.state.devices[name]?.pairedWith = phone.udid
+            try WorktreeStateStore.save(ctx.state, ctx.paths)
+        }
+        return try requireDevice(name, in: ctx)
+    }
+
+    private func requireDevice(_ name: String, in ctx: WorktreeContext) throws -> ProvisionedDevice {
+        guard let device = ctx.state.devices[name] else {
+            throw XcdError(.internalError, "device '\(name)' was not recorded after provisioning")
         }
         return device
     }

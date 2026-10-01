@@ -6,13 +6,17 @@ public struct ProvisionedDevice: Codable, Sendable, Equatable {
     public var deviceTypeIdentifier: String
     public var runtime: String
     public var runtimeIdentifier: String
+    /// For watches: the udid of the phone this clone is paired with, once the pairing succeeded.
+    public var pairedWith: String?
 
-    public init(udid: String, deviceType: String, deviceTypeIdentifier: String, runtime: String, runtimeIdentifier: String) {
+    public init(udid: String, deviceType: String, deviceTypeIdentifier: String, runtime: String, runtimeIdentifier: String,
+                pairedWith: String? = nil) {
         self.udid = udid
         self.deviceType = deviceType
         self.deviceTypeIdentifier = deviceTypeIdentifier
         self.runtime = runtime
         self.runtimeIdentifier = runtimeIdentifier
+        self.pairedWith = pairedWith
     }
 }
 
