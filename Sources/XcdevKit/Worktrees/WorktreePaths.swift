@@ -27,4 +27,23 @@ public struct WorktreePaths: Sendable, Equatable {
     public var sourcePackages: String { stateDirectory + "/SourcePackages" }
     public var logs: String { stateDirectory + "/logs" }
     public var results: String { stateDirectory + "/results" }
+
+    public var appStateFile: String { stateDirectory + "/app.json" }
+
+    /// `<directory>/<yyyyMMdd-HHmmss>-<kind>.<ext>`, suffixed `-2`, `-3`, … if taken. Creates `directory`.
+    public func newArtifact(in directory: String, kind: String, ext: String, now: Date) -> String {
+        let fm = FileManager.default
+        try? fm.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let stem = directory + "/" + formatter.string(from: now) + "-" + kind
+        var candidate = stem + "." + ext
+        var n = 2
+        while fm.fileExists(atPath: candidate) {
+            candidate = "\(stem)-\(n).\(ext)"
+            n += 1
+        }
+        return candidate
+    }
 }
