@@ -11,7 +11,7 @@ struct Xcd: AsyncParsableCommand {
         version: XcdevVersion.current,
         subcommands: [BuildCommand.self, TestCommand.self, RunCommand.self, LogsCommand.self, CleanCommand.self,
                       InstallCommand.self, UninstallCommand.self, LaunchCommand.self, TerminateCommand.self,
-                      WorktreeCommand.self, SimCommand.self, ConfigCommand.self, ContextCommand.self]
+                      WorktreeCommand.self, SimCommand.self, ConfigCommand.self, ContextCommand.self, GuideCommand.self]
     )
 
     /// Parse errors become `usage` failures (exit 2, JSON envelope with --json / XCD_OUTPUT=json).
