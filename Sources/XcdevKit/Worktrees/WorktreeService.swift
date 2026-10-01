@@ -69,11 +69,15 @@ public struct WorktreeService: Sendable {
     public func create(name: String, from ref: String? = nil,
                        in ctx: WorktreeContext) async throws -> (state: WorktreeState, created: Bool) {
         try Self.validate(name: name)
-        let projectRoot = ctx.location.projectRoot
-        let key = String(projectRoot.map { $0.isLetter || $0.isNumber ? $0 : "-" })
-        return try await FileLock.withLock(at: globalPaths.locksDirectory + "/worktrees-" + key + ".lock") {
+        return try await FileLock.withLock(at: lockPath(projectRoot: ctx.location.projectRoot)) {
             try await createLocked(name: name, from: ref, in: ctx)
         }
+    }
+
+    /// The per-project lock that serializes create and remove across processes.
+    func lockPath(projectRoot: String) -> String {
+        let key = String(projectRoot.map { $0.isLetter || $0.isNumber ? $0 : "-" })
+        return globalPaths.locksDirectory + "/worktrees-" + key + ".lock"
     }
 
     private func createLocked(name: String, from ref: String?,
@@ -177,5 +181,65 @@ public struct WorktreeService: Sendable {
             throw XcdError(.usage, "'\(name)' is not a valid worktree name",
                            next: "use letters, digits, '.', '_' or '-' (not 'main'), e.g. `xcd wt create login-flow`")
         }
+    }
+}
+
+public struct WorktreeRemoval: Codable, Sendable, Equatable {
+    public let name: String
+    public let path: String
+    public let branch: String
+    public let removedDevices: [String]
+    /// True when the checkout or its state was already gone, so clones (if any) could not be found.
+    public let stateMissing: Bool
+}
+
+extension WorktreeService {
+    /// Deletes the worktree's clones, the git worktree, and its registry entry. Keeps the branch.
+    /// Serialized with `create` per project across processes.
+    public func remove(name: String, force: Bool = false, in ctx: WorktreeContext) async throws -> WorktreeRemoval {
+        guard name != "main" else { throw XcdError(.usage, "the main worktree cannot be removed") }
+        return try await FileLock.withLock(at: lockPath(projectRoot: ctx.location.projectRoot)) {
+            try await removeLocked(name: name, force: force, in: ctx)
+        }
+    }
+
+    private func removeLocked(name: String, force: Bool, in ctx: WorktreeContext) async throws -> WorktreeRemoval {
+        let projectRoot = ctx.location.projectRoot
+        let entry = try entry(named: name, projectRoot: projectRoot)
+        let fm = FileManager.default
+        let exists = fm.fileExists(atPath: entry.path)
+
+        if exists && !force {
+            let status = try await runner.runChecked(.git(["status", "--porcelain"], in: entry.path))
+            let changes = status.stdoutString.split(separator: "\n").map(String.init)
+            if !changes.isEmpty {
+                throw XcdError(.worktreeDirty, "worktree '\(name)' has uncommitted changes",
+                               next: "commit or stash them, or re-run `xcd wt remove \(name) --force`",
+                               details: Array(changes.prefix(20)))
+            }
+        }
+
+        let state = exists ? try WorktreeStateStore.load(WorktreePaths(root: entry.path)) : nil
+        var removedDevices: [String] = []
+        if let state, !state.devices.isEmpty {
+            let simctl = SimctlClient(runner: runner, developerDir: state.xcode?.developerDir)
+            for (deviceName, device) in state.devices.sorted(by: { $0.key < $1.key }) {
+                _ = try? await simctl.shutdown(udid: device.udid)
+                try await simctl.delete(udid: device.udid)
+                removedDevices.append(deviceName)
+            }
+        }
+
+        if exists {
+            // Cleanliness was checked above (or the caller forced), so --force only lets git
+            // delete ignored build state such as .xcdev/.
+            try await runner.runChecked(.git(["worktree", "remove", "--force", entry.path], in: projectRoot),
+                                        next: "close anything using the worktree, then re-run `xcd wt remove \(name)`")
+        }
+        _ = try? await runner.run(.git(["worktree", "prune"], in: projectRoot))
+        if fm.fileExists(atPath: entry.path) { try? fm.removeItem(atPath: entry.path) }
+        try await registry.remove(id: entry.id)
+        return WorktreeRemoval(name: name, path: entry.path, branch: state?.branch ?? name,
+                               removedDevices: removedDevices, stateMissing: state == nil)
     }
 }
