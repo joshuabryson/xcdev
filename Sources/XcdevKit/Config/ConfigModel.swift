@@ -8,6 +8,8 @@ public struct XcdevConfig: Codable, Sendable, Equatable {
     public var presets: [String: LaunchPreset]?
     public var worktrees: WorktreeSettings?
     public var logs: LogSettings?
+    public var commands: [String: ProjectCommandSpec]?
+    public var hooks: HookCommands?
 
     public struct Schemes: Codable, Sendable, Equatable {
         public var app: String?
@@ -48,4 +50,67 @@ public struct DeviceSpec: Codable, Sendable, Equatable {
 public struct LaunchPreset: Codable, Sendable, Equatable {
     public var args: [String]?
     public var env: [String: String]?
+}
+
+/// A project command under `commands:`, run as `xcd <name> [args…]`.
+public struct ProjectCommandSpec: Codable, Sendable, Equatable {
+    public var description: String?
+    public var run: String
+    /// "device" and/or "build".
+    public var needs: [String]?
+    public var timeout: String?
+
+    public init(description: String? = nil, run: String, needs: [String]? = nil, timeout: String? = nil) {
+        self.description = description
+        self.run = run
+        self.needs = needs
+        self.timeout = timeout
+    }
+
+    public static let needsValues = ["device", "build"]
+    public static let defaultTimeout: Duration = .seconds(1800)
+
+    public var needsDevice: Bool { needs?.contains("device") ?? false }
+    public var needsBuild: Bool { needs?.contains("build") ?? false }
+    public var timeoutDuration: Duration { timeout.flatMap(DurationText.parse) ?? Self.defaultTimeout }
+}
+
+/// The hooks v1 supports, named as they appear under `hooks:`.
+public enum HookName: String, Codable, Sendable, CaseIterable {
+    case postWorktreeCreate = "post-worktree-create"
+    case preBuild = "pre-build"
+    case postLaunch = "post-launch"
+    case preWorktreeRemove = "pre-worktree-remove"
+}
+
+/// `hooks:`: one shell command per hook.
+public struct HookCommands: Codable, Sendable, Equatable {
+    public var postWorktreeCreate: String?
+    public var preBuild: String?
+    public var postLaunch: String?
+    public var preWorktreeRemove: String?
+
+    enum CodingKeys: String, CodingKey {
+        case postWorktreeCreate = "post-worktree-create"
+        case preBuild = "pre-build"
+        case postLaunch = "post-launch"
+        case preWorktreeRemove = "pre-worktree-remove"
+    }
+
+    public init(postWorktreeCreate: String? = nil, preBuild: String? = nil, postLaunch: String? = nil,
+                preWorktreeRemove: String? = nil) {
+        self.postWorktreeCreate = postWorktreeCreate
+        self.preBuild = preBuild
+        self.postLaunch = postLaunch
+        self.preWorktreeRemove = preWorktreeRemove
+    }
+
+    public func command(for hook: HookName) -> String? {
+        switch hook {
+        case .postWorktreeCreate: return postWorktreeCreate
+        case .preBuild: return preBuild
+        case .postLaunch: return postLaunch
+        case .preWorktreeRemove: return preWorktreeRemove
+        }
+    }
 }

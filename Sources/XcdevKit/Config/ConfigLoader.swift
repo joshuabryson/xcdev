@@ -75,6 +75,31 @@ public enum ConfigLoader {
             issues.append(ConfigIssue(path: "logs.maxFollow",
                                       message: "'\(maxFollow)' is not a duration like \"30s\", \"5m\", or \"1h\""))
         }
+        issues += commandIssues(config.commands ?? [:])
+        return issues
+    }
+
+    static func commandIssues(_ commands: [String: ProjectCommandSpec]) -> [ConfigIssue] {
+        var issues: [ConfigIssue] = []
+        for (name, spec) in commands.sorted(by: { $0.key < $1.key }) {
+            let path = "commands.\(name)"
+            if name.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) == nil {
+                issues.append(ConfigIssue(path: path, message: "'\(name)' is not a valid command name (use letters, digits, '.', '_' or '-')"))
+            } else if BuiltinCommands.reservedNames.contains(name) {
+                issues.append(ConfigIssue(path: path, message: "'\(name)' is a built-in xcd command, so `xcd \(name)` would never run this; rename it"))
+            }
+            if spec.run.trimmingCharacters(in: .whitespaces).isEmpty {
+                issues.append(ConfigIssue(path: path + ".run", message: "must not be empty"))
+            }
+            for (index, need) in (spec.needs ?? []).enumerated() where !ProjectCommandSpec.needsValues.contains(need) {
+                let hint = Suggest.closest(to: need, in: ProjectCommandSpec.needsValues, limit: 1).first.map { " (did you mean '\($0)'?)" } ?? ""
+                issues.append(ConfigIssue(path: "\(path).needs[\(index)]",
+                                          message: "'\(need)' is not one of: \(ProjectCommandSpec.needsValues.joined(separator: ", "))\(hint)"))
+            }
+            if let timeout = spec.timeout, DurationText.parse(timeout) == nil {
+                issues.append(ConfigIssue(path: path + ".timeout", message: "'\(timeout)' is not a duration like \"30s\", \"10m\", or \"1h\""))
+            }
+        }
         return issues
     }
 
