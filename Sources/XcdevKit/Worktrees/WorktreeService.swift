@@ -33,6 +33,10 @@ public struct WorktreeService: Sendable {
             let root = worktreeName == "main"
                 ? location.projectRoot
                 : try entry(named: worktreeName, projectRoot: location.projectRoot).path
+            guard FileManager.default.fileExists(atPath: root) else {
+                throw XcdError(.worktreeNotFound, "worktree '\(worktreeName)' was deleted outside xcd",
+                               next: "run `xcd wt remove \(worktreeName)` to clean it up")
+            }
             location = ProjectLocation(projectRoot: location.projectRoot, worktreeRoot: root)
         }
         let config = try ConfigLoader.load(worktreeRoot: location.worktreeRoot, projectRoot: location.projectRoot)
@@ -56,6 +60,29 @@ public struct WorktreeService: Sendable {
         try registry.entries()
             .filter { projectRoot == nil || $0.projectRoot == projectRoot }
             .sorted { ($0.project, $0.name) < ($1.project, $1.name) }
+    }
+
+    /// `list` plus each worktree's branch, clones, and their boot state. Boot state comes from one
+    /// `simctl list` call (skipped when no worktree has clones); if it fails, states are "unknown".
+    public func listDetails(projectRoot: String?) async throws -> [WorktreeListItem] {
+        let fm = FileManager.default
+        let loaded = try list(projectRoot: projectRoot).map { entry -> (RegistryEntry, WorktreeState?, Bool) in
+            let exists = fm.fileExists(atPath: entry.path)
+            let state = exists ? (try? WorktreeStateStore.load(WorktreePaths(root: entry.path))) ?? nil : nil
+            return (entry, state, exists)
+        }
+        var catalog: SimCatalog?
+        if loaded.contains(where: { !($0.1?.devices.isEmpty ?? true) }) {
+            catalog = try? await SimctlClient(runner: runner, developerDir: nil).catalog()
+        }
+        return loaded.map { entry, state, exists in
+            let devices = (state?.devices ?? [:]).sorted { $0.key < $1.key }.map { name, device in
+                let simState = catalog.map { $0.device(udid: device.udid)?.state ?? "gone" } ?? "unknown"
+                return WorktreeListItem.Device(name: name, udid: device.udid, state: simState)
+            }
+            let status: WorktreeListItem.Status = !exists ? .missing : entry.status == .ready ? .ready : .incomplete
+            return WorktreeListItem(entry: entry, status: status, branch: state?.branch, devices: devices)
+        }
     }
 
     public func worktreesDirectory(for ctx: WorktreeContext) -> String {
@@ -107,7 +134,9 @@ public struct WorktreeService: Sendable {
             let args = branchExists
                 ? ["worktree", "add", path, name]
                 : ["worktree", "add", "-b", name, path, ref ?? "HEAD"]
-            try await runner.runChecked(.git(args, in: projectRoot),
+            var add = Invocation.git(args, in: projectRoot)
+            add.timeout = .seconds(600)          // checking out a large repo can take minutes
+            try await runner.runChecked(add,
                                         next: "check that the --from ref exists and the branch isn't checked out elsewhere")
             worktreeAdded = true
             branchCreated = !branchExists
@@ -186,6 +215,7 @@ public struct WorktreeService: Sendable {
 
 public struct WorktreeRemoval: Codable, Sendable, Equatable {
     public let name: String
+    public let project: String
     public let path: String
     public let branch: String
     public let removedDevices: [String]
@@ -239,7 +269,42 @@ extension WorktreeService {
         _ = try? await runner.run(.git(["worktree", "prune"], in: projectRoot))
         if fm.fileExists(atPath: entry.path) { try? fm.removeItem(atPath: entry.path) }
         try await registry.remove(id: entry.id)
-        return WorktreeRemoval(name: name, path: entry.path, branch: state?.branch ?? name,
+        return WorktreeRemoval(name: name, project: ctx.location.projectName, path: entry.path, branch: state?.branch ?? name,
                                removedDevices: removedDevices, stateMissing: state == nil)
+    }
+}
+
+/// One row of `xcd wt list`.
+public struct WorktreeListItem: Codable, Sendable, Equatable {
+    public enum Status: String, Codable, Sendable { case ready, incomplete, missing }
+
+    public struct Device: Codable, Sendable, Equatable {
+        public let name: String
+        public let udid: String
+        /// simctl's state ("Booted", "Shutdown", …), "gone" if the clone no longer exists, or "unknown".
+        public let state: String
+
+        public init(name: String, udid: String, state: String) {
+            self.name = name
+            self.udid = udid
+            self.state = state
+        }
+    }
+
+    public let project: String
+    public let name: String
+    public let path: String
+    public let status: Status
+    public let branch: String?
+    /// Sorted by name.
+    public let devices: [Device]
+
+    public init(entry: RegistryEntry, status: Status, branch: String?, devices: [Device]) {
+        project = entry.project
+        name = entry.name
+        path = entry.path
+        self.status = status
+        self.branch = branch
+        self.devices = devices
     }
 }

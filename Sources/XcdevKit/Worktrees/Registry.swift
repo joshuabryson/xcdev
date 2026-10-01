@@ -34,7 +34,9 @@ public struct Registry: Sendable {
         do {
             return try JSONCoding.decoder.decode(File.self, from: data).worktrees
         } catch {
-            throw XcdError(.internalError, "\(paths.registryFile) is corrupt", details: ["\(error)"])
+            throw XcdError(.internalError, "\(paths.registryFile) is corrupt",
+                           next: "move \(Shell.quote(paths.registryFile)) aside; xcd re-registers worktrees as they are opened",
+                           details: ["\(error)"])
         }
     }
 

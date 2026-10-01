@@ -52,6 +52,8 @@ import XcdevTestSupport
         try FileManager.default.removeItem(atPath: state.path)
         let removal = try await svc.remove(name: "feat", in: main)
         #expect(removal.stateMissing)
+        #expect(removal.project == "Sample App")
+        #expect(removal.text.contains("(named \"xcd · Sample App · feat · …\")"))
         #expect(try svc.list(projectRoot: project.root).map(\.name) == ["main"])
     }
 

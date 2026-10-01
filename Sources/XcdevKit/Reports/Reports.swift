@@ -21,19 +21,20 @@ public struct WorktreeCreateReport: Reportable {
 }
 
 public struct WorktreeListReport: Reportable {
-    public let worktrees: [RegistryEntry]
+    public let worktrees: [WorktreeListItem]
     public let includeProject: Bool
 
-    public init(worktrees: [RegistryEntry], includeProject: Bool) {
+    public init(worktrees: [WorktreeListItem], includeProject: Bool) {
         self.worktrees = worktrees
         self.includeProject = includeProject
     }
 
     public var text: String {
         guard !worktrees.isEmpty else { return "no worktrees" }
-        return worktrees.map { entry in
-            let name = includeProject ? "\(entry.project)/\(entry.name)" : entry.name
-            return "\(name)  \(entry.status.rawValue)  \(entry.path)"
+        return worktrees.map { item in
+            let name = includeProject ? "\(item.project)/\(item.name)" : item.name
+            let devices = item.devices.isEmpty ? "none" : item.devices.map { "\($0.name):\($0.state)" }.joined(separator: ",")
+            return "\(name)  \(item.status.rawValue)  branch=\(item.branch ?? "-")  devices=\(devices)  \(item.path)"
         }.joined(separator: "\n")
     }
 }
@@ -72,7 +73,7 @@ extension WorktreeRemoval: Reportable {
             "branch kept: \(branch)",
         ]
         if stateMissing {
-            lines.append("note: the worktree's state was already gone, so any simulators it cloned may remain (named \"xcd · <project> · \(name) · …\")")
+            lines.append("note: the worktree's state was already gone, so any simulators it cloned may remain (named \"xcd · \(project) · \(name) · …\")")
         }
         return lines.joined(separator: "\n")
     }

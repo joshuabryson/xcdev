@@ -20,10 +20,25 @@ import Testing
     }
 
     @Test func listText() {
-        let entries = [RegistryEntry(state)]
-        #expect(WorktreeListReport(worktrees: entries, includeProject: false).text == "feat  ready  /p/App.worktrees/feat")
-        #expect(WorktreeListReport(worktrees: entries, includeProject: true).text == "App/feat  ready  /p/App.worktrees/feat")
+        let feat = WorktreeListItem(entry: RegistryEntry(state), status: .ready, branch: "feat", devices: [
+            .init(name: "iphone", udid: "U1", state: "Booted"),
+            .init(name: "watch", udid: "U2", state: "gone"),
+        ])
+        let bare = WorktreeListItem(entry: RegistryEntry(state), status: .missing, branch: nil, devices: [])
+        #expect(WorktreeListReport(worktrees: [feat], includeProject: false).text
+                == "feat  ready  branch=feat  devices=iphone:Booted,watch:gone  /p/App.worktrees/feat")
+        #expect(WorktreeListReport(worktrees: [feat, bare], includeProject: true).text == """
+        App/feat  ready  branch=feat  devices=iphone:Booted,watch:gone  /p/App.worktrees/feat
+        App/feat  missing  branch=-  devices=none  /p/App.worktrees/feat
+        """)
         #expect(WorktreeListReport(worktrees: [], includeProject: false).text == "no worktrees")
+    }
+
+    @Test func listJSONCarriesFields() {
+        let item = WorktreeListItem(entry: RegistryEntry(state), status: .ready, branch: "feat",
+                                    devices: [.init(name: "iphone", udid: "U1", state: "Shutdown")])
+        let json = Renderer.success(WorktreeListReport(worktrees: [item], includeProject: false), command: "wt list", format: .json)
+        #expect(json == #"{"command":"wt list","data":{"includeProject":false,"worktrees":[{"branch":"feat","devices":[{"name":"iphone","state":"Shutdown","udid":"U1"}],"name":"feat","path":"/p/App.worktrees/feat","project":"App","status":"ready"}]},"ok":true}"#)
     }
 
     @Test func statusText() {
@@ -43,13 +58,13 @@ import Testing
     }
 
     @Test func removeText() {
-        let r = WorktreeRemoval(name: "feat", path: "/p/x", branch: "feat", removedDevices: ["iphone", "watch"], stateMissing: false)
+        let r = WorktreeRemoval(name: "feat", project: "App", path: "/p/x", branch: "feat", removedDevices: ["iphone", "watch"], stateMissing: false)
         #expect(r.text == "removed worktree feat  devices=iphone,watch\nbranch kept: feat")
-        let missing = WorktreeRemoval(name: "feat", path: "/p/x", branch: "feat", removedDevices: [], stateMissing: true)
+        let missing = WorktreeRemoval(name: "feat", project: "App", path: "/p/x", branch: "feat", removedDevices: [], stateMissing: true)
         #expect(missing.text == """
         removed worktree feat  devices=none
         branch kept: feat
-        note: the worktree's state was already gone, so any simulators it cloned may remain (named "xcd · <project> · feat · …")
+        note: the worktree's state was already gone, so any simulators it cloned may remain (named "xcd · App · feat · …")
         """)
     }
 

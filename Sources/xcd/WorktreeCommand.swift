@@ -33,10 +33,11 @@ struct WorktreeCommand: AsyncParsableCommand {
         func run() async throws {
             try await Emit.run("wt list", options) { services in
                 if all {
-                    return WorktreeListReport(worktrees: try services.worktrees.list(projectRoot: nil), includeProject: true)
+                    return WorktreeListReport(worktrees: try await services.worktrees.listDetails(projectRoot: nil),
+                                              includeProject: true)
                 }
                 let ctx = try await services.open(worktree: options.worktree)
-                return WorktreeListReport(worktrees: try services.worktrees.list(projectRoot: ctx.location.projectRoot),
+                return WorktreeListReport(worktrees: try await services.worktrees.listDetails(projectRoot: ctx.location.projectRoot),
                                           includeProject: false)
             }
         }

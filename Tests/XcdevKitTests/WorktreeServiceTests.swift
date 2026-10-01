@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 import XcdevTestSupport
 @testable import XcdevKit
@@ -186,6 +187,93 @@ import XcdevTestSupport
         #expect(results.filter(\.created).count == 1)
     }
 
+    @Test func listDetailsShowsBranchDevicesAndBootState() async throws {
+        let project = try TempProject.make(config: Self.config)
+        defer { project.remove() }
+        let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        let svc = service(project)
+        var main = try await svc.open(from: project.root)
+        _ = try await svc.create(name: "feat", in: main)
+        let (doomed, _) = try await svc.create(name: "doomed", in: main)
+        let phone = try #require(sims.devices.first)
+        try await SimctlClient(runner: fake, developerDir: nil).boot(udid: phone.udid)
+        main.state.devices = [
+            "watch": ProvisionedDevice(udid: "GONE", deviceType: "W", deviceTypeIdentifier: "w", runtime: "watchOS", runtimeIdentifier: "r"),
+            "iphone": ProvisionedDevice(udid: phone.udid, deviceType: "P", deviceTypeIdentifier: "p", runtime: "iOS", runtimeIdentifier: "r"),
+        ]
+        try WorktreeStateStore.save(main.state, main.paths)
+        try FileManager.default.removeItem(atPath: doomed.path)
+
+        let items = try await svc.listDetails(projectRoot: project.root)
+        #expect(items.map(\.name) == ["doomed", "feat", "main"])
+        #expect(items[0].status == .missing && items[0].branch == nil && items[0].devices.isEmpty)
+        #expect(items[1].status == .ready && items[1].branch == "feat" && items[1].devices.isEmpty)
+        #expect(items[2].branch == "main")
+        #expect(items[2].devices.map(\.name) == ["iphone", "watch"])
+        #expect(items[2].devices.map(\.state) == ["Booted", "gone"])
+        #expect(fake.commandLines.filter { $0.hasPrefix("xcrun simctl list") }.count == 1)
+        #expect(WorktreeListReport(worktrees: items, includeProject: false).text.hasSuffix(
+            "main  ready  branch=main  devices=iphone:Booted,watch:gone  \(project.root)"))
+    }
+
+    @Test func listDetailsSurvivesSimctlFailure() async throws {
+        let project = try TempProject.make(config: Self.config)
+        defer { project.remove() }
+        fake.stub(["xcrun", "simctl", "list"], exitCode: 1, stderr: "CoreSimulator is sad")
+        let svc = service(project)
+        var main = try await svc.open(from: project.root)
+        main.state.devices = ["iphone": ProvisionedDevice(udid: "U", deviceType: "P", deviceTypeIdentifier: "p",
+                                                          runtime: "iOS", runtimeIdentifier: "r")]
+        try WorktreeStateStore.save(main.state, main.paths)
+        let items = try await svc.listDetails(projectRoot: project.root)
+        #expect(items.map(\.devices) == [[WorktreeListItem.Device(name: "iphone", udid: "U", state: "unknown")]])
+    }
+
+    @Test func listDetailsSkipsSimctlWithoutDevices() async throws {
+        let project = try TempProject.make(config: Self.config)
+        defer { project.remove() }
+        let svc = service(project)
+        _ = try await svc.open(from: project.root)
+        #expect(try await svc.listDetails(projectRoot: project.root).map(\.name) == ["main"])
+        #expect(fake.calls.isEmpty)
+    }
+
+    @Test func openByNameOfDeletedWorktreeExplains() async throws {
+        let project = try TempProject.make(config: Self.config)
+        defer { project.remove() }
+        let svc = service(project)
+        let main = try await svc.open(from: project.root)
+        let (feat, _) = try await svc.create(name: "feat", in: main)
+        try FileManager.default.removeItem(atPath: feat.path)
+        let error = await #expect(throws: XcdError.self) { try await svc.open(from: project.root, worktreeName: "feat") }
+        #expect(error?.code == .worktreeNotFound)
+        #expect(error?.message == "worktree 'feat' was deleted outside xcd")
+        #expect(error?.next == "run `xcd wt remove feat` to clean it up")
+    }
+
+    @Test func corruptRegistryExplainsRecovery() throws {
+        let project = try TempProject.make(config: Self.config)
+        defer { project.remove() }
+        let paths = GlobalPaths(base: project.home)
+        try FileManager.default.createDirectory(atPath: (paths.registryFile as NSString).deletingLastPathComponent,
+                                                withIntermediateDirectories: true)
+        try "{nope".write(toFile: paths.registryFile, atomically: true, encoding: .utf8)
+        let error = #expect(throws: XcdError.self) { try Registry(paths: paths).entries() }
+        #expect(error?.next == "move \(Shell.quote(paths.registryFile)) aside; xcd re-registers worktrees as they are opened")
+    }
+
+    @Test func gitWorktreeAddGetsLongTimeout() async throws {
+        let project = try TempProject.make(config: Self.config)
+        defer { project.remove() }
+        let recorder = RecordingRunner()
+        let svc = WorktreeService(runner: recorder, globalPaths: GlobalPaths(base: project.home))
+        let main = try await svc.open(from: project.root)
+        _ = try await svc.create(name: "feat", in: main)
+        let add = try #require(recorder.calls.first { $0.arguments.contains("add") && $0.arguments.contains("worktree") })
+        #expect(add.timeout == .seconds(600))
+        #expect(recorder.calls.filter { $0 != add }.allSatisfy { $0.timeout != .seconds(600) })
+    }
+
     @Test func createFromRefRejectedWhenBranchExists() async throws {
         let project = try TempProject.make(config: Self.config)
         defer { project.remove() }
@@ -195,5 +283,16 @@ import XcdevTestSupport
         let error = await #expect(throws: XcdError.self) { try await svc.create(name: "existing", from: "main", in: main) }
         #expect(error?.code == .usage)
         #expect(try svc.list(projectRoot: project.root).map(\.name) == ["main"])
+    }
+}
+
+/// Runs everything for real and records each invocation.
+private final class RecordingRunner: ProcessRunning {
+    private let recorded = Mutex<[Invocation]>([])
+    var calls: [Invocation] { recorded.withLock { $0 } }
+
+    func run(_ invocation: Invocation) async throws -> ProcessOutput {
+        recorded.withLock { $0.append(invocation) }
+        return try await SystemProcessRunner().run(invocation)
     }
 }
