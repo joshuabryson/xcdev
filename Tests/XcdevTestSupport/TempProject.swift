@@ -9,10 +9,19 @@ public struct TempProject: Sendable {
     /// Use as GlobalPaths base (XCDEV_HOME) so tests never touch the real registry.
     public let home: String
 
-    public static func make(config: String, name: String = "Sample App") throws -> TempProject {
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent("xcdev-tests-\(UUID().uuidString)").path
+    /// `fixture`: a directory whose contents are copied in before the first commit. `parent`: where the throwaway
+    /// directory goes (default: the temp directory; simulator app output needs somewhere outside it).
+    public static func make(config: String, name: String = "Sample App", fixture: String? = nil,
+                            parent: String? = nil) throws -> TempProject {
+        let fm = FileManager.default
+        let base = (parent ?? fm.temporaryDirectory.path) + "/xcdev-tests-\(UUID().uuidString)"
         let root = base + "/" + name
-        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        try fm.createDirectory(atPath: root, withIntermediateDirectories: true)
+        if let fixture {
+            for item in try fm.contentsOfDirectory(atPath: fixture) {
+                try fm.copyItem(atPath: fixture + "/" + item, toPath: root + "/" + item)
+            }
+        }
         try config.write(toFile: root + "/.xcdev.yml", atomically: true, encoding: .utf8)
         try "hello\n".write(toFile: root + "/README.md", atomically: true, encoding: .utf8)
         try git(["init", "-q", "-b", "main"], in: root)

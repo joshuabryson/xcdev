@@ -3,3 +3,5 @@
 .DS_Store
 /.xcdev/
 /.claude/
+xcuserdata/
+Fixtures/**/project.xcworkspace/
