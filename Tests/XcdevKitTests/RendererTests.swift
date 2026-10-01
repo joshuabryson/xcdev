@@ -35,6 +35,29 @@ private struct Sample: Reportable {
         #expect(out == #"{"command":"sim boot","error":{"code":"config_missing","message":"no .xcdev.yml","next":"run `xcd init`"},"ok":false}"#)
     }
 
+    @Test func usageFailureAsJSON() {
+        let message = """
+        Error: Missing expected argument '<name>'
+        Help:  <name>  Worktree name.
+        Usage: xcd worktree create <name> [--json]
+
+        """
+        let out = Renderer.usageFailure(message: message, arguments: ["wt", "create", "--json"], environment: [:])
+        #expect(out == #"{"command":"wt create","error":{"code":"usage","details":["Help:  <name>  Worktree name.","Usage: xcd worktree create <name> [--json]"],"message":"Missing expected argument '<name>'","next":"run `xcd help` or `xcd <command> --help`"},"ok":false}"#)
+    }
+
+    @Test func usageFailureAsTextOrEnvJSON() {
+        let text = Renderer.usageFailure(message: "Error: Unknown option '--bogus'", arguments: ["sim", "boot", "--bogus"],
+                                         environment: [:])
+        #expect(text == """
+        error[usage]: Unknown option '--bogus'
+        next: run `xcd help` or `xcd <command> --help`
+        """)
+        let json = Renderer.usageFailure(message: "Error: Unknown option '--bogus'", arguments: ["sim", "boot", "--bogus"],
+                                         environment: ["XCD_OUTPUT": "json"])
+        #expect(json.hasPrefix(#"{"command":"sim boot","error":{"code":"usage","message":"Unknown option '--bogus'""#))
+    }
+
     @Test func formatResolution() {
         #expect(OutputFormat.resolve(jsonFlag: true, environment: [:]) == .json)
         #expect(OutputFormat.resolve(jsonFlag: false, environment: ["XCD_OUTPUT": "JSON"]) == .json)

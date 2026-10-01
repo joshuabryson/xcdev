@@ -27,6 +27,18 @@ public enum Renderer {
         }
     }
 
+    /// A command-line parse error as a `usage` failure. The first line of `message` (minus ArgumentParser's
+    /// "Error: " prefix) is the message; later lines become details. `arguments` excludes argv[0].
+    public static func usageFailure(message: String, arguments: [String], environment: [String: String]) -> String {
+        var lines = message.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        var first = lines.isEmpty ? "invalid command line" : lines.removeFirst()
+        if first.hasPrefix("Error: ") { first.removeFirst("Error: ".count) }
+        let error = XcdError(.usage, first, next: "run `xcd help` or `xcd <command> --help`", details: lines)
+        let format = OutputFormat.resolve(jsonFlag: arguments.contains("--json"), environment: environment)
+        let command = arguments.filter { !$0.hasPrefix("-") }.joined(separator: " ")
+        return failure(error, command: command, format: format)
+    }
+
     static func encode<T: Encodable>(_ value: T) -> String {
         let data = (try? JSONCoding.encoder(pretty: false).encode(value)) ?? Data(#"{"ok":false}"#.utf8)
         return String(decoding: data, as: UTF8.self)
