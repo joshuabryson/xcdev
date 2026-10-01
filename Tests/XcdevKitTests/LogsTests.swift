@@ -156,9 +156,11 @@ import XcdevTestSupport
         var unbuilt = try context(product: nil)
         let error = await #expect(throws: XcdError.self) { try await service.logs(LogOptions(), in: &unbuilt) }
         #expect(error?.code == .appNotBuilt)
+        #expect(error?.next == "run `xcd build` (or `xcd run`)")
         let app = await #expect(throws: XcdError.self) { try await service.logs(LogOptions(appOutput: true), in: &unbuilt) }
         #expect(app?.code == .appNotBuilt)
         #expect(app?.message == "nothing has been launched in this worktree yet")
+        #expect(app?.next == "run `xcd run` (or `xcd launch`), then `xcd logs --app`")
     }
 
     @Test func appOutputShowsTheLatestLaunchsCapturedOutput() async throws {
