@@ -68,4 +68,24 @@ import XcdevTestSupport
         #expect(fake.commandLines == ["git -C /r status", "git -C /r log"])
         await #expect(throws: XcdError.self) { try await fake.run(Invocation("/usr/bin/xcrun", ["simctl"])) }
     }
+
+    @Test func timeoutEscalatesToKillWhenTermIsIgnored() async throws {
+        let start = ContinuousClock.now
+        let error = await #expect(throws: XcdError.self) {
+            try await runner.run(Invocation("/bin/sh", ["-c", "trap '' TERM; while true; do sleep 0.1; done"],
+                                            timeout: .milliseconds(300)))
+        }
+        #expect(error?.code == .timeout)
+        #expect(ContinuousClock.now - start < .seconds(8))
+    }
+
+    @Test func cancellationThrowsCancellationError() async throws {
+        let runner = self.runner
+        let start = ContinuousClock.now
+        let task = Task { try await runner.run(Invocation("/bin/sleep", ["30"])) }
+        try await Task.sleep(for: .milliseconds(200))
+        task.cancel()
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(ContinuousClock.now - start < .seconds(3))
+    }
 }

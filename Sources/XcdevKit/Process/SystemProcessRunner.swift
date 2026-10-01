@@ -36,13 +36,12 @@ public struct SystemProcessRunner: ProcessRunning {
         let timer = Task {
             try? await Task.sleep(for: invocation.timeout)
             guard !Task.isCancelled else { return }
-            timedOut.set()
-            handle.terminate()
+            if handle.terminate() { timedOut.set() }
         }
         let status = await withTaskCancellationHandler {
             await exit.wait()
         } onCancel: {
-            handle.terminate()
+            _ = handle.terminate()
         }
         timer.cancel()
         let (out, err) = await (outData, errData)
@@ -55,6 +54,7 @@ public struct SystemProcessRunner: ProcessRunning {
             error.details.removeAll { $0.hasPrefix("exit: ") }
             throw error
         }
+        if Task.isCancelled { throw CancellationError() }
         return ProcessOutput(exitCode: status, stdoutData: out, stderrData: err)
     }
 
@@ -70,7 +70,18 @@ public struct SystemProcessRunner: ProcessRunning {
 private final class ProcessHandle: @unchecked Sendable {
     private let process: Process
     init(_ process: Process) { self.process = process }
-    func terminate() { if process.isRunning { process.terminate() } }
+    /// Sends SIGTERM, then SIGKILL after a grace period if the process is still running.
+    /// Returns whether a running process was signalled.
+    @discardableResult
+    func terminate() -> Bool {
+        guard process.isRunning else { return false }
+        process.terminate()
+        let process = process
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        }
+        return true
+    }
 }
 
 private final class ExitSignal: Sendable {
