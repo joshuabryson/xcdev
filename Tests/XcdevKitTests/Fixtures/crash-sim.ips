@@ -1,0 +1,101 @@
+{"app_name":"SampleApp","timestamp":"2026-09-30 19:56:19.00 -0600","app_version":"1.0","slice_uuid":"47881578-23d2-39f8-85bb-717055dac348","build_version":"1","platform":7,"bundleID":"dev.xcdev.SampleApp","share_with_app_devs":0,"is_first_party":0,"bug_type":"309","os_version":"macOS 27.0.1 (26A434)","roots_installed":0,"name":"SampleApp","incident_id":"D3AC7645-C9F6-4FA3-AE95-36FA9F7F552D"}
+{
+  "procName" : "SampleApp",
+  "pid" : 46606,
+  "procPath" : "/Users/USER/Library/Developer/CoreSimulator/Devices/C268DCFB-3E56-4C43-8947-B25ED3833F7E/data/Containers/Bundle/Application/C455E44B-F3EF-4268-949F-8C874BD18713/SampleApp.app/SampleApp",
+  "captureTime" : "2026-09-30 19:56:17.4298 -0600",
+  "bundleInfo" : {
+    "CFBundleShortVersionString" : "1.0",
+    "CFBundleVersion" : "1",
+    "CFBundleIdentifier" : "dev.xcdev.SampleApp"
+  },
+  "exception" : {
+    "codes" : "0x0000000000000001, 0x00000001c16c415c",
+    "rawCodes" : [
+      1,
+      7540064604
+    ],
+    "type" : "EXC_BREAKPOINT",
+    "signal" : "SIGTRAP"
+  },
+  "termination" : {
+    "flags" : 0,
+    "code" : 5,
+    "namespace" : "SIGNAL",
+    "indicator" : "Trace/BPT trap: 5",
+    "byProc" : "exc handler",
+    "byPid" : 46606
+  },
+  "faultingThread" : 0,
+  "threads" : [
+    {
+      "triggered" : true,
+      "id" : 1145191,
+      "queue" : "com.apple.main-thread",
+      "frames" : [
+        {
+          "imageOffset" : 1053020,
+          "symbol" : "_assertionFailure(_:_:file:line:flags:)",
+          "symbolLocation" : 208,
+          "imageIndex" : 0
+        },
+        {
+          "imageOffset" : 8832,
+          "sourceLine" : 14,
+          "sourceFile" : "SampleAppApp.swift",
+          "symbol" : "closure #1 in SampleAppApp.init()",
+          "imageIndex" : 1,
+          "symbolLocation" : 244
+        },
+        {
+          "imageOffset" : 8884,
+          "sourceFile" : "/<compiler-generated>",
+          "symbol" : "thunk for @escaping @callee_guaranteed @Sendable () -> ()",
+          "symbolLocation" : 48,
+          "imageIndex" : 1
+        },
+        {
+          "imageOffset" : 114616,
+          "symbol" : "_dispatch_client_callout",
+          "symbolLocation" : 12,
+          "imageIndex" : 2
+        },
+        {
+          "imageOffset" : 24696,
+          "symbol" : "_dispatch_continuation_pop",
+          "symbolLocation" : 776,
+          "imageIndex" : 2
+        }
+      ]
+    }
+  ],
+  "usedImages" : [
+    {
+      "source" : "P",
+      "arch" : "arm64",
+      "base" : 7539011584,
+      "size" : 4962641,
+      "uuid" : "4bac37fd-036c-3819-88c4-d0183173216a",
+      "path" : "/Volumes/VOLUME/*/libswiftCore.dylib",
+      "name" : "libswiftCore.dylib"
+    },
+    {
+      "source" : "P",
+      "arch" : "arm64",
+      "base" : 4308631552,
+      "size" : 16384,
+      "uuid" : "3174cd36-502c-30f7-b9de-be803aae5f89",
+      "path" : "/Users/USER/Library/Developer/CoreSimulator/Devices/C268DCFB-3E56-4C43-8947-B25ED3833F7E/data/Containers/Bundle/Application/C455E44B-F3EF-4268-949F-8C874BD18713/SampleApp.app/SampleApp.debug.dylib",
+      "name" : "SampleApp.debug.dylib"
+    },
+    {
+      "source" : "P",
+      "arch" : "arm64",
+      "base" : 8158027776,
+      "size" : 281688,
+      "uuid" : "a0ea2486-b842-3ba5-aedf-210e821d01f7",
+      "path" : "/Volumes/VOLUME/*/libdispatch.dylib",
+      "name" : "libdispatch.dylib"
+    }
+  ]
+}
