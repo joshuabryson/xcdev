@@ -52,6 +52,30 @@ import XcdevTestSupport
         #expect(sims.cloneCount == 1)
     }
 
+    @Test func sameNamedProjectsKeepEachOthersClones() async throws {
+        let dirB = FileManager.default.temporaryDirectory.appendingPathComponent("xcd-prov-\(UUID().uuidString)").path
+        defer {
+            try? FileManager.default.removeItem(atPath: dir)
+            try? FileManager.default.removeItem(atPath: dirB)
+        }
+        let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        func mainContext(_ root: String) throws -> WorktreeContext {
+            var ctx = try context()
+            ctx.state.name = "main"
+            ctx.state.projectRoot = root
+            ctx.state.path = root
+            return WorktreeContext(location: ProjectLocation(projectRoot: root, worktreeRoot: root),
+                                   config: ctx.config, state: ctx.state)
+        }
+        var a = try mainContext(dir)
+        var b = try mainContext(dirB)
+        let deviceA = try await provisioner.ensure("iphone", in: &a)
+        let deviceB = try await provisioner.ensure("iphone", in: &b)
+        #expect(deviceA.udid != deviceB.udid)
+        #expect(sims.devices.contains { $0.udid == deviceA.udid })
+        #expect(sims.devices.filter { $0.name == "xcd · App · main · iphone" }.count == 2)
+    }
+
     @Test func recreatesCloneDeletedExternally() async throws {
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))

@@ -62,9 +62,7 @@ public struct DeviceProvisioner: Sendable {
         let template = try await TemplateStore(simctl: simctl, locksDirectory: globalPaths.locksDirectory)
             .ensureTemplate(for: resolved)
         let cloneName = SimNaming.clone(project: ctx.state.project, worktree: ctx.state.name, device: name)
-        for stale in catalog.devices where stale.name == cloneName {
-            try? await simctl.delete(udid: stale.udid)
-        }
+        // Never delete by name: another project with the same basename shares it. Orphans are for `xcd doctor`.
         let udid = try await simctl.clone(udid: template, name: cloneName)
         let device = ProvisionedDevice(udid: udid, deviceType: resolved.deviceType.name,
                                        deviceTypeIdentifier: resolved.deviceType.identifier,
