@@ -28,10 +28,10 @@ public enum Schemes {
 
     public static func listInvocation(_ container: ProjectContainer, paths: WorktreePaths,
                                       developerDir: String?) -> Invocation {
-        // Package resolution during -list must also stay inside this worktree's state.
+        // Package resolution during -list must also stay inside this worktree's state. -derivedDataPath is left
+        // out: xcodebuild rejects it without -scheme ("The flag -scheme … is required"), and -list builds nothing.
         var invocation = Invocation.xcrun(["xcodebuild", "-list", "-json"] + container.arguments
-                                              + ["-derivedDataPath", paths.derivedData,
-                                                 "-clonedSourcePackagesDirPath", paths.sourcePackages],
+                                              + ["-clonedSourcePackagesDirPath", paths.sourcePackages],
                                           developerDir: developerDir, timeout: .seconds(120))
         invocation.workingDirectory = container.workingDirectory
         return invocation

@@ -106,8 +106,8 @@ import Testing
         #expect(Schemes.parseList(Data(Fixture.string("xcodebuild-list-package.json").utf8)) == ["SamplePackage"])
         #expect(Schemes.parseList(Data("not json".utf8)).isEmpty)
         let list = Schemes.listInvocation(.project("/p/A.xcodeproj"), paths: WorktreePaths(root: "/p"), developerDir: nil)
+        // Xcode 27 rejects -list with -derivedDataPath ("-scheme … is required"), so only packages are redirected.
         #expect(list.arguments == ["xcodebuild", "-list", "-json", "-project", "/p/A.xcodeproj",
-                              "-derivedDataPath", "/p/.xcdev/DerivedData",
                               "-clonedSourcePackagesDirPath", "/p/.xcdev/SourcePackages"])
     }
 

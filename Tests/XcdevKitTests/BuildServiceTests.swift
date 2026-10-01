@@ -108,7 +108,7 @@ import XcdevTestSupport
         #expect(error?.code == .usage)
         #expect(error?.next == "set schemes.app in .xcdev.yml to one of: App, AppKit (or pass --scheme)")
         let list = try #require(fake.calls.first { $0.arguments.contains("-list") }).arguments
-        #expect(list.contains(ctx.paths.derivedData) && list.contains(ctx.paths.sourcePackages))
+        #expect(!list.contains("-derivedDataPath") && list.contains(ctx.paths.sourcePackages))
     }
 
     @Test func failureWithoutResultsPassesXcodebuildErrorsThrough() async throws {
