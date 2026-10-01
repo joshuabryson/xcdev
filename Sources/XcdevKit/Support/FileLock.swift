@@ -11,11 +11,23 @@ public enum FileLock {
             throw XcdError(.internalError, "cannot open lock file \(path) (errno \(errno))")
         }
         defer { close(fd) }
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        let lockErrno = await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
             DispatchQueue.global().async {
-                while flock(fd, LOCK_EX) != 0 && errno == EINTR {}
-                continuation.resume()
+                while true {
+                    if flock(fd, LOCK_EX) == 0 {
+                        continuation.resume(returning: 0)
+                        return
+                    }
+                    let code = errno
+                    if code != EINTR {
+                        continuation.resume(returning: code)
+                        return
+                    }
+                }
             }
+        }
+        guard lockErrno == 0 else {
+            throw XcdError(.internalError, "cannot lock \(path) (errno \(lockErrno): \(String(cString: strerror(lockErrno))))")
         }
         defer { flock(fd, LOCK_UN) }
         return try await body()
