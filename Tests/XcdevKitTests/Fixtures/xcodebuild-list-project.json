@@ -1,0 +1,16 @@
+{
+  "project": {
+    "configurations": [
+      "Debug",
+      "Release"
+    ],
+    "name": "SampleApp",
+    "schemes": [
+      "SampleApp"
+    ],
+    "targets": [
+      "SampleApp",
+      "SampleAppTests"
+    ]
+  }
+}
