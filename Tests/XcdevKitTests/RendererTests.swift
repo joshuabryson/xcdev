@@ -7,13 +7,43 @@ private struct Sample: Reportable {
     var envelopeWorktree: String? { "feat" }
 }
 
+private struct FailedSample: Reportable {
+    let name: String
+    var text: String { "build failed \(name)" }
+    var envelopeWorktree: String? { "feat" }
+    var failure: XcdError? {
+        XcdError(.buildFailed, "build failed with 1 error", next: "fix the errors and re-run `xcd build`")
+    }
+}
+
 @Suite struct RendererTests {
+    @Test func textTaskFailureAppendsNext() {
+        #expect(Renderer.report(FailedSample(name: "a"), command: "build", format: .text) == """
+        build failed a
+        next: fix the errors and re-run `xcd build`
+        """)
+    }
+
+    @Test func jsonTaskFailureCarriesDataAndError() {
+        let out = Renderer.report(FailedSample(name: "a"), command: "build", format: .json)
+        #expect(out == #"{"command":"build","data":{"name":"a"},"error":{"code":"build_failed","message":"build failed with 1 error","next":"fix the errors and re-run `xcd build`"},"ok":false,"worktree":"feat"}"#)
+    }
+
+    @Test func taskFailureExitCodes() {
+        #expect(ErrorCode.buildFailed.exitCode == 1)
+        #expect(ErrorCode.testFailed.exitCode == 1)
+        #expect(ErrorCode.appCrashed.exitCode == 1)
+        #expect(ErrorCode.appNotBuilt.exitCode == 2)
+        #expect(ErrorCode.xcodeRuntimeMismatch.exitCode == 3)
+        #expect(ErrorCode.xcodeRuntimeMismatch.rawValue == "xcode_runtime_mismatch")
+    }
+
     @Test func textSuccessIsPayloadText() {
-        #expect(Renderer.success(Sample(name: "a"), command: "x", format: .text) == "hello a")
+        #expect(Renderer.report(Sample(name: "a"), command: "x", format: .text) == "hello a")
     }
 
     @Test func jsonSuccessIsSortedCompactEnvelope() {
-        let out = Renderer.success(Sample(name: "a"), command: "wt create", format: .json)
+        let out = Renderer.report(Sample(name: "a"), command: "wt create", format: .json)
         #expect(out == #"{"command":"wt create","data":{"name":"a"},"ok":true,"worktree":"feat"}"#)
     }
 

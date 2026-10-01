@@ -37,7 +37,7 @@ import Testing
     @Test func listJSONCarriesFields() {
         let item = WorktreeListItem(entry: RegistryEntry(state), status: .ready, branch: "feat",
                                     devices: [.init(name: "iphone", udid: "U1", state: "Shutdown")])
-        let json = Renderer.success(WorktreeListReport(worktrees: [item], includeProject: false), command: "wt list", format: .json)
+        let json = Renderer.report(WorktreeListReport(worktrees: [item], includeProject: false), command: "wt list", format: .json)
         #expect(json == #"{"command":"wt list","data":{"includeProject":false,"worktrees":[{"branch":"feat","devices":[{"name":"iphone","state":"Shutdown","udid":"U1"}],"name":"feat","path":"/p/App.worktrees/feat","project":"App","status":"ready"}]},"ok":true}"#)
     }
 
@@ -76,7 +76,7 @@ import Testing
     }
 
     @Test func jsonEnvelopeCarriesWorktree() {
-        let json = Renderer.success(SimReport(action: "booted", device: "iphone", udid: "U1", retries: 0, worktree: "feat"),
+        let json = Renderer.report(SimReport(action: "booted", device: "iphone", udid: "U1", retries: 0, worktree: "feat"),
                                     command: "sim boot", format: .json)
         #expect(json == #"{"command":"sim boot","data":{"action":"booted","device":"iphone","retries":0,"udid":"U1","worktree":"feat"},"ok":true,"worktree":"feat"}"#)
     }
