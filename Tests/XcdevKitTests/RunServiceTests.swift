@@ -231,6 +231,41 @@ import XcdevTestSupport
         #expect(kill < open)
     }
 
+    @Test func aMacAppThatCrashesBeforeItIsSeenIsACrash() async throws {
+        defer { worktree.remove() }
+        _ = try setUp()
+        var ctx = try context()
+        try recordMacBuild(ctx)
+        fake.stub(["ps"])                                        // the app dies before `ps` sees it
+        fake.stub(["open"]) { inv in
+            try "Mac/MacApp.swift:9: Fatal error: crashed in init\n".write(toFile: inv.arguments[3], atomically: true, encoding: .utf8)
+            try FileManager.default.createDirectory(atPath: crashDir, withIntermediateDirectories: true)
+            try Fixture.string("crash-sim.ips").write(toFile: crashDir + "/Mac-2026-09-30-195619.ips", atomically: true, encoding: .utf8)
+            return ProcessOutput()
+        }
+        let report = try await service().launch(device: "mac", options: LaunchOptions(), in: &ctx)
+        #expect(report.status == .crashed)
+        #expect(report.failure?.code == .appCrashed)
+        #expect(report.pid == 46606 && report.crash?.path == crashDir + "/Mac-2026-09-30-195619.ips")
+        #expect(report.appOutput == ["Mac/MacApp.swift:9: Fatal error: crashed in init"])
+        #expect(try AppStateStore.load(ctx.paths).lastLaunch?.pid == 46606)
+    }
+
+    @Test func aMacAppThatNeverStartsWithoutACrashReportFails() async throws {
+        defer { worktree.remove() }
+        _ = try setUp()
+        var ctx = try context()
+        try recordMacBuild(ctx)
+        fake.stub(["ps"])
+        fake.stub(["open"])
+        let error = await #expect(throws: XcdError.self) {
+            try await service().launch(device: "mac", options: LaunchOptions(), in: &ctx)
+        }
+        #expect(error?.code == .subprocessFailed)
+        #expect(error?.message == "Mac did not start within 5s")
+        #expect(error?.next?.hasPrefix("read the app log: \(ctx.paths.logs)/") == true)
+    }
+
     @Test func environmentPairsParse() throws {
         #expect(try LaunchOptions.parseEnvironment(["A=1", "B=x=y", "C="]) == ["A": "1", "B": "x=y", "C": ""])
         let error = #expect(throws: XcdError.self) { try LaunchOptions.parseEnvironment(["NOPE"]) }

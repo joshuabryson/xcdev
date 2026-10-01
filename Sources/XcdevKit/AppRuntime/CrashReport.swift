@@ -62,8 +62,9 @@ public struct CrashReportLocator: Sendable {
         self.directory = directory
     }
 
-    /// The `<process>-*.ips` written since `since` (allowing 2s of clock slack) whose pid matches.
-    public func find(processName: String, pid: Int32, since: Date) -> CrashReport? {
+    /// The newest `<process>-*.ips` written since `since` (allowing 2s of clock slack) whose pid matches;
+    /// any pid when `pid` is nil (the process died before its pid was seen).
+    public func find(processName: String, pid: Int32? = nil, since: Date) -> CrashReport? {
         let fm = FileManager.default
         let names = (try? fm.contentsOfDirectory(atPath: directory)) ?? []
         for name in names.sorted(by: >) where name.hasPrefix(processName + "-") && name.hasSuffix(".ips") {
@@ -71,7 +72,7 @@ public struct CrashReportLocator: Sendable {
             guard let modified = (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date,
                   modified >= since.addingTimeInterval(-2),
                   let text = try? String(contentsOfFile: path, encoding: .utf8),
-                  let report = try? CrashReport.parse(text, path: path), report.pid == pid else { continue }
+                  let report = try? CrashReport.parse(text, path: path), pid == nil || report.pid == pid else { continue }
             return report
         }
         return nil

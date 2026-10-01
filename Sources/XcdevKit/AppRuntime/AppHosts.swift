@@ -9,8 +9,9 @@ public enum AppEnvironment {
 public protocol AppHost: Sendable {
     func install(_ product: AppProduct) async throws
     func uninstall(_ product: AppProduct) async throws
-    /// Starts the app with stdout and stderr going to `logFile`; returns its pid.
-    func launch(_ product: AppProduct, arguments: [String], environment: [String: String], logFile: String) async throws -> Int32
+    /// Starts the app with stdout and stderr going to `logFile`; returns its pid, or nil when the launch went
+    /// through but no process was ever seen (it may have crashed before it could be).
+    func launch(_ product: AppProduct, arguments: [String], environment: [String: String], logFile: String) async throws -> Int32?
     /// Stops the app; false when it wasn't running.
     func terminate(_ product: AppProduct) async throws -> Bool
 }
@@ -33,7 +34,7 @@ public struct SimulatorAppHost: AppHost {
     }
 
     public func launch(_ product: AppProduct, arguments: [String], environment: [String: String],
-                       logFile: String) async throws -> Int32 {
+                       logFile: String) async throws -> Int32? {
         try await simctl.launch(udid: udid, bundleId: product.bundleId, arguments: arguments, environment: environment,
                                 logFile: logFile)
     }
@@ -58,7 +59,7 @@ public struct MacAppHost: AppHost {
     public func uninstall(_ product: AppProduct) async throws {}
 
     public func launch(_ product: AppProduct, arguments: [String], environment: [String: String],
-                       logFile: String) async throws -> Int32 {
+                       logFile: String) async throws -> Int32? {
         let before = try await pids(of: product.executablePath)
         var args = ["-n", "-g", "--stdout", logFile, "--stderr", logFile]
         let env = AppEnvironment.captureOutput.merging(environment, uniquingKeysWith: { $1 })
@@ -70,8 +71,7 @@ public struct MacAppHost: AppHost {
             if let pid = try await pids(of: product.executablePath).subtracting(before).max() { return pid }
             try await sleep(.milliseconds(250))
         }
-        throw XcdError(.subprocessFailed, "\(product.executableName) did not start within 5s",
-                       next: "read the app log: \(logFile)")
+        return nil
     }
 
     public func terminate(_ product: AppProduct) async throws -> Bool {

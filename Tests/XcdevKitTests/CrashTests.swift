@@ -67,6 +67,15 @@ import XcdevTestSupport
         #expect(CrashReportLocator(directory: dir).find(processName: "SampleApp", pid: 46606, since: launchedAt) == nil)
     }
 
+    @Test func aProcessNeverSeenRunningIsMatchedByNameAndTime() throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let path = try writeReport()
+        #expect(CrashReportLocator(directory: dir).find(processName: "SampleApp", since: launchedAt)?.path == path)
+        #expect(CrashReportLocator(directory: dir).find(processName: "Other", since: launchedAt) == nil)
+        _ = try writeReport(modified: launchedAt.addingTimeInterval(-3600))
+        #expect(CrashReportLocator(directory: dir).find(processName: "SampleApp", since: launchedAt.addingTimeInterval(60)) == nil)
+    }
+
     @Test func realProbeSeesThisProcess() {
         #expect(SystemProcessProbe().isRunning(getpid()))
         #expect(!SystemProcessProbe().isRunning(99_999_999))

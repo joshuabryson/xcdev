@@ -48,8 +48,8 @@ public struct CrashWatcher: Sendable {
         }
     }
 
-    /// Crash reports appear a second or two after the process dies.
-    private func report(processName: String, pid: Int32, since: Date) async throws -> CrashReport? {
+    /// Crash reports appear a second or two after the process dies. A nil `pid` takes any report for `processName`.
+    func report(processName: String, pid: Int32?, since: Date) async throws -> CrashReport? {
         var waited = Duration.zero
         while true {
             if let report = locator.find(processName: processName, pid: pid, since: since) { return report }

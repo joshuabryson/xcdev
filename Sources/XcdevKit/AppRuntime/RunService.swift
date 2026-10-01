@@ -142,14 +142,30 @@ public struct RunService: Sendable {
         // Taken before the launch: crash reports are matched to launches written at or after this time.
         let launchedAt = builds.now()
         let appLog = paths.newArtifact(in: paths.logs, kind: "app", ext: "log", now: launchedAt)
-        let pid = try await host.launch(product, arguments: arguments, environment: environment, logFile: appLog)
+        let pid: Int32
+        var crashedAtLaunch: LaunchOutcome?
+        if let launched = try await host.launch(product, arguments: arguments, environment: environment, logFile: appLog) {
+            pid = launched
+        } else if let crash = try await watcher.report(processName: product.executableName, pid: nil, since: launchedAt) {
+            // A Mac app that dies before `ps` sees it (e.g. a fatalError in App.init) still leaves its crash report.
+            pid = crash.pid
+            crashedAtLaunch = .exited(after: 0, crash: crash)
+        } else {
+            throw XcdError(.subprocessFailed, "\(product.executableName) did not start within 5s",
+                           next: "read the app log: \(appLog)")
+        }
         var state = try AppStateStore.load(paths)
         state.lastLaunch = LaunchRecord(target: target.name, bundleId: product.bundleId, processName: product.executableName,
                                         pid: pid, appLog: appLog, launchedAt: launchedAt)
         try AppStateStore.save(state, paths)
-        builds.progress("launched \(product.bundleId) (pid \(pid)); watching \(DurationText.format(crashWindow)) for a crash")
-        let outcome = try await watcher.watch(pid: pid, processName: product.executableName, window: crashWindow,
-                                              launchedAt: launchedAt)
+        let outcome: LaunchOutcome
+        if let crashedAtLaunch {
+            outcome = crashedAtLaunch
+        } else {
+            builds.progress("launched \(product.bundleId) (pid \(pid)); watching \(DurationText.format(crashWindow)) for a crash")
+            outcome = try await watcher.watch(pid: pid, processName: product.executableName, window: crashWindow,
+                                          launchedAt: launchedAt)
+        }
         let status: RunReport.Status
         var exitedAfter: Double?
         var crash: CrashReport?

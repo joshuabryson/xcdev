@@ -75,14 +75,13 @@ import XcdevTestSupport
                                    macProduct.path, "--args", "-flag"])
     }
 
-    @Test func macLaunchThatNeverStartsFails() async throws {
+    @Test func macLaunchThatIsNeverSeenRunningHasNoPid() async throws {
         fake.stub(["ps"], stdout: "  100 /other\n")
         fake.stub(["open"])
-        let error = await #expect(throws: XcdError.self) {
-            try await MacAppHost(runner: fake, sleep: { _ in }).launch(macProduct, arguments: [], environment: [:], logFile: "/w/app.log")
-        }
-        #expect(error?.message == "Mac App did not start within 5s")
-        #expect(error?.next == "read the app log: /w/app.log")
+        let pid = try await MacAppHost(runner: fake, sleep: { _ in })
+            .launch(macProduct, arguments: [], environment: [:], logFile: "/w/app.log")
+        #expect(pid == nil)
+        #expect(fake.calls.filter { $0.argv[0] == "ps" }.count == 21)    // before `open`, then 20 polls
     }
 
     @Test func macTerminateStopsEveryCopyOfThisBuild() async throws {
