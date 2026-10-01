@@ -1,0 +1,34 @@
+{
+  "actionTitle": "Build \"SampleApp\"",
+  "analyzerWarningCount": 0,
+  "analyzerWarnings": [],
+  "destination": {
+    "architecture": "arm64",
+    "deviceId": "C268DCFB-3E56-4C43-8947-B25ED3833F7E",
+    "deviceName": "xcd · App · main · iphone",
+    "modelName": "iPhone 17",
+    "osBuildNumber": "24A434",
+    "osVersion": "27.0",
+    "platform": "iOS Simulator"
+  },
+  "endTime": 1790819256.872,
+  "errorCount": 2,
+  "errors": [
+    {
+      "className": "DVTTextDocumentLocation",
+      "issueType": "Swift Compiler Error",
+      "message": "Cannot find 'authModel' in scope",
+      "sourceURL": "file:///Users/dev/My%20Apps/SampleApp/SampleApp/BrokenAuth.swift#EndingColumnNumber=15&EndingLineNumber=2&StartingColumnNumber=15&StartingLineNumber=2&Timestamp=812512056.232046"
+    },
+    {
+      "className": "DVTTextDocumentLocation",
+      "issueType": "Swift Compiler Error",
+      "message": "Cannot convert value of type 'String' to specified type 'Int'",
+      "sourceURL": "file:///Users/dev/My%20Apps/SampleApp/SampleApp/BrokenMath.swift#EndingColumnNumber=22&EndingLineNumber=1&StartingColumnNumber=22&StartingLineNumber=1&Timestamp=812512056.232046"
+    }
+  ],
+  "startTime": 1790819256.226,
+  "status": "failed",
+  "warningCount": 0,
+  "warnings": []
+}

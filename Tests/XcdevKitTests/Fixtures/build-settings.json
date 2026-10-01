@@ -1,0 +1,57 @@
+[
+  {
+    "action": "build-for-testing",
+    "target": "SampleAppTests",
+    "buildSettings": {
+      "TARGET_BUILD_DIR": "/Users/dev/My Apps/dd/Build/Products/Debug-iphonesimulator/SampleApp.app/PlugIns",
+      "FULL_PRODUCT_NAME": "SampleAppTests.xctest",
+      "PRODUCT_BUNDLE_IDENTIFIER": "dev.xcdev.SampleAppTests",
+      "WRAPPER_NAME": "SampleAppTests.xctest",
+      "EXECUTABLE_PATH": "SampleAppTests.xctest/SampleAppTests",
+      "EXECUTABLE_NAME": "SampleAppTests",
+      "CODESIGNING_FOLDER_PATH": "/Users/dev/My Apps/dd/Build/Products/Debug-iphonesimulator/SampleApp.app/PlugIns/SampleAppTests.xctest",
+      "BUILT_PRODUCTS_DIR": "/Users/dev/My Apps/dd/Build/Products/Debug-iphonesimulator",
+      "PLATFORM_NAME": "iphonesimulator",
+      "SDK_NAME": "iphonesimulator27.0",
+      "PRODUCT_TYPE": "com.apple.product-type.bundle.unit-test",
+      "WRAPPER_EXTENSION": "xctest",
+      "IPHONEOS_DEPLOYMENT_TARGET": "18.0",
+      "SUPPORTED_PLATFORMS": "iphoneos iphonesimulator",
+      "CONFIGURATION": "Debug",
+      "TARGET_NAME": "SampleAppTests",
+      "PROJECT_NAME": "SampleApp",
+      "PRODUCT_NAME": "SampleAppTests",
+      "EFFECTIVE_PLATFORM_NAME": "-iphonesimulator",
+      "TEST_HOST": "/Users/dev/My Apps/dd/Build/Products/Debug-iphonesimulator/SampleApp.app//SampleApp",
+      "INFOPLIST_PATH": "SampleAppTests.xctest/Info.plist",
+      "CONTENTS_FOLDER_PATH": "SampleAppTests.xctest"
+    }
+  },
+  {
+    "action": "build-for-testing",
+    "target": "SampleApp",
+    "buildSettings": {
+      "TARGET_BUILD_DIR": "/Users/dev/My Apps/dd/Build/Products/Debug-iphonesimulator",
+      "FULL_PRODUCT_NAME": "SampleApp.app",
+      "PRODUCT_BUNDLE_IDENTIFIER": "dev.xcdev.SampleApp",
+      "WRAPPER_NAME": "SampleApp.app",
+      "EXECUTABLE_PATH": "SampleApp.app/SampleApp",
+      "EXECUTABLE_NAME": "SampleApp",
+      "CODESIGNING_FOLDER_PATH": "/Users/dev/My Apps/dd/Build/Products/Debug-iphonesimulator/SampleApp.app",
+      "BUILT_PRODUCTS_DIR": "/Users/dev/My Apps/dd/Build/Products/Debug-iphonesimulator",
+      "PLATFORM_NAME": "iphonesimulator",
+      "SDK_NAME": "iphonesimulator27.0",
+      "PRODUCT_TYPE": "com.apple.product-type.application",
+      "WRAPPER_EXTENSION": "app",
+      "IPHONEOS_DEPLOYMENT_TARGET": "18.0",
+      "SUPPORTED_PLATFORMS": "iphoneos iphonesimulator",
+      "CONFIGURATION": "Debug",
+      "TARGET_NAME": "SampleApp",
+      "PROJECT_NAME": "SampleApp",
+      "PRODUCT_NAME": "SampleApp",
+      "EFFECTIVE_PLATFORM_NAME": "-iphonesimulator",
+      "INFOPLIST_PATH": "SampleApp.app/Info.plist",
+      "CONTENTS_FOLDER_PATH": "SampleApp.app"
+    }
+  }
+]

@@ -1,0 +1,28 @@
+{
+  "actionTitle": "Build \"SampleApp\"",
+  "analyzerWarningCount": 0,
+  "analyzerWarnings": [],
+  "destination": {
+    "architecture": "arm64",
+    "deviceId": "C268DCFB-3E56-4C43-8947-B25ED3833F7E",
+    "deviceName": "xcd · App · main · iphone",
+    "modelName": "iPhone 17",
+    "osBuildNumber": "24A434",
+    "osVersion": "27.0",
+    "platform": "iOS Simulator"
+  },
+  "endTime": 1790819202.954,
+  "errorCount": 0,
+  "errors": [],
+  "startTime": 1790819196.656,
+  "status": "succeeded",
+  "warningCount": 1,
+  "warnings": [
+    {
+      "className": "DVTTextDocumentLocation",
+      "issueType": "NoUsage",
+      "message": "Initialization of immutable value 'unusedValue' was never used; consider replacing with assignment to '_' or removing it",
+      "sourceURL": "file:///Users/dev/My%20Apps/SampleApp/SampleApp/Warnings.swift#EndingColumnNumber=8&EndingLineNumber=1&StartingColumnNumber=8&StartingLineNumber=1&Timestamp=812511996.6626559"
+    }
+  ]
+}
