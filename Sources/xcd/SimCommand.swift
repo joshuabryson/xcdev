@@ -20,9 +20,7 @@ struct SimCommand: AsyncParsableCommand {
         func run() async throws {
             try await Emit.run("sim boot", options) { services in
                 var ctx = try await services.open(worktree: options.worktree)
-                let name = try services.provisioner.deviceName(target.device, config: ctx.config)
-                let (device, retries) = try await services.provisioner.boot(name, in: &ctx)
-                return SimReport(action: "booted", device: name, udid: device.udid, retries: retries, worktree: ctx.state.name)
+                return try await services.provisioner.bootReport(target.device, in: &ctx)
             }
         }
     }
@@ -35,12 +33,7 @@ struct SimCommand: AsyncParsableCommand {
         func run() async throws {
             try await Emit.run("sim shutdown", options) { services in
                 let ctx = try await services.open(worktree: options.worktree)
-                let name = try services.provisioner.deviceName(target.device, config: ctx.config)
-                guard let device = ctx.state.devices[name] else {
-                    return SimReport(action: "not cloned", device: name, udid: nil, retries: 0, worktree: ctx.state.name)
-                }
-                let retries = try await services.provisioner.simctl(for: ctx).shutdown(udid: device.udid)
-                return SimReport(action: "shut down", device: name, udid: device.udid, retries: retries, worktree: ctx.state.name)
+                return try await services.provisioner.shutdownReport(target.device, in: ctx)
             }
         }
     }
@@ -53,14 +46,7 @@ struct SimCommand: AsyncParsableCommand {
         func run() async throws {
             try await Emit.run("sim erase", options) { services in
                 let ctx = try await services.open(worktree: options.worktree)
-                let name = try services.provisioner.deviceName(target.device, config: ctx.config)
-                guard let device = ctx.state.devices[name] else {
-                    return SimReport(action: "not cloned", device: name, udid: nil, retries: 0, worktree: ctx.state.name)
-                }
-                let simctl = services.provisioner.simctl(for: ctx)
-                let retries = try await simctl.shutdown(udid: device.udid)
-                try await simctl.erase(udid: device.udid)
-                return SimReport(action: "erased", device: name, udid: device.udid, retries: retries, worktree: ctx.state.name)
+                return try await services.provisioner.eraseReport(target.device, in: ctx)
             }
         }
     }
@@ -73,10 +59,7 @@ struct SimCommand: AsyncParsableCommand {
         func run() async throws {
             try await Emit.run("sim open", options) { services in
                 var ctx = try await services.open(worktree: options.worktree)
-                let name = try services.provisioner.deviceName(target.device, config: ctx.config)
-                let (device, retries) = try await services.provisioner.boot(name, in: &ctx)
-                try await services.provisioner.simctl(for: ctx).openSimulatorApp(udid: device.udid)
-                return SimReport(action: "opened", device: name, udid: device.udid, retries: retries, worktree: ctx.state.name)
+                return try await services.provisioner.openReport(target.device, in: &ctx)
             }
         }
     }
