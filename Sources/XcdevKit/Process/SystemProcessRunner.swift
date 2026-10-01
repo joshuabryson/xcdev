@@ -12,10 +12,21 @@ public struct SystemProcessRunner: ProcessRunning {
         if let directory = invocation.workingDirectory {
             process.currentDirectoryURL = URL(fileURLWithPath: directory)
         }
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
+        let pipes: (out: Pipe, err: Pipe)?
+        let logHandle: FileHandle?
+        if let file = invocation.outputFile {
+            logHandle = try Self.appendHandle(for: file)
+            pipes = nil
+            process.standardOutput = logHandle
+            process.standardError = logHandle
+        } else {
+            let captured = (out: Pipe(), err: Pipe())
+            pipes = captured
+            logHandle = nil
+            process.standardOutput = captured.out
+            process.standardError = captured.err
+        }
+        defer { try? logHandle?.close() }
         process.standardInput = FileHandle.nullDevice
 
         let exit = ExitSignal()
@@ -29,8 +40,8 @@ public struct SystemProcessRunner: ProcessRunning {
         }
 
         let handle = ProcessHandle(process)
-        async let outData = Self.readToEnd(stdout.fileHandleForReading)
-        async let errData = Self.readToEnd(stderr.fileHandleForReading)
+        async let outData = Self.readToEnd(pipes?.out)
+        async let errData = Self.readToEnd(pipes?.err)
 
         let timedOut = Flag()
         let timer = Task {
@@ -48,6 +59,7 @@ public struct SystemProcessRunner: ProcessRunning {
 
         if timedOut.isSet {
             let output = ProcessOutput(exitCode: status, stdoutData: out, stderrData: err)
+            if invocation.stopAtTimeout { return output }
             var error = XcdError.subprocess(invocation, output, code: .timeout,
                                             message: "`\(invocation.argv.prefix(3).joined(separator: " "))` timed out after \(invocation.timeout)",
                                             next: "re-run with a larger --timeout, or run `xcd doctor` if a simulator is stuck")
@@ -58,12 +70,25 @@ public struct SystemProcessRunner: ProcessRunning {
         return ProcessOutput(exitCode: status, stdoutData: out, stderrData: err)
     }
 
-    private static func readToEnd(_ handle: FileHandle) async -> Data {
-        await withCheckedContinuation { continuation in
+    private static func readToEnd(_ pipe: Pipe?) async -> Data {
+        guard let handle = pipe?.fileHandleForReading else { return Data() }
+        return await withCheckedContinuation { continuation in
             DispatchQueue.global().async {
                 continuation.resume(returning: (try? handle.readToEnd()) ?? Data())
             }
         }
+    }
+
+    /// Opens `file` for appending, creating it and its parent directories. Shared with the fake runner.
+    package static func appendHandle(for file: String) throws -> FileHandle {
+        let fm = FileManager.default
+        try fm.createDirectory(atPath: (file as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        if !fm.fileExists(atPath: file) { fm.createFile(atPath: file, contents: nil) }
+        guard let handle = FileHandle(forWritingAtPath: file) else {
+            throw XcdError(.internalError, "cannot write \(file)")
+        }
+        handle.seekToEndOfFile()
+        return handle
     }
 }
 

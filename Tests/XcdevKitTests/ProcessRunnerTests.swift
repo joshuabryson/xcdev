@@ -88,4 +88,35 @@ import XcdevTestSupport
         await #expect(throws: CancellationError.self) { try await task.value }
         #expect(ContinuousClock.now - start < .seconds(3))
     }
+
+    @Test func outputFileReceivesBothStreamsAndAppends() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xcd-out-\(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let file = dir + "/logs dir/out.log"
+        let first = try await runner.run(Invocation("/bin/sh", ["-c", "echo one; echo two >&2; exit 5"], outputFile: file))
+        #expect(first.exitCode == 5)
+        #expect(first.stdout.isEmpty && first.stderr.isEmpty)
+        _ = try await runner.run(Invocation("/bin/echo", ["three"], outputFile: file))
+        let text = try String(contentsOfFile: file, encoding: .utf8)
+        #expect(text.contains("one\n") && text.contains("two\n"))
+        #expect(text.hasSuffix("three\n"))
+    }
+
+    @Test func stopAtTimeoutReturnsWhatWasCaptured() async throws {
+        let start = ContinuousClock.now
+        let out = try await runner.run(Invocation("/bin/sh", ["-c", "echo started; exec sleep 10"],
+                                                  timeout: .milliseconds(500), stopAtTimeout: true))
+        #expect(out.stdoutString == "started\n")
+        #expect(ContinuousClock.now - start < .seconds(4))
+    }
+
+    @Test func fakeRunnerHonorsOutputFile() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xcd-fake-\(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let fake = FakeProcessRunner()
+        fake.stub(["xcrun", "xcodebuild"], exitCode: 65, stdout: "compiling\n", stderr: "** BUILD FAILED **\n")
+        let out = try await fake.run(Invocation("/usr/bin/xcrun", ["xcodebuild"], outputFile: dir + "/b.log"))
+        #expect(out.exitCode == 65 && out.stdout.isEmpty)
+        #expect(try String(contentsOfFile: dir + "/b.log", encoding: .utf8) == "compiling\n** BUILD FAILED **\n")
+    }
 }

@@ -34,7 +34,12 @@ public final class FakeProcessRunner: ProcessRunning {
         guard let stub else {
             throw XcdError(.internalError, "unstubbed command: \(invocation.commandLine)")
         }
-        return try stub.respond(invocation)
+        let output = try stub.respond(invocation)
+        guard let file = invocation.outputFile else { return output }
+        let handle = try SystemProcessRunner.appendHandle(for: file)
+        defer { try? handle.close() }
+        handle.write(output.stdout + output.stderr)
+        return ProcessOutput(exitCode: output.exitCode, stdoutData: Data(), stderrData: Data())
     }
 }
 

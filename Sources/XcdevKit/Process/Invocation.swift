@@ -7,14 +7,21 @@ public struct Invocation: Sendable, Equatable {
     public var environment: [String: String]
     public var workingDirectory: String?
     public var timeout: Duration
+    /// When set, stdout and stderr are appended to this file instead of captured; the returned output is then empty.
+    public var outputFile: String?
+    /// When true, reaching `timeout` ends the process and returns normally instead of throwing `.timeout`.
+    public var stopAtTimeout: Bool
 
     public init(_ executable: String, _ arguments: [String], environment: [String: String] = [:],
-                workingDirectory: String? = nil, timeout: Duration = .seconds(120)) {
+                workingDirectory: String? = nil, timeout: Duration = .seconds(120),
+                outputFile: String? = nil, stopAtTimeout: Bool = false) {
         self.executable = executable
         self.arguments = arguments
         self.environment = environment
         self.workingDirectory = workingDirectory
         self.timeout = timeout
+        self.outputFile = outputFile
+        self.stopAtTimeout = stopAtTimeout
     }
 
     /// argv with argv[0] = executable basename. Used for display and stub matching.
