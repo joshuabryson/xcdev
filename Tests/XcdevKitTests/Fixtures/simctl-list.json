@@ -1,0 +1,31 @@
+{
+  "devicetypes" : [
+    { "name" : "iPhone 18 Pro", "identifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro", "productFamily" : "iPhone" },
+    { "name" : "iPhone 18 Pro Max", "identifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro-Max", "productFamily" : "iPhone" },
+    { "name" : "iPhone 16", "identifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-16", "productFamily" : "iPhone" },
+    { "name" : "Apple Watch Series 11 (46mm)", "identifier" : "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Series-11-46mm", "productFamily" : "Apple Watch" },
+    { "name" : "Apple Vision Pro", "identifier" : "com.apple.CoreSimulator.SimDeviceType.Apple-Vision-Pro-4K", "productFamily" : "Apple Vision" }
+  ],
+  "runtimes" : [
+    { "name" : "iOS 18.0", "identifier" : "com.apple.CoreSimulator.SimRuntime.iOS-18-0", "version" : "18.0", "platform" : "iOS", "isAvailable" : true, "buildversion" : "22A3351",
+      "supportedDeviceTypes" : [ { "identifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-16", "name" : "iPhone 16", "productFamily" : "iPhone" } ] },
+    { "name" : "iOS 26.5", "identifier" : "com.apple.CoreSimulator.SimRuntime.iOS-26-5", "version" : "26.5", "platform" : "iOS", "isAvailable" : true, "buildversion" : "23F77",
+      "supportedDeviceTypes" : [ { "identifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-16", "name" : "iPhone 16", "productFamily" : "iPhone" } ] },
+    { "name" : "iOS 27.0", "identifier" : "com.apple.CoreSimulator.SimRuntime.iOS-27-0", "version" : "27.0", "platform" : "iOS", "isAvailable" : true, "buildversion" : "24A434",
+      "supportedDeviceTypes" : [
+        { "identifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro", "name" : "iPhone 18 Pro", "productFamily" : "iPhone" },
+        { "identifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro-Max", "name" : "iPhone 18 Pro Max", "productFamily" : "iPhone" },
+        { "identifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-16", "name" : "iPhone 16", "productFamily" : "iPhone" } ] },
+    { "name" : "watchOS 27.0", "identifier" : "com.apple.CoreSimulator.SimRuntime.watchOS-27-0", "version" : "27.0", "platform" : "watchOS", "isAvailable" : true, "buildversion" : "24R362",
+      "supportedDeviceTypes" : [ { "identifier" : "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Series-11-46mm", "name" : "Apple Watch Series 11 (46mm)", "productFamily" : "Apple Watch" } ] },
+    { "name" : "visionOS 27.0", "identifier" : "com.apple.CoreSimulator.SimRuntime.xrOS-27-0", "version" : "27.0", "platform" : "xrOS", "isAvailable" : true, "buildversion" : "24M362",
+      "supportedDeviceTypes" : [ { "identifier" : "com.apple.CoreSimulator.SimDeviceType.Apple-Vision-Pro-4K", "name" : "Apple Vision Pro", "productFamily" : "Apple Vision" } ] }
+  ],
+  "devices" : {
+    "com.apple.CoreSimulator.SimRuntime.iOS-27-0" : [
+      { "udid" : "4CEABB59-81A5-4060-9573-99D2BA1BA97B", "name" : "iPhone 18 Pro", "state" : "Shutdown", "isAvailable" : true,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro", "dataPath" : "/tmp/x/data", "logPath" : "/tmp/x/log" }
+    ]
+  },
+  "pairs" : {}
+}
