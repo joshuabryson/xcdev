@@ -129,6 +129,40 @@ import XcdevTestSupport
         #expect(pkillCalls == 0)
     }
 
+    /// Simctl answered, but its JSON didn't parse. The decoding error's coding path names a
+    /// CoreSimulator runtime, which must not read as CoreSimulator's failure: a restart wouldn't help.
+    @Test func aListThatDoesNotParseIsNotFixedByRestarting() async throws {
+        let (project, _, _, _) = try await setup()
+        defer { project.remove() }
+        fake.stub(["xcrun", "simctl", "list", "-j"],
+                  stdout: #"{"devicetypes": [], "runtimes": [], "devices": {"com.apple.CoreSimulator.SimRuntime.iOS-27-0": [{"udid": 7}]}}"#)
+        fake.stub(["pkill"]) { _ in ProcessOutput() }
+        let report = await doctor(project).run(fix: true, checks: [CoreSimulatorCheck()], from: nil)
+        let problem = try #require(report.problems.first)
+        #expect(problem.message.hasPrefix("simctl couldn't list simulators: could not parse `simctl list -j` output: "))
+        #expect(problem.message.contains("com.apple.CoreSimulator.SimRuntime.iOS-27-0"))
+        #expect(problem.action == nil && problem.next != nil && !problem.fixed)
+        #expect(pkillCalls == 0)
+    }
+
+    /// Stderr that merely mentions a connection isn't CoreSimulator's broken connection.
+    @Test func anUnrelatedConnectionErrorIsNotFixedByRestarting() async throws {
+        let (project, _, _, _) = try await setup()
+        defer { project.remove() }
+        fake.stub(["xcrun", "simctl", "list", "-j"], exitCode: 1,
+                  stderr: "error: could not open a connection to the license agreement server")
+        fake.stub(["pkill"]) { _ in ProcessOutput() }
+        let report = await doctor(project).run(fix: true, checks: [CoreSimulatorCheck()], from: nil)
+        #expect(report.problems.first?.action == nil)
+        #expect(pkillCalls == 0)
+        // A connection to the service that broke still counts.
+        for stderr in ["CoreSimulatorService connection became invalid", "Connection interrupted", "The connection was invalidated"] {
+            let failure = XcdError(.simulatorFailed, "`xcrun simctl list` failed (exit 1)",
+                                   details: ["command: xcrun simctl list -j", "exit: 1", stderr])
+            #expect(CoreSimulatorCheck.isCoreSimulatorFailure(failure), "\(stderr)")
+        }
+    }
+
     /// With nothing on stderr, the error ends at its exit code, without "exit: 1" detail noise.
     @Test func aListFailureWithoutStderrEndsAtItsExitCode() async throws {
         let (project, _, _, _) = try await setup()

@@ -46,17 +46,21 @@ public struct CoreSimulatorCheck: DoctorCheck {
     }
 
     /// Whether a failed `simctl list` is CoreSimulator's fault, so restarting it may help. True when the list
-    /// timed out (the service is hung), or when its stderr names CoreSimulator, its device set, or a broken
-    /// connection to the service (e.g. "Failed to initialize simulator device set.", "CoreSimulatorService
+    /// timed out (the service is hung), or when simctl failed and its stderr names CoreSimulator, its device set,
+    /// or a broken connection to the service (e.g. "Failed to initialize simulator device set.", "CoreSimulatorService
     /// connection became invalid", NSMachErrorDomain errors). False when xcrun itself failed ("xcrun: error:",
-    /// e.g. no Xcode selected), when simctl exited without saying why, or when its output couldn't be parsed:
-    /// a restart wouldn't fix those, and it would shut down every simulator on the Mac.
+    /// e.g. no Xcode selected), when simctl exited without saying why, and whenever simctl didn't fail at all
+    /// (no `command:` detail), such as output that couldn't be parsed, whose decoding error quotes runtime ids
+    /// like "com.apple.CoreSimulator.SimRuntime.iOS-27-0": a restart wouldn't fix those, and it would shut down
+    /// every simulator on the Mac.
     static func isCoreSimulatorFailure(_ error: XcdError) -> Bool {
         if error.code == .timeout { return true }
+        guard error.details.contains(where: { $0.hasPrefix("command: ") }) else { return false }
         let stderr = error.details.filter { !$0.hasPrefix("command: ") && !$0.hasPrefix("exit: ") }
             .joined(separator: "\n").lowercased()
         if stderr.contains("xcrun: error:") { return false }
-        let markers = ["coresimulator", "device set", "nsmacherrordomain", "mach error", "connection"]
+        let markers = ["coresimulator", "device set", "nsmacherrordomain", "mach error",
+                       "connection became invalid", "connection invalid", "connection interrupted", "invalidated"]
         return markers.contains { stderr.contains($0) }
     }
 }
