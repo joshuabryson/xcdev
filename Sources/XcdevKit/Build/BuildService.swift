@@ -33,14 +33,28 @@ public struct BuildService: Sendable {
     /// One-line progress messages (the CLI prints them on stderr).
     public let progress: @Sendable (String) -> Void
     public let now: @Sendable () -> Date
+    /// Runs `pre-build` before every build and test, and `post-launch` for RunService. Nil runs no hooks.
+    public let hooks: HookRunner?
 
     public init(runner: any ProcessRunning, provisioner: DeviceProvisioner,
                 progress: @escaping @Sendable (String) -> Void = { _ in },
-                now: @escaping @Sendable () -> Date = { Date() }) {
+                now: @escaping @Sendable () -> Date = { Date() }, hooks: HookRunner? = nil) {
         self.runner = runner
         self.provisioner = provisioner
         self.progress = progress
         self.now = now
+        self.hooks = hooks
+    }
+
+    /// Runs the `pre-build` hook first, before the project, scheme, or simulator is resolved, so a hook can
+    /// generate the project (xcodegen, tuist). Its context names the requested device, or the default one, but
+    /// has no UDID, runtime, or app yet. Only Xcode is resolved first, for DEVELOPER_DIR.
+    func runPreBuild(device requested: String?, in ctx: inout WorktreeContext) async throws {
+        guard let hooks, ctx.config.hooks?.command(for: .preBuild) != nil else { return }
+        _ = try await provisioner.ensureXcode(&ctx)
+        let device = ctx.config.allDevices.isEmpty ? nil : try provisioner.deviceName(requested, config: ctx.config)
+        try await hooks.run(.preBuild, config: ctx.config,
+                            context: .beforeBuild(ctx: ctx, device: device, output: hooks.output), logs: ctx.paths)
     }
 
     /// Resolves the Xcode, the container, the target (cloning its simulator on first use), and the scheme.
@@ -55,6 +69,7 @@ public struct BuildService: Sendable {
     }
 
     public func build(_ options: BuildOptions, in ctx: inout WorktreeContext) async throws -> BuildReport {
+        try await runPreBuild(device: options.device, in: &ctx)
         let plan = try await plan(device: options.device, scheme: options.scheme, role: .app, in: &ctx)
         let paths = ctx.paths
         let run = try await runWithResultBundle(plan, kind: "build", paths: paths, timeout: options.timeout,

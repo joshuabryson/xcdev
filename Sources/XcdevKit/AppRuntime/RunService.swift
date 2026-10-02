@@ -158,6 +158,14 @@ public struct RunService: Sendable {
         state.lastLaunch = LaunchRecord(target: target.name, bundleId: product.bundleId, processName: product.executableName,
                                         pid: pid, appLog: appLog, launchedAt: launchedAt)
         try AppStateStore.save(state, paths)
+        if crashedAtLaunch == nil {
+            do {
+                try await builds.hooks?.run(.postLaunch, in: ctx, device: target.configDevice)
+            } catch var error as XcdError where error.code == .hookFailed || error.code == .timeout {
+                error.details.append("the app is still running (pid \(pid)); stop it with `xcd terminate`")
+                throw error
+            }
+        }
         let outcome: LaunchOutcome
         if let crashedAtLaunch {
             outcome = crashedAtLaunch

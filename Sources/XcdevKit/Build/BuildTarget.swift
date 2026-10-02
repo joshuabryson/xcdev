@@ -14,6 +14,9 @@ public struct BuildTarget: Sendable, Equatable {
         self.device = device
     }
 
+    /// The config device name, or nil for a package built for the host.
+    public var configDevice: String? { name == Self.hostName ? nil : name }
+
     public var summary: String {
         guard let device else { return "\(name) (macOS)" }
         return "\(name) (\(device.deviceType), \(device.runtime))"

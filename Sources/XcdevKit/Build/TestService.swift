@@ -26,6 +26,7 @@ public struct TestService: Sendable {
     public init(builds: BuildService) { self.builds = builds }
 
     public func test(_ options: TestOptions, in ctx: inout WorktreeContext) async throws -> TestReport {
+        try await builds.runPreBuild(device: options.device, in: &ctx)
         let plan = try await builds.plan(device: options.device, scheme: options.scheme, role: .test, in: &ctx)
         let paths = ctx.paths
         let run = try await builds.runWithResultBundle(plan, kind: "test", paths: paths, timeout: options.timeout,

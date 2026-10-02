@@ -31,7 +31,8 @@ public struct Services: Sendable {
 
     public var worktrees: WorktreeService { WorktreeService(runner: runner, globalPaths: globalPaths) }
     public var provisioner: DeviceProvisioner { DeviceProvisioner(runner: runner, globalPaths: globalPaths) }
-    public var builds: BuildService { BuildService(runner: runner, provisioner: provisioner, progress: progress) }
+    public var hooks: HookRunner { HookRunner(runner: runner, output: output, progress: progress) }
+    public var builds: BuildService { BuildService(runner: runner, provisioner: provisioner, progress: progress, hooks: hooks) }
     public var tests: TestService { TestService(builds: builds) }
     public var apps: RunService {
         RunService(builds: builds, watcher: CrashWatcher(probe: SystemProcessProbe(), locator: CrashReportLocator()))

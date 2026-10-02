@@ -24,6 +24,15 @@ public struct ContextInfo: Reportable {
                            developerDir: ctx.xcode?.developerDir, output: output?.rawValue)
     }
 
+    /// The context before a build resolves its project, simulator, and app (for `pre-build`): the requested device's
+    /// name, but no UDID, runtime, or app, even when an earlier build already has them.
+    public static func beforeBuild(ctx: WorktreeContext, device: String?, output: OutputFormat? = nil) -> ContextInfo {
+        ContextInfo(projectRoot: ctx.location.projectRoot, worktree: ctx.location.worktreeRoot,
+                    worktreeName: ctx.state.name, device: device, udid: nil, runtime: nil,
+                    derivedData: ctx.paths.derivedData, appPath: nil, bundleId: nil,
+                    developerDir: ctx.xcode?.developerDir, output: output?.rawValue)
+    }
+
     /// The context of a worktree known only by its state (for worktree hooks): no device, no app.
     public static func worktree(_ state: WorktreeState, output: OutputFormat? = nil) -> ContextInfo {
         ContextInfo(projectRoot: state.projectRoot, worktree: state.path, worktreeName: state.name, device: nil, udid: nil,
