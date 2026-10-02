@@ -9,7 +9,7 @@ struct InitCommand: AsyncParsableCommand {
     @Flag(help: "Detect the project and print the decisions to ask the user. Writes nothing.") var plan = false
     @Flag(help: "Write the config using every recommendation (the default).") var defaults = false
     @Option(name: .customLong("set"), parsing: .upToNextOption,
-            help: "Answers as KEY=VALUE, e.g. --set devices.default=\"iPhone 17\" xcode=system. Repeatable.")
+            help: "Answers as KEY=VALUE, e.g. --set devices.default=\"iPhone 17 Pro\" xcode=system. Repeatable.")
     var answers: [String] = []
     @Flag(help: "Replace an existing .xcdev.yml.") var force = false
     @OptionGroup var options: GlobalOptions

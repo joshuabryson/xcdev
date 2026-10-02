@@ -1,3 +1,5 @@
+import Foundation
+
 /// One documented config key, as `xcd config explain` shows it. User-named keys appear as `<name>`.
 public struct ConfigKeyDoc: Codable, Sendable, Equatable {
     /// e.g. "devices.<name>.runtime".

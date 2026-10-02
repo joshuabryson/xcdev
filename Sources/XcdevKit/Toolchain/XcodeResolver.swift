@@ -1,3 +1,5 @@
+import Foundation
+
 public enum XcodeResolver {
     /// spec: nil/"system" (xcode-select target, else newest stable), "latest" (newest stable),
     /// "beta" (newest beta), a version prefix ("27", "27.0"), or an absolute .app path.

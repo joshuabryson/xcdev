@@ -1,3 +1,5 @@
+import Foundation
+
 public struct TestReport: Reportable {
     public enum Outcome: String, Codable, Sendable {
         case passed, failed

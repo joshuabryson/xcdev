@@ -1,3 +1,5 @@
+import Foundation
+
 /// A compiler or test diagnostic, passed through unchanged apart from formatting.
 public struct Diagnostic: Codable, Sendable, Equatable {
     public enum Severity: String, Codable, Sendable { case error, warning }

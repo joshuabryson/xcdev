@@ -122,7 +122,7 @@ public enum InitAnswers {
         for pair in pairs {
             guard let equals = pair.firstIndex(of: "="), equals != pair.startIndex else {
                 throw XcdError(.usage, "--set \(pair) is not KEY=VALUE",
-                               next: "pass answers like `--set devices.default=\"iPhone 17\" xcode=system`")
+                               next: "pass answers like `--set devices.default=\"iPhone 17 Pro\" xcode=system`")
             }
             answers[String(pair[..<equals]).trimmingCharacters(in: .whitespaces)] = String(pair[pair.index(after: equals)...])
         }

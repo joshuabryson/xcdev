@@ -1,3 +1,5 @@
+import Foundation
+
 /// A Markdown guide written for agents, compiled into the binary so it always matches this version of xcd.
 public struct Guide: Codable, Sendable, Equatable {
     public let topic: String

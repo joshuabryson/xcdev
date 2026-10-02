@@ -1,3 +1,5 @@
+import Foundation
+
 /// xcdev's own failure categories. Diagnostics from underlying tools pass through unchanged
 /// inside results and are never mapped to these codes. A code never changes meaning once released.
 public enum ErrorCode: String, Codable, Sendable, CaseIterable {

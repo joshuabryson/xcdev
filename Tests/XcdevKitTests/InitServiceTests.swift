@@ -133,9 +133,10 @@ import XcdevTestSupport
     }
 
     @Test func setAnswersParse() throws {
-        #expect(try InitAnswers.parse(["devices.default=iPhone 17", "xcode=system", "xcode=27.0"])
-                == ["devices.default": "iPhone 17", "xcode": "27.0"])
+        #expect(try InitAnswers.parse(["devices.default=iPhone 17 Pro", "xcode=system", "xcode=27.0"])
+                == ["devices.default": "iPhone 17 Pro", "xcode": "27.0"])
         let error = #expect(throws: XcdError.self) { try InitAnswers.parse(["xcode"]) }
         #expect(error?.message == "--set xcode is not KEY=VALUE")
+        #expect(error?.next == "pass answers like `--set devices.default=\"iPhone 17 Pro\" xcode=system`")
     }
 }
