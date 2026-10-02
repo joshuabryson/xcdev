@@ -19,7 +19,8 @@ struct SetupDoctorIntegrationTests {
     }
 
     /// The round trip: init → wt create → build → run → logs → wt remove → doctor reports nothing to fix.
-    /// Doctor runs without --fix: this test's private XCDEV_HOME makes every other registry's clones look orphaned.
+    /// Doctor runs without --fix, so it changes nothing on this Mac. This test's private XCDEV_HOME doesn't know other
+    /// registries' projects, so their clones are reported (never deleted, even with --fix) and filtered out below.
     @Test func initWorktreeBuildRunLogsRemoveThenDoctorIsClean() async throws {
         let project = try bareAppProject()
         try await withCleanup(project) { svc in

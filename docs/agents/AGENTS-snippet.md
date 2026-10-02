@@ -10,5 +10,6 @@ working in parallel never collide.
   `file:line:col: error:` lines.
 - Run: `xcd run` builds, installs, launches, and watches for a crash; `xcd logs` and `xcd logs --app` show output.
 - Every failure ends with `next:`; do that. `--json` gives one JSON object per command; `xcd help errors` lists codes.
-- If simulators or worktrees misbehave: `xcd doctor`, then `xcd doctor --fix`.
+- If simulators or worktrees misbehave: `xcd doctor`, then `xcd doctor --fix`. Read the problems first: `--fix` may
+  restart CoreSimulator, which shuts down every agent's simulators.
 - No `.xcdev.yml` yet? Follow `xcd guide setup`.

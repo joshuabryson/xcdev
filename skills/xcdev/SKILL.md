@@ -27,7 +27,7 @@ it gives each git worktree its own simulator clones and DerivedData, so parallel
 | Simulator | `xcd sim boot`, `xcd sim open`, `xcd sim erase` |
 | Context for scripts | `xcd context` (prints XCD_* variables) |
 | Explain a config key | `xcd config explain <key>` |
-| Fix simulators or worktrees | `xcd doctor`, then `xcd doctor --fix` |
+| Fix simulators or worktrees | `xcd doctor`, then `xcd doctor --fix` (read the problems first: it may restart CoreSimulator, which shuts down every agent's simulators) |
 
 ## Reading results
 

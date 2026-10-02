@@ -107,14 +107,17 @@ public struct TemplatesCheck: DoctorCheck {
 
 /// xcd-named clones that no worktree records.
 ///
-/// Only a clone of a project this registry knows is deleted by `--fix`: another xcd state folder (a different
+/// Only a clone of a project this registry knows is deleted by `--fix`. Another xcd state folder (a different
 /// `XCDEV_HOME`, or a fresh one with no registry.json yet) has its own registry and clones, which this one can't
-/// tell apart from orphans. Entries an earlier fix in this run dropped (`formerEntries`) still count as known. Those are reported with the command to delete them by hand, and never fixed.
+/// tell apart from orphans, so a clone of an unknown project is reported with the command to delete it by hand,
+/// and never fixed. Entries an earlier fix in this run dropped (`formerEntries`) still count as known.
 ///
 /// A clone is left alone while any registry entry it could belong to says so: that worktree is being created or
-/// removed, its worktree.json can't be read, or the clone is younger than `graceSeconds` (or of unknown age), as
-/// another agent may be cloning it right now. Nothing at all is reported while the registry can't be read.
-/// Ownership is decided by name prefix against every entry, since project and device names may contain " · ".
+/// removed, its checkout can't be reached (`CheckoutPresence`), its worktree.json can't be read, or the clone is
+/// younger than `graceSeconds` (or of unknown age), as another agent may be cloning it right now. A clone whose
+/// worktree exists is deleted only while it is shut down; a booted one may be in use, so it is only reported.
+/// Nothing at all is reported while the registry can't be read. Ownership is decided by name prefix against every
+/// entry, since project and device names may contain " · ".
 public struct OrphanedClonesCheck: DoctorCheck {
     public let id = "orphaned-clones"
     public let graceSeconds: TimeInterval

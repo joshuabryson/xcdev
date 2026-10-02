@@ -32,7 +32,8 @@ xcd help                  # every command, project command, and plugin
 - `skills/xcdev/SKILL.md` is an agent skill, and `docs/agents/AGENTS-snippet.md` is a snippet for a project's
   `AGENTS.md`, that teach agents to use `xcd`.
 - Every failure ends with a `next:` line, and `--json` prints one JSON object per command.
-- `xcd doctor` checks simulators, worktrees, and the project's setup; `xcd doctor --fix` repairs what it can.
+- `xcd doctor` checks simulators, worktrees, and the project's setup; `xcd doctor --fix` repairs what it can. It may
+  restart CoreSimulator, which shuts down every agent's simulators, so read the problems first.
 
 ## Extending
 
