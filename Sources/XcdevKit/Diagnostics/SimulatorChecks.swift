@@ -100,3 +100,106 @@ public struct TemplatesCheck: DoctorCheck {
         }
     }
 }
+
+/// xcd-named clones that no worktree records. A clone younger than `graceSeconds` whose worktree is registered
+/// is left alone: another agent may be cloning it right now.
+///
+/// Nothing is reported while the registry can't be read: every clone would look orphaned, including other
+/// agents'. Nor is a clone whose worktree a `wt create` or `wt remove` is working on, or whose worktree.json
+/// couldn't be read, or whose age is unknown while its worktree is registered.
+public struct OrphanedClonesCheck: DoctorCheck {
+    public let id = "orphaned-clones"
+    public let graceSeconds: TimeInterval
+    public init(graceSeconds: TimeInterval = 600) { self.graceSeconds = graceSeconds }
+
+    public func detect(_ env: DoctorEnvironment) async -> [DoctorProblem] {
+        guard env.registryError == nil, let catalog = env.catalog else { return [] }
+        let recorded = env.recordedClones
+        return catalog.devices.compactMap { device in
+            guard device.name.hasPrefix(SimNaming.clonePrefix), !recorded.contains(device.udid) else { return nil }
+            let parts = device.name.dropFirst(SimNaming.clonePrefix.count).components(separatedBy: " · ")
+            let entry = parts.count == 3 ? env.registry.first { $0.project == parts[0] && $0.name == parts[1] } : nil
+            var owner: RegistryEntry?
+            if let entry {
+                if env.isBusy(entry) { return nil }
+                if FileManager.default.fileExists(atPath: entry.path) {
+                    guard env.states[entry.id] != nil else { return nil }        // its worktree.json is unreadable
+                    guard let age = env.age(of: device), age >= graceSeconds else { return nil }
+                    owner = entry
+                }
+            }
+            let why = owner.map { "\($0.project)/\($0.name) doesn't record it" } ?? "its worktree no longer exists"
+            return DoctorProblem(check: id, message: "\(device.name) (\(device.udid)) is orphaned: \(why)",
+                                 action: .deleteSimulator, fix: "shut it down and delete it", subject: device.udid)
+        }
+    }
+
+    public func fix(_ problem: DoctorProblem, _ env: DoctorEnvironment) async throws {
+        guard let udid = problem.subject else { return }
+        _ = try? await env.simctl.shutdown(udid: udid)
+        try await env.simctl.delete(udid: udid)
+    }
+}
+
+/// Recorded clones that are unavailable (their runtime was removed) or stuck booting or shutting down.
+public struct StuckClonesCheck: DoctorCheck {
+    public let id = "stuck-clones"
+    static let transient: Set<String> = ["Booting", "Shutting Down", "Creating"]
+    /// How long a transient state must last to be reported as stuck.
+    public let patience: Duration
+    /// How long the fix waits for a stuck clone to settle by itself before shutting it down: a cold boot of a
+    /// fresh clone can take a minute or two, and another agent may be waiting on it.
+    static let settleTimeout = Duration.seconds(120)
+    static let settlePoll = Duration.seconds(5)
+
+    public init(patience: Duration = .seconds(5)) { self.patience = patience }
+
+    public func detect(_ env: DoctorEnvironment) async -> [DoctorProblem] {
+        guard let catalog = env.catalog else { return [] }
+        let recorded = env.recordedClones
+        let clones = catalog.devices.filter { recorded.contains($0.udid) }
+        var problems = clones.filter { !$0.isAvailable }.map { device in
+            DoctorProblem(check: id, message: "\(device.name) (\(device.udid)) is unavailable; its runtime may have been removed",
+                          action: .deleteSimulator, fix: "delete it; it is cloned again on next use", subject: device.udid)
+        }
+        let busy = clones.filter { $0.isAvailable && Self.transient.contains($0.state) }
+        guard !busy.isEmpty else { return problems }
+        try? await env.sleep(patience)
+        let later = (try? await env.simctl.catalog()) ?? catalog
+        for device in busy {
+            guard let now = later.device(udid: device.udid), Self.transient.contains(now.state) else { continue }
+            problems.append(DoctorProblem(check: id, message: "\(device.name) (\(device.udid)) is stuck in \(now.state)",
+                                          action: .shutDownSimulator,
+                                          fix: "if it is still stuck in 2 minutes, shut it down, or delete it if that fails (it is cloned again on next use)",
+                                          subject: device.udid))
+        }
+        return problems
+    }
+
+    public func fix(_ problem: DoctorProblem, _ env: DoctorEnvironment) async throws {
+        guard let udid = problem.subject else { return }
+        if problem.action == .shutDownSimulator {
+            try await waitWhileTransient(udid, env)
+            let out = try await env.runner.run(.xcrun(["simctl", "shutdown", udid], developerDir: nil, timeout: .seconds(60)))
+            if out.succeeded || out.stderrString.contains("current state: Shutdown") { return }
+        }
+        try await env.simctl.delete(udid: udid)
+        try env.forget(udid: udid)
+    }
+
+    /// Polls the clone for up to `settleTimeout`. Returns while it is still transient; throws `DoctorLeftAlone`
+    /// if it settled or disappeared meanwhile, so a slow boot is never cut short.
+    func waitWhileTransient(_ udid: String, _ env: DoctorEnvironment) async throws {
+        var waited = Duration.zero
+        while waited < Self.settleTimeout {
+            try await env.sleep(Self.settlePoll)
+            waited += Self.settlePoll
+            guard let device = try await env.simctl.catalog().device(udid: udid) else {
+                throw DoctorLeftAlone(note: "\(udid) was deleted meanwhile; left alone")
+            }
+            if !Self.transient.contains(device.state) {
+                throw DoctorLeftAlone(note: "\(device.name) (\(udid)) is now \(device.state); left alone")
+            }
+        }
+    }
+}

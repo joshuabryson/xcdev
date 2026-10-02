@@ -27,6 +27,8 @@ public struct DoctorReport: Reportable {
     public struct CheckResult: Codable, Sendable, Equatable {
         public let id: String
         public let problems: [DoctorProblem]
+        /// Things another xcd is working on (`DoctorCheck.inProgress`); they don't count as problems.
+        public var inProgress: [String] = []
     }
 
     public let fixMode: Bool
@@ -41,7 +43,8 @@ public struct DoctorReport: Reportable {
         let fixed = problems.count - remaining.count
         var lines = ["doctor: \(problems.count) problem\(problems.count == 1 ? "" : "s")" + (fixMode ? ", \(fixed) fixed" : "")]
         for check in checks {
-            if check.problems.isEmpty { lines.append("ok       \(check.id)") }
+            if check.problems.isEmpty && check.inProgress.isEmpty { lines.append("ok       \(check.id)") }
+            for note in check.inProgress { lines.append("busy     \(check.id)  \(note)") }
             for problem in check.problems {
                 var line: String
                 if problem.fixed {
@@ -93,8 +96,12 @@ public struct DoctorService: Sendable {
 
     /// Every check, in the order fixes should happen: worktrees before the clones they leave behind.
     public static var allChecks: [any DoctorCheck] {
-        [CoreSimulatorCheck(), TemplatesCheck()]
+        [CoreSimulatorCheck(), MissingWorktreesCheck(), IncompleteWorktreesCheck(), OrphanedClonesCheck(),
+         StuckClonesCheck(), TemplatesCheck()]
     }
+
+    /// `xcd prune`: worktrees that are gone, and clones nothing owns.
+    public static var pruneChecks: [any DoctorCheck] { [MissingWorktreesCheck(), OrphanedClonesCheck()] }
 
     /// `directory` is where doctor was run; inside a project, its setup is checked too.
     public func run(fix: Bool, checks: [any DoctorCheck] = allChecks, from directory: String?,
@@ -103,20 +110,26 @@ public struct DoctorService: Sendable {
         var results: [DoctorReport.CheckResult] = []
         for check in checks where check.applies(env) {
             var problems = await check.detect(env)
+            var inProgress = check.inProgress(env)
             if fix, problems.contains(where: { $0.action != nil }) {
+                var leftAlone: Set<Int> = []
                 for index in problems.indices where problems[index].action != nil {
                     do {
                         try await check.fix(problems[index], env)
                         problems[index].fixed = true
+                    } catch let left as DoctorLeftAlone {
+                        inProgress.append(left.note)
+                        leftAlone.insert(index)
                     } catch let error as XcdError {
                         problems[index].fixError = error.message + (error.next.map { "; \($0)" } ?? "")
                     } catch {
                         problems[index].fixError = "\(error)"
                     }
                 }
+                problems = problems.indices.filter { !leftAlone.contains($0) }.map { problems[$0] }
                 env = await environment(from: directory)
             }
-            results.append(.init(id: check.id, problems: problems))
+            results.append(.init(id: check.id, problems: problems, inProgress: inProgress))
         }
         return DoctorReport(fixMode: fix, checks: results, disk: includeDisk ? await disk(env) : nil)
     }
@@ -142,9 +155,15 @@ public struct DoctorService: Sendable {
         for entry in registry where FileManager.default.fileExists(atPath: entry.path) {
             if let state = try? WorktreeStateStore.load(WorktreePaths(root: entry.path)) { states[entry.id] = state }
         }
+        // Probed once here, never again by the checks: see `DoctorEnvironment.busy`.
+        let worktrees = WorktreeService(runner: runner, globalPaths: globalPaths)
+        let busy = Set(registry.filter {
+            FileLock.isHeld(at: worktrees.lockPath(projectRoot: $0.projectRoot, worktree: $0.name))
+        }.map(\.id))
         return DoctorEnvironment(runner: runner, globalPaths: globalPaths, catalog: catalog, catalogFailure: catalogFailure,
                                  registry: registry, registryError: registryError, states: states,
-                                 project: await project(from: directory), discovery: discovery, now: now(), sleep: sleep)
+                                 project: await project(from: directory), discovery: discovery, now: now(), sleep: sleep,
+                                 busy: busy)
     }
 
     /// The project at `directory`, read-only: a missing or invalid .xcdev.yml is recorded, not thrown.
