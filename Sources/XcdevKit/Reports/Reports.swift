@@ -75,6 +75,7 @@ extension WorktreeRemoval: Reportable {
         if stateMissing {
             lines.append("note: the worktree's state was already gone, so any simulators it cloned may remain (named \"xcd · \(project) · \(name) · …\")")
         }
+        lines += warnings.map { "warning: " + $0 }
         return lines.joined(separator: "\n")
     }
 }

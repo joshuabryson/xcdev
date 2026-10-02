@@ -22,10 +22,13 @@ public struct WorktreeContext: Sendable {
 public struct WorktreeService: Sendable {
     public let runner: any ProcessRunning
     public let globalPaths: GlobalPaths
+    /// Runs `post-worktree-create` and `pre-worktree-remove`. Nil runs no hooks.
+    public let hooks: HookRunner?
 
-    public init(runner: any ProcessRunning, globalPaths: GlobalPaths) {
+    public init(runner: any ProcessRunning, globalPaths: GlobalPaths, hooks: HookRunner? = nil) {
         self.runner = runner
         self.globalPaths = globalPaths
+        self.hooks = hooks
     }
 
     var registry: Registry { Registry(paths: globalPaths) }
@@ -96,13 +99,49 @@ public struct WorktreeService: Sendable {
         return URL(fileURLWithPath: absolute).standardizedFileURL.path
     }
 
-    /// Creates `<worktrees root>/<name>` on branch `<name>` (reusing the branch if it exists).
-    /// Never clones simulators. Idempotent, and serialized per project across processes.
+    /// Creates `<worktrees root>/<name>` on branch `<name>` (reusing the branch if it exists), then runs the new
+    /// checkout's `post-worktree-create` hook. Never clones simulators. Idempotent, and serialized per project
+    /// across processes.
+    ///
+    /// The hook can take 30 minutes, so it runs outside the per-project lock, which is held only to add the
+    /// checkout and again to mark it ready (or roll it back). The worktree's own lock is held throughout, so no
+    /// other create or remove of this name can see it half-made, while other worktrees are never blocked.
     public func create(name: String, from ref: String? = nil,
                        in ctx: WorktreeContext) async throws -> (state: WorktreeState, created: Bool) {
         try Self.validate(name: name)
-        return try await FileLock.withLock(at: lockPath(projectRoot: ctx.location.projectRoot)) {
-            try await createLocked(name: name, from: ref, in: ctx)
+        let projectRoot = ctx.location.projectRoot
+        return try await FileLock.withLock(at: lockPath(projectRoot: projectRoot, worktree: name)) {
+            let checkout = try await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) {
+                try await addCheckout(name: name, from: ref, in: ctx)
+            }
+            guard checkout.created else { return (checkout.state, false) }
+            var state = checkout.state
+            do {
+                try await runPostCreateHook(state, in: ctx)
+                state.status = .ready
+                try await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) {
+                    try WorktreeStateStore.save(state, WorktreePaths(root: state.path))
+                    try await registry.upsert(RegistryEntry(state))
+                }
+                return (state, true)
+            } catch {
+                _ = try? await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) {
+                    await rollBack(state, worktreeAdded: true, branchCreated: checkout.branchCreated)
+                }
+                guard var error = error as? XcdError else { throw error }
+                switch error.code {
+                case .hookFailed:
+                    error.next = "fix hooks.post-worktree-create (its output is in the log), then re-run `xcd wt create \(name)`"
+                case .configInvalid:
+                    error.next = "fix .xcdev.yml on branch '\(name)', then re-run `xcd wt create \(name)`"
+                default:
+                    break
+                }
+                error.details.append(checkout.branchCreated
+                    ? "the worktree was not created: its checkout and branch were rolled back"
+                    : "the worktree was not created: its checkout was rolled back, and branch '\(name)', which already existed, was kept")
+                throw error
+            }
         }
     }
 
@@ -112,13 +151,45 @@ public struct WorktreeService: Sendable {
         return globalPaths.locksDirectory + "/worktrees-" + key + ".lock"
     }
 
-    private func createLocked(name: String, from ref: String?,
-                              in ctx: WorktreeContext) async throws -> (state: WorktreeState, created: Bool) {
+    /// One worktree's lock, held (before the project lock, never after it) for a whole create or remove,
+    /// including its hook. `worktree` is a validated name, so it is safe in a file name.
+    func lockPath(projectRoot: String, worktree: String) -> String {
+        String(lockPath(projectRoot: projectRoot).dropLast(".lock".count)) + "--" + worktree + ".lock"
+    }
+
+    /// The checkout's own config, which its hooks (and their scripts) come from, or nil when it has no
+    /// .xcdev.yml. Never the caller's config: the hook's script may not exist on this checkout's branch.
+    func hookConfig(worktree: String, projectRoot: String) throws -> XcdevConfig? {
+        do {
+            return try ConfigLoader.load(worktreeRoot: worktree, projectRoot: projectRoot)
+        } catch let error as XcdError where error.code == .configMissing {
+            return nil
+        }
+    }
+
+    /// Runs the new checkout's `post-worktree-create`, logging to the calling worktree so the log survives a rollback.
+    private func runPostCreateHook(_ state: WorktreeState, in ctx: WorktreeContext) async throws {
+        guard let hooks, let config = try hookConfig(worktree: state.path, projectRoot: ctx.location.projectRoot) else {
+            return
+        }
+        try await hooks.run(.postWorktreeCreate, config: config, context: .worktree(state, output: hooks.output),
+                            logs: ctx.paths)
+    }
+
+    /// The result of the locked part of `create`: an `incomplete` new checkout, or an existing ready one.
+    private struct Checkout: Sendable {
+        var state: WorktreeState
+        var created: Bool
+        var branchCreated: Bool
+    }
+
+    private func addCheckout(name: String, from ref: String?, in ctx: WorktreeContext) async throws -> Checkout {
         let projectRoot = ctx.location.projectRoot
         let existing = try registry.entries().first(where: { $0.projectRoot == projectRoot && $0.name == name })
         if let existing, existing.status == .ready, FileManager.default.fileExists(atPath: existing.path) {
-            if let state = try WorktreeStateStore.load(WorktreePaths(root: existing.path)) { return (state, false) }
-            return (try await open(from: existing.path).state, false)
+            let stored = try WorktreeStateStore.load(WorktreePaths(root: existing.path))
+            let state = if let stored { stored } else { try await open(from: existing.path).state }
+            return Checkout(state: state, created: false, branchCreated: false)
         }
         let branchExists = try await runner.run(
             .git(["rev-parse", "--verify", "--quiet", "refs/heads/\(name)"], in: projectRoot)).succeeded
@@ -153,22 +224,25 @@ public struct WorktreeService: Sendable {
                 // APFS clonefile copy: instant and space-free until files diverge.
                 try await runner.runChecked(Invocation("/bin/cp", ["-c", "-R", seed, paths.sourcePackages]))
             }
-            state.status = .ready
-            try WorktreeStateStore.save(state, paths)
-            try await registry.upsert(RegistryEntry(state))
-            return (state, true)
+            return Checkout(state: state, created: true, branchCreated: branchCreated)
         } catch {
-            // Undo only what this attempt created; never touch a checkout that was already there.
-            if worktreeAdded {
-                _ = try? await runner.run(.git(["worktree", "remove", "--force", path], in: projectRoot))
-            }
-            if branchCreated {
-                _ = try? await runner.run(.git(["branch", "-D", name], in: projectRoot))
-            }
-            _ = try? await runner.run(.git(["worktree", "prune"], in: projectRoot))
-            try? await registry.remove(id: state.id)
+            await rollBack(state, worktreeAdded: worktreeAdded, branchCreated: branchCreated)
             throw error
         }
+    }
+
+    /// Undoes a creation attempt: only what it created, never a checkout or branch that was already there.
+    /// The caller holds the project lock.
+    private func rollBack(_ state: WorktreeState, worktreeAdded: Bool, branchCreated: Bool) async {
+        let projectRoot = state.projectRoot
+        if worktreeAdded {
+            _ = try? await runner.run(.git(["worktree", "remove", "--force", state.path], in: projectRoot))
+        }
+        if branchCreated {
+            _ = try? await runner.run(.git(["branch", "-D", state.name], in: projectRoot))
+        }
+        _ = try? await runner.run(.git(["worktree", "prune"], in: projectRoot))
+        try? await registry.remove(id: state.id)
     }
 
     func entry(named name: String, projectRoot: String) throws -> RegistryEntry {
@@ -226,33 +300,70 @@ public struct WorktreeRemoval: Codable, Sendable, Equatable {
     public let removedDevices: [String]
     /// True when the checkout or its state was already gone, so clones (if any) could not be found.
     public let stateMissing: Bool
+    /// Problems that `--force` removed the worktree despite, such as a failing `pre-worktree-remove` hook.
+    public var warnings: [String] = []
 }
 
 extension WorktreeService {
-    /// Deletes the worktree's clones, the git worktree, and its registry entry. Keeps the branch.
-    /// Serialized with `create` per project across processes.
+    /// Runs the worktree's `pre-worktree-remove` hook, then deletes its clones, the git worktree, and its registry
+    /// entry. Keeps the branch. Serialized with `create` per project across processes.
+    ///
+    /// A dirty worktree is refused before the hook runs, so teardown never runs for a removal that is then refused.
+    /// The hook runs before the per-project lock is taken (under the worktree's own lock, as in `create`).
+    /// `force` skips the dirty check and turns a failing hook into a warning in the result.
     public func remove(name: String, force: Bool = false, in ctx: WorktreeContext) async throws -> WorktreeRemoval {
         guard name != "main" else { throw XcdError(.usage, "the main worktree cannot be removed") }
-        return try await FileLock.withLock(at: lockPath(projectRoot: ctx.location.projectRoot)) {
-            try await removeLocked(name: name, force: force, in: ctx)
+        let projectRoot = ctx.location.projectRoot
+        _ = try entry(named: name, projectRoot: projectRoot)   // only registered (so valid) names reach a lock path
+        return try await FileLock.withLock(at: lockPath(projectRoot: projectRoot, worktree: name)) {
+            let entry = try entry(named: name, projectRoot: projectRoot)
+            var warnings: [String] = []
+            if FileManager.default.fileExists(atPath: entry.path) {
+                if !force { try await checkClean(entry) }
+                warnings = try await runPreRemoveHook(entry, force: force, in: ctx)
+            }
+            return try await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) {
+                try await removeLocked(name: name, warnings: warnings, in: ctx)
+            }
         }
     }
 
-    private func removeLocked(name: String, force: Bool, in ctx: WorktreeContext) async throws -> WorktreeRemoval {
+    private func checkClean(_ entry: RegistryEntry) async throws {
+        let status = try await runner.runChecked(.git(["status", "--porcelain"], in: entry.path))
+        let changes = status.stdoutString.split(separator: "\n").map(String.init)
+        if !changes.isEmpty {
+            throw XcdError(.worktreeDirty, "worktree '\(entry.name)' has uncommitted changes",
+                           next: "commit or stash them, or re-run `xcd wt remove \(entry.name) --force`",
+                           details: Array(changes.prefix(20)))
+        }
+    }
+
+    /// Runs the doomed worktree's own `pre-worktree-remove` from inside it. A failure (or an invalid config) keeps
+    /// the worktree, unless `force`, which returns it as a warning instead.
+    private func runPreRemoveHook(_ entry: RegistryEntry, force: Bool, in ctx: WorktreeContext) async throws -> [String] {
+        guard let hooks, let state = try? WorktreeStateStore.load(WorktreePaths(root: entry.path)) else { return [] }
+        do {
+            guard let config = try hookConfig(worktree: entry.path, projectRoot: ctx.location.projectRoot) else { return [] }
+            try await hooks.run(.preWorktreeRemove, config: config, context: .worktree(state, output: hooks.output),
+                                logs: ctx.paths)
+            return []
+        } catch var error as XcdError {
+            let log = error.details.first { $0.hasPrefix("log: ") }.map { " (" + $0 + ")" } ?? ""
+            if force { return [error.message + "; removed anyway because of --force" + log] }
+            if error.code == .hookFailed {
+                error.next = "fix hooks.pre-worktree-remove (its output is in the log), then re-run `xcd wt remove \(entry.name)`;"
+                    + " `--force` removes it without the hook succeeding, discarding any uncommitted changes"
+            }
+            error.details.append("the worktree was kept")
+            throw error
+        }
+    }
+
+    private func removeLocked(name: String, warnings: [String], in ctx: WorktreeContext) async throws -> WorktreeRemoval {
         let projectRoot = ctx.location.projectRoot
         let entry = try entry(named: name, projectRoot: projectRoot)
         let fm = FileManager.default
         let exists = fm.fileExists(atPath: entry.path)
-
-        if exists && !force {
-            let status = try await runner.runChecked(.git(["status", "--porcelain"], in: entry.path))
-            let changes = status.stdoutString.split(separator: "\n").map(String.init)
-            if !changes.isEmpty {
-                throw XcdError(.worktreeDirty, "worktree '\(name)' has uncommitted changes",
-                               next: "commit or stash them, or re-run `xcd wt remove \(name) --force`",
-                               details: Array(changes.prefix(20)))
-            }
-        }
 
         let state = exists ? try WorktreeStateStore.load(WorktreePaths(root: entry.path)) : nil
         var removedDevices: [String] = []
@@ -266,7 +377,7 @@ extension WorktreeService {
         }
 
         if exists {
-            // Cleanliness was checked above (or the caller forced), so --force only lets git
+            // Cleanliness was checked before the hook (or the caller forced), so --force only lets git
             // delete ignored build state such as .xcdev/.
             try await runner.runChecked(.git(["worktree", "remove", "--force", entry.path], in: projectRoot),
                                         next: "close anything using the worktree, then re-run `xcd wt remove \(name)`")
@@ -275,7 +386,7 @@ extension WorktreeService {
         if fm.fileExists(atPath: entry.path) { try? fm.removeItem(atPath: entry.path) }
         try await registry.remove(id: entry.id)
         return WorktreeRemoval(name: name, project: ctx.location.projectName, path: entry.path, branch: state?.branch ?? name,
-                               removedDevices: removedDevices, stateMissing: state == nil)
+                               removedDevices: removedDevices, stateMissing: state == nil, warnings: warnings)
     }
 }
 

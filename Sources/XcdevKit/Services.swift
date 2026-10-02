@@ -29,7 +29,7 @@ public struct Services: Sendable {
                         progress: { FileHandle.standardError.write(Data("xcd: \($0)\n".utf8)) })
     }
 
-    public var worktrees: WorktreeService { WorktreeService(runner: runner, globalPaths: globalPaths) }
+    public var worktrees: WorktreeService { WorktreeService(runner: runner, globalPaths: globalPaths, hooks: hooks) }
     public var provisioner: DeviceProvisioner { DeviceProvisioner(runner: runner, globalPaths: globalPaths) }
     public var hooks: HookRunner { HookRunner(runner: runner, output: output, progress: progress) }
     public var builds: BuildService { BuildService(runner: runner, provisioner: provisioner, progress: progress, hooks: hooks) }
