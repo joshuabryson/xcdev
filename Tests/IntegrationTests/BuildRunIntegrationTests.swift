@@ -4,10 +4,6 @@ import XcdevTestSupport
 @testable import XcdevKit
 
 private let enabled = ProcessInfo.processInfo.environment["XCD_INTEGRATION"] == "1"
-private let repoRoot = URL(fileURLWithPath: #filePath)
-    .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
-/// Simulators can't write app output under $TMPDIR, so these projects live here instead.
-private let testsHome = NSHomeDirectory() + "/Library/Caches/xcdev-tests"
 
 @Suite(.enabled(if: enabled, "set XCD_INTEGRATION=1 to run (needs Xcode + an iOS simulator runtime)"), .serialized)
 struct BuildRunIntegrationTests {
@@ -31,28 +27,6 @@ struct BuildRunIntegrationTests {
         devices:
           iphone: { type: "\(try await iPhoneType())" }
         """, name: "Sample App \(UUID().uuidString.prefix(6))", fixture: repoRoot + "/Fixtures/SampleApp", parent: testsHome)
-    }
-
-    func services(_ project: TempProject) -> Services {
-        Services(runner: runner, globalPaths: GlobalPaths(base: project.home), currentDirectory: project.root, environment: [:])
-    }
-
-    /// Runs `body`, then always (even when it throws) deletes every simulator clone of this project and the project.
-    /// Clones are found by name (`xcd · <project> · …`), so ones a failed step never recorded in state go too.
-    func withCleanup(_ project: TempProject, _ body: (Services) async throws -> Void) async throws {
-        let svc = services(project)
-        var failure: (any Error)?
-        do { try await body(svc) } catch { failure = error }
-        let simctl = SimctlClient(runner: runner, developerDir: nil)
-        let prefix = SimNaming.clonePrefix + URL(fileURLWithPath: project.root).lastPathComponent + " · "
-        if let catalog = try? await simctl.catalog() {
-            for device in catalog.devices where device.name.hasPrefix(prefix) {
-                _ = try? await simctl.shutdown(udid: device.udid)
-                try? await simctl.delete(udid: device.udid)
-            }
-        }
-        project.remove()
-        if let failure { throw failure }
     }
 
     /// Runs `body` in the main worktree (main can't be removed), then cleans up as `withCleanup` does.
