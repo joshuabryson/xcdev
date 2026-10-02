@@ -29,7 +29,7 @@ rm -rf "$stage"
 mkdir -p "$stage"
 cp "$bin/xcd" LICENSE README.md "$stage/"
 tarball="$dist/xcdev-$version-macos.tar.gz"
-tar -czf "$tarball" -C "$stage" xcd LICENSE README.md
+COPYFILE_DISABLE=1 tar --no-mac-metadata --uid 0 --gid 0 -czf "$tarball" -C "$stage" xcd LICENSE README.md
 sha=$(shasum -a 256 "$tarball" | cut -d ' ' -f 1)
 sed -e "s|@VERSION@|$version|g" -e "s|@SHA256@|$sha|g" -e "s|@REPOSITORY@|$repo|g" \
     packaging/homebrew/xcdev.rb.template > "$dist/xcdev.rb"

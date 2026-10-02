@@ -11,7 +11,8 @@ brew install <owner>/tap/xcdev      # installs `xcd` and the `xcdev` alias
 ```
 
 Or download `xcdev-<version>-macos.tar.gz` from the GitHub releases (a universal binary for Apple silicon and Intel),
-or build from source with `swift build -c release`. Requires macOS 15 or later and Xcode.
+or build from source with `swift build -c release`. Requires macOS 15 or later and Xcode. CI builds and tests with Xcode 26.2 on a
+`macos-26` runner (pinned in `.github/workflows`).
 
 ## Quick start
 

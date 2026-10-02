@@ -8,18 +8,15 @@ on:
 
 # The runner image and the Xcode are pinned, so a new default image can't change what CI builds with.
 env:
-  XCODE_APP: /Applications/Xcode_16.4.app
+  XCODE_APP: /Applications/Xcode_26.2.app
 
 jobs:
   unit:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode
-        run: |
-          [ -d "$XCODE_APP" ] || { echo "::error::$XCODE_APP is not installed on this runner image; update XCODE_APP"; ls -d /Applications/Xcode*; exit 1; }
-          sudo xcode-select -s "$XCODE_APP"
-          xcodebuild -version
+        run: scripts/select-xcode.sh "$XCODE_APP"
       - name: Build
         run: swift build
       - name: Unit tests
@@ -27,13 +24,10 @@ jobs:
 
   integration:
     if: github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/')
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode
-        run: |
-          [ -d "$XCODE_APP" ] || { echo "::error::$XCODE_APP is not installed on this runner image; update XCODE_APP"; ls -d /Applications/Xcode*; exit 1; }
-          sudo xcode-select -s "$XCODE_APP"
-          xcodebuild -version
+        run: scripts/select-xcode.sh "$XCODE_APP"
       - name: Integration tests (real Xcode, git, and simulators)
         run: XCD_INTEGRATION=1 swift test
