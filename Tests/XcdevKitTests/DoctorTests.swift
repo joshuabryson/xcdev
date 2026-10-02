@@ -145,6 +145,29 @@ import XcdevTestSupport
         #expect(pkillCalls == 0)
     }
 
+    /// A `simctl list` that times out means the service is hung, so it isn't retried, and `--fix`
+    /// restarts it.
+    @Test func aListThatTimesOutIsFixedByRestartingAtOnce() async throws {
+        let (project, _, _, _) = try await setup()
+        defer { project.remove() }
+        let listing = Fixture.string("simctl-list.json")
+        let restarted = Counter()
+        fake.stub(["xcrun", "simctl", "list", "-j"]) { inv in
+            guard restarted.value > 0 else {
+                throw XcdError.subprocess(inv, ProcessOutput(exitCode: 15), code: .timeout,
+                                          message: "`xcrun simctl list` timed out after 120 seconds")
+            }
+            return ProcessOutput(stdout: listing)
+        }
+        fake.stub(["pkill"]) { _ in restarted.increment(); return ProcessOutput() }
+        let report = await doctor(project).run(fix: true, checks: [CoreSimulatorCheck()], from: nil)
+        let problem = try #require(report.problems.first)
+        #expect(problem.action == .restartCoreSimulator && problem.fixed)
+        #expect(pkillCalls == 1)
+        let lists = fake.calls.map(\.argv).prefix { $0.first != "pkill" }.filter { $0 == ["xcrun", "simctl", "list", "-j"] }
+        #expect(lists.count == 1)                                               // no retries before the restart
+    }
+
     /// Stderr that merely mentions a connection isn't CoreSimulator's broken connection.
     @Test func anUnrelatedConnectionErrorIsNotFixedByRestarting() async throws {
         let (project, _, _, _) = try await setup()
@@ -373,6 +396,22 @@ import XcdevTestSupport
         sims.setState("Booted", udid: late)
         await #expect(throws: DoctorLeftAlone.self) { try await OrphanedClonesCheck().fix(problem, env) }
         #expect(sims.devices.first { $0.udid == late }?.state == "Booted")
+    }
+
+    /// An old, unrecorded clone of a worktree another xcd is creating or removing is that xcd's.
+    @Test(.timeLimit(.minutes(1))) func aBusyWorktreesUnrecordedCloneIsNotOrphaned() async throws {
+        let (project, sims, worktrees, main) = try await setup()
+        defer { project.remove() }
+        _ = try await worktrees.create(name: "feat", in: main)
+        let clone = sims.add(name: "xcd · Sample App · feat · iphone",
+                             dataPath: try agedDevice(project.base + "/old-device", seconds: 3600))
+        let holder = try await holdLock(worktrees.lockPath(projectRoot: project.root, worktree: "feat"))
+        let report = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: nil, includeDisk: false)
+        holder.cancel()
+        _ = await holder.result
+        #expect(report.problems.isEmpty)
+        #expect(sims.devices.contains { $0.udid == clone })
+        #expect(await doctor(project).run(fix: false, checks: [OrphanedClonesCheck()], from: nil).problems.map(\.subject) == [clone])
     }
 
     /// With the registry unreadable, every clone would look orphaned, so none is touched.
