@@ -87,7 +87,7 @@ import XcdevTestSupport
         let config = try ConfigLoader.load(worktreeRoot: project.root, projectRoot: project.root)
         #expect(config.project == "SampleApp.xcodeproj" && config.defaultDevice == "iphone")
         #expect(config.allDevices.keys.sorted() == ["iphone"])
-        #expect(report.text.hasSuffix("next: run `xcd config show` to check the result"))
+        #expect(report.text.hasSuffix("next: run `xcd config show` to check the result, then `xcd doctor`"))
         #expect(leftoverScratch(project).isEmpty)
     }
 

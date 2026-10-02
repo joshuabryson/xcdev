@@ -97,7 +97,7 @@ public struct DoctorService: Sendable {
     /// Every check, in the order fixes should happen: worktrees before the clones they leave behind.
     public static var allChecks: [any DoctorCheck] {
         [CoreSimulatorCheck(), MissingWorktreesCheck(), IncompleteWorktreesCheck(), OrphanedClonesCheck(),
-         StuckClonesCheck(), TemplatesCheck()]
+         StuckClonesCheck(), TemplatesCheck(), ProjectCheck()]
     }
 
     /// `xcd prune`: worktrees that are gone, and clones nothing owns.

@@ -9,7 +9,7 @@ Use this guide when a project has no `.xcdev.yml`, or when the user wants to cha
 3. Skip any decision the user wants left at the default: don't pass it to `--set`, and it gets its recommendation.
 4. When the user asks what a setting means, run `xcd config explain <key>` (for example `xcd config explain xcode`) and answer from it. `xcd config explain` with no key lists every key.
 5. Apply the answers with `xcd init --set <key>=<value> …`. Quote values that contain spaces: `xcd init --set devices.default="iPhone 17 Pro" xcode=system`. To take every recommendation, run `xcd init --defaults`. If a `.xcdev.yml` already exists, add `--force` to replace it.
-6. Finish with `xcd config show`, and check that it matches what the user chose.
+6. Finish with `xcd config show`, and check that it matches what the user chose. Then run `xcd doctor`: it checks that the configured Xcode, device types, and runtimes are installed, and every problem it reports says what to do.
 
 Commit `.xcdev.yml`. `xcd init` adds `.xcdev/` (per-worktree build state) and `.xcdev.local.yml` (per-machine overrides) to `.gitignore`.
 

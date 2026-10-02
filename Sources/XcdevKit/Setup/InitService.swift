@@ -110,7 +110,7 @@ public struct InitReport: Reportable {
         lines.append(gitignoreAdded.isEmpty ? ".gitignore: already ignores .xcdev/ and .xcdev.local.yml"
                                             : ".gitignore: added " + gitignoreAdded.joined(separator: ", "))
         lines.append("change a choice: `xcd init --force --set <key>=<value>` (`xcd init --plan` lists the keys), or edit .xcdev.yml (`xcd config explain <key>`)")
-        lines.append("next: run `xcd config show` to check the result")
+        lines.append("next: run `xcd config show` to check the result, then `xcd doctor`")
         return lines.joined(separator: "\n")
     }
 }

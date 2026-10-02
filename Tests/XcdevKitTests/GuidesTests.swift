@@ -21,7 +21,7 @@ import Testing
     @Test func setupGuideWalksThroughInitPlanAndExplain() throws {
         let guide = try Guides.guide("setup")
         #expect(guide.summary == "Set up xcd in a project")
-        for step in ["xcd init --plan", "xcd config explain", "xcd init --set", "xcd init --defaults", "xcd config show"] {
+        for step in ["xcd init --plan", "xcd config explain", "xcd init --set", "xcd init --defaults", "xcd config show", "xcd doctor"] {
             #expect(guide.markdown.contains(step), "setup guide doesn't mention \(step)")
         }
         // The reference covers every top-level section of the config.

@@ -558,4 +558,138 @@ import XcdevTestSupport
         #expect(report.problems.count == 1 && report.problems[0].subject == orphan && report.problems[0].fixed)
         #expect(report.disk == nil)
     }
+
+    @Test func projectSetupProblemsSayWhatToDo() async throws {
+        let apps = FileManager.default.temporaryDirectory.appendingPathComponent("xcd apps \(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: apps) }
+        try XcodeTests.makeFakeXcode(at: apps + "/Xcode.app", version: "27.0", build: "27A266a")
+        fake.stub(["mdfind"], stdout: "")
+        fake.stub(["xcode-select", "-p"], stdout: apps + "/Xcode.app/Contents/Developer\n")
+        var (project, _, _, main) = try await setup(config: """
+        version: 1
+        project: App.xcodeproj
+        xcode: "26.4"
+        defaultDevice: iphone
+        devices:
+          iphone: { type: "iPhone 99" }
+          mac: { platform: macOS }
+        """)
+        defer { project.remove() }
+        main.state.xcode = XcodeInstall(path: apps + "/Xcode-26.4.app", version: "26.4", build: "x")
+        try WorktreeStateStore.save(main.state, main.paths)
+        let discovery = XcodeDiscovery(runner: fake, applicationsDirectories: [apps])
+
+        let report = await doctor(project, discovery: discovery).run(fix: false, from: project.root)
+        let found = report.problems.filter { $0.check == "project" }
+        #expect(found.map { $0.message.components(separatedBy: " (").last ?? "" }.contains("xcode_missing)"))
+        #expect(found.contains { $0.message.hasPrefix("worktree 'main' is pinned to Xcode 26.4 (x)") && $0.action == .unpinXcode })
+        #expect(found.contains { $0.message.hasPrefix("device type 'iPhone 99' (devices.iphone.type) is not available") })
+        // Each one says what to do, by hand (`next:`) or with --fix.
+        let xcode = try #require(found.first { $0.message.hasPrefix("Xcode 26.4 is not installed") })
+        #expect(xcode.next == "set `xcode:` in .xcdev.yml to an installed version, e.g. \"27.0\"")
+        let device = try #require(found.first { $0.message.hasPrefix("device type 'iPhone 99'") })
+        #expect(device.next?.hasPrefix("set devices.iphone.type to one of: ") == true
+                || device.next == "run `xcrun simctl list devicetypes` and set devices.iphone.type")
+        let pinned = try #require(found.first { $0.action == .unpinXcode })
+        #expect(pinned.fix == "unpin it, so the next command resolves `xcode:` again")
+        #expect(report.failure?.next == "run `xcd doctor --fix` to fix 1 of them; the others say what to do")
+        #expect(report.text.contains("problem  project  Xcode 26.4 is not installed (xcode_missing)  next: set `xcode:`"))
+        #expect(report.text.contains("(--fix: unpin it, so the next command resolves `xcode:` again)"))
+        #expect(try WorktreeStateStore.load(main.paths)?.xcode != nil)          // reported only, without --fix
+
+        _ = await doctor(project, discovery: discovery).run(fix: true, checks: [ProjectCheck()], from: project.root)
+        #expect(try WorktreeStateStore.load(main.paths)?.xcode == nil)
+    }
+
+    @Test func anInvalidConfigIsAProblemNotAnError() async throws {
+        let (project, _, _, _) = try await setup()
+        defer { project.remove() }
+        try project.write("version: 1\nproject: App.xcodeproj\ndevics: {}\n", to: ".xcdev.yml")
+        let report = await doctor(project).run(fix: false, checks: [ProjectCheck()], from: project.root)
+        #expect(report.problems.map(\.message) == [".xcdev.yml is invalid (1 problem): devics: unknown key (did you mean 'devices'?) (config_invalid)"])
+        #expect(report.problems.map(\.next) == ["fix .xcdev.yml, then run `xcd config show`"])
+        #expect(report.failure?.next == "fix .xcdev.yml, then run `xcd config show`")
+    }
+
+    @Test func outsideAProjectTheProjectCheckIsSkipped() async throws {
+        let (project, _, _, _) = try await setup()
+        defer { project.remove() }
+        let report = await doctor(project).run(fix: false, checks: [ProjectCheck()], from: project.base)
+        #expect(report.checks.isEmpty && report.failure == nil)
+    }
+
+    /// A plain `doctor` in a project xcd never opened writes nothing (no .xcdev/, registry,
+    /// or worktree state) and runs no command that changes anything. The SDK cache is the one exception.
+    @Test func doctorWithoutFixWritesNothing() async throws {
+        let project = try TempProject.make(config: """
+        version: 1
+        project: App.xcodeproj
+        xcode: "27.0"
+        defaultDevice: iphone
+        devices:
+          iphone: { type: "iPhone 18 Pro" }
+        """)
+        defer { project.remove() }
+        _ = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        let apps = project.base + "/apps"
+        try XcodeTests.makeFakeXcode(at: apps + "/Xcode.app", version: "27.0", build: "27A266a")
+        fake.stub(["mdfind"], stdout: "")
+        fake.stub(["xcode-select", "-p"], stdout: apps + "/Xcode.app/Contents/Developer\n")
+        let runner = ArgvRecorder(RoutingRunner(fake: fake))
+        let service = DoctorService(runner: runner, globalPaths: GlobalPaths(base: project.home),
+                                    discovery: XcodeDiscovery(runner: runner, applicationsDirectories: [apps]))
+        let before = try Self.snapshot(project.base)
+
+        #expect(try Registry(paths: GlobalPaths(base: project.home)).entries().isEmpty)    // reading a missing registry
+        #expect(try Self.snapshot(project.base) == before)
+        let report = await service.run(fix: false, from: project.root)
+
+        #expect(report.checks.map(\.id).last == "project" && report.problems.isEmpty)
+        let cache = GlobalPaths(base: project.home).cacheDirectory
+        let after = try Self.snapshot(project.base)
+        #expect(before.filter { after[$0.key] != $0.value }.isEmpty)               // nothing changed or removed
+        let added = Set(after.keys).subtracting(before.keys)
+        #expect(added.contains(project.home) && added.contains(cache))             // the SDK cache, and only it
+        let cached = added.subtracting([project.home, cache])
+        #expect(!cached.isEmpty && cached.allSatisfy {
+            $0.hasPrefix(cache + "/sdks-") && $0.hasSuffix(".json") && !$0.dropFirst(cache.count + 1).contains("/")
+        })
+        #expect(!FileManager.default.fileExists(atPath: project.root + "/.xcdev"))
+        #expect(!FileManager.default.fileExists(atPath: GlobalPaths(base: project.home).registryFile))
+
+        let readOnly: [[String]] = [["git", "rev-parse"], ["xcrun", "simctl", "list"], ["mdfind"], ["xcode-select", "-p"],
+                                    ["xcrun", "xcodebuild", "-showsdks"], ["du"]]
+        #expect(!runner.calls.isEmpty)
+        let commands = runner.calls.map { $0.starts(with: ["git", "-C"]) ? ["git"] + $0.dropFirst(3) : $0 }
+        #expect(commands.filter { argv in !readOnly.contains { argv.starts(with: $0) } } == [])
+    }
+
+    /// Every file and folder under `root`: a file's contents, or "dir" for a folder.
+    static func snapshot(_ root: String) throws -> [String: Data] {
+        var tree: [String: Data] = [:]
+        let fm = FileManager.default
+        guard let paths = fm.subpaths(atPath: root) else { return tree }
+        for relative in paths {
+            let path = root + "/" + relative
+            var isDirectory: ObjCBool = false
+            guard fm.fileExists(atPath: path, isDirectory: &isDirectory) else { continue }
+            tree[path] = isDirectory.boolValue ? Data("dir".utf8) : try Data(contentsOf: URL(fileURLWithPath: path))
+        }
+        return tree
+    }
+}
+
+/// Records every command's argv, git included, then runs it on `inner`.
+private final class ArgvRecorder: ProcessRunning {
+    let inner: any ProcessRunning
+    private let recorded = Mutex<[[String]]>([])
+
+    init(_ inner: any ProcessRunning) { self.inner = inner }
+
+    var calls: [[String]] { recorded.withLock { $0 } }
+
+    func run(_ invocation: Invocation) async throws -> ProcessOutput {
+        recorded.withLock { $0.append(invocation.argv) }
+        return try await inner.run(invocation)
+    }
 }
