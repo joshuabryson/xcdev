@@ -20,8 +20,8 @@ import XcdevTestSupport
         try worktree.context(yaml, container: "App.xcodeproj")
     }
 
-    func service(_ probe: FakeProbe = FakeProbe()) -> RunService {
-        let builds = BuildService(runner: fake, provisioner: worktree.provisioner)
+    func service(_ probe: FakeProbe = FakeProbe(), now: @escaping @Sendable () -> Date = { Date() }) -> RunService {
+        let builds = BuildService(runner: fake, provisioner: worktree.provisioner, now: now)
         return RunService(builds: builds, watcher: CrashWatcher(probe: probe, locator: CrashReportLocator(directory: crashDir),
                                                                 sleep: { _ in }),
                           sleep: { _ in })
@@ -139,9 +139,13 @@ import XcdevTestSupport
         defer { worktree.remove() }
         _ = try setUp(pid: 46606, appOutput: "SampleApp launched greeting=none\nSampleApp/SampleAppApp.swift:14: Fatal error: SampleApp crashed on purpose\n")
         try FileManager.default.createDirectory(atPath: crashDir, withIntermediateDirectories: true)
-        try Fixture.string("crash-sim.ips").write(toFile: crashDir + "/SampleApp-2026-09-30-195619.ips", atomically: true, encoding: .utf8)
+        // The report is written at the launch time the fixed clock gives, so how long the fake build takes doesn't matter.
+        let launchedAt = Date(timeIntervalSince1970: 1_790_040_000)
+        let ips = crashDir + "/SampleApp-2026-09-30-195619.ips"
+        try Fixture.string("crash-sim.ips").write(toFile: ips, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: launchedAt], ofItemAtPath: ips)
         var ctx = try context()
-        let report = try await service(FakeProbe(runningChecks: 4))
+        let report = try await service(FakeProbe(runningChecks: 4), now: { launchedAt })
             .run(BuildOptions(), noBuild: false, launch: LaunchOptions(arguments: ["-crashOnLaunch"]), in: &ctx)
         #expect(report.status == .crashed)
         #expect(report.failure?.code == .appCrashed)
