@@ -26,8 +26,23 @@ import XcdevTestSupport
 
     func cleanUp() { try? FileManager.default.removeItem(atPath: (root as NSString).deletingLastPathComponent) }
 
-    func detector(progress: Activity = .silent) -> ProjectDetector {
-        ProjectDetector(runner: fake, developerDir: nil, scratch: scratch, xcodeDerivedData: derivedData, progress: progress)
+    /// Each (source, destination) the detector cloned, with the real `clonefile` doing the work.
+    let clones = Clones()
+
+    final class Clones: Sendable {
+        private let list = Mutex<[[String]]>([])
+        func append(_ pair: [String]) { list.withLock { $0.append(pair) } }
+        var all: [[String]] { list.withLock { $0 } }
+    }
+
+    func detector(progress: Activity = .silent,
+                  clone: (@Sendable (String, String) -> Int32)? = nil) -> ProjectDetector {
+        let clones = self.clones
+        return ProjectDetector(runner: fake, developerDir: nil, scratch: scratch, xcodeDerivedData: derivedData, progress: progress,
+                               cloneTree: clone ?? { source, destination in
+                                   clones.append([source, destination])
+                                   return ProjectDetector.cloneTree(source, destination)
+                               })
     }
 
     /// The note detection adds when the project files weren't enough, here because `make` creates empty containers.
@@ -45,6 +60,18 @@ import XcdevTestSupport
         let twice = #"[{"target":"A","buildSettings":{"PRODUCT_TYPE":"com.apple.product-type.application"}},{"target":"A","buildSettings":{}}]"#
         #expect(AppTarget.parse(Data(twice.utf8)).count == 1)
         #expect(AppTarget.parse(Data("[\n\n]\n".utf8)).isEmpty)
+    }
+
+    /// With no destination, `-showBuildSettings` reports a Mac Catalyst app as a Mac one; xcd counts it as iOS, as the
+    /// project files do (it runs in the iOS simulator), and drops the Catalyst device family 6.
+    @Test func aCatalystAppsBuildSettingsReadAsIOS() {
+        let catalyst = #"[{"target":"Cat","buildSettings":{"PRODUCT_TYPE":"com.apple.product-type.application","#
+            + #""SUPPORTED_PLATFORMS":"macosx macosx","IS_MACCATALYST":"YES","SUPPORTS_MACCATALYST":"YES","TARGETED_DEVICE_FAMILY":"1,2,6"}},"#
+            + #"{"target":"Opt","buildSettings":{"PRODUCT_TYPE":"com.apple.product-type.application","#
+            + #""SUPPORTED_PLATFORMS":"iphoneos iphonesimulator","SUPPORTS_MACCATALYST":"YES","TARGETED_DEVICE_FAMILY":"1,2"}}]"#
+        #expect(AppTarget.parse(Data(catalyst.utf8)) == [
+            AppTarget(name: "Cat", isApp: true, platforms: [.iOS], deviceFamilies: [1, 2]),
+            AppTarget(name: "Opt", isApp: true, platforms: [.iOS], deviceFamilies: [1, 2])])
     }
 
     @Test func packageManifestFromRecordedDump() throws {
@@ -113,7 +140,6 @@ import XcdevTestSupport
     func stubXcodebuild() {
         fake.stub(["xcrun", "xcodebuild", "-list"], stdout: Fixture.string("xcodebuild-list-project.json"))
         fake.stub(["xcrun", "xcodebuild", "-showBuildSettings"], stdout: Fixture.string("build-settings-scheme-app.json"))
-        fake.stub(["cp"], stdout: "")
     }
 
     /// The project files leave Configured's platform open, so detection asks xcodebuild.
@@ -139,8 +165,8 @@ import XcdevTestSupport
         #expect(detected.notes == [configuredNote])
         // xcodebuild may write into a package folder it uses, so it gets an APFS clone in the scratch folder.
         let copy = scratch + "/.xcdev/SourcePackages"
-        let cp = try #require(fake.calls.first { $0.argv.first == "cp" })
-        #expect(cp.arguments == ["-cR", newest, copy])
+        #expect(clones.all == [[newest, copy]])
+        #expect(FileManager.default.fileExists(atPath: copy + "/workspace-state.json"))    // the whole tree, in one call
         let xcodebuild = fake.calls.filter { $0.arguments.first == "xcodebuild" }
         #expect(xcodebuild.count == 2)
         for call in xcodebuild {
@@ -162,7 +188,61 @@ import XcdevTestSupport
         try FileManager.default.createDirectory(atPath: own, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: own + "/workspace-state.json", contents: Data("{}".utf8))
         _ = try await detector().detect(root: root, container: "Configured.xcodeproj")
-        #expect(fake.calls.first { $0.argv.first == "cp" }?.arguments == ["-cR", own, scratch + "/.xcdev/SourcePackages"])
+        #expect(clones.all == [[own, scratch + "/.xcdev/SourcePackages"]])
+    }
+
+    /// A worktree xcd just created has no packages of its own and no DerivedData yet, but its main checkout may.
+    @Test func aNewWorktreeUsesPackagesXcodeResolvedForTheMainCheckout() async throws {
+        defer { cleanUp() }
+        _ = try makeConfigured()
+        stubXcodebuild()
+        let main = root + "/../Main Checkout"
+        let resolved = try xcodeResolved(main + "/Configured.xcodeproj", name: "Configured-main")
+        _ = try await detector().detect(root: root, container: "Configured.xcodeproj", projectRoot: main)
+        #expect(clones.all == [[resolved, scratch + "/.xcdev/SourcePackages"]])
+    }
+
+    /// clonefile works only within an APFS volume; elsewhere xcodebuild resolves the packages afresh.
+    @Test func packagesThatCantBeClonedAreResolvedAfresh() async throws {
+        defer { cleanUp() }
+        let container = try makeConfigured()
+        stubXcodebuild()
+        let resolved = try xcodeResolved(container, name: "Configured-xcode")
+        let detected = try await detector(clone: { _, _ in EXDEV }).detect(root: root, container: "Configured.xcodeproj")
+        #expect(detected.notes == [configuredNote, "could not clone the Swift packages already resolved in \(resolved) "
+                                   + "(Cross-device link), so xcodebuild resolved them again"])
+        #expect(!fake.calls.contains { $0.arguments.contains("-disableAutomaticPackageResolution") })
+    }
+
+    /// xcodebuild -list creates project.xcworkspace/xcshareddata/swiftpm/configuration; xcd removes the empty
+    /// folders it caused, and leaves the ones that were there and any with files in them.
+    @Test func emptyFoldersXcodebuildCreatesInTheProjectAreRemoved() async throws {
+        defer { cleanUp() }
+        _ = try makeConfigured()
+        stubXcodebuild()
+        let workspace = root + "/Configured.xcodeproj/project.xcworkspace"
+        fake.stub(["xcrun", "xcodebuild", "-list"]) { _ in
+            try FileManager.default.createDirectory(atPath: workspace + "/xcshareddata/swiftpm/configuration", withIntermediateDirectories: true)
+            return ProcessOutput(stdout: Fixture.string("xcodebuild-list-project.json"))
+        }
+        _ = try await detector().detect(root: root, container: "Configured.xcodeproj")
+        #expect(!FileManager.default.fileExists(atPath: workspace))
+
+        try FileManager.default.createDirectory(atPath: workspace + "/xcshareddata", withIntermediateDirectories: true)
+        try "<Workspace/>".write(toFile: workspace + "/contents.xcworkspacedata", atomically: true, encoding: .utf8)
+        _ = try await detector().detect(root: root, container: "Configured.xcodeproj")
+        #expect(FileManager.default.fileExists(atPath: workspace + "/xcshareddata"))
+        #expect(!FileManager.default.fileExists(atPath: workspace + "/xcshareddata/swiftpm"))
+
+        // A folder xcodebuild put a file in (say, Package.resolved) stays.
+        fake.stub(["xcrun", "xcodebuild", "-list"]) { _ in
+            try FileManager.default.createDirectory(atPath: workspace + "/xcshareddata/swiftpm/configuration", withIntermediateDirectories: true)
+            try "{}".write(toFile: workspace + "/xcshareddata/swiftpm/Package.resolved", atomically: true, encoding: .utf8)
+            return ProcessOutput(stdout: Fixture.string("xcodebuild-list-project.json"))
+        }
+        _ = try await detector().detect(root: root, container: "Configured.xcodeproj")
+        #expect(FileManager.default.fileExists(atPath: workspace + "/xcshareddata/swiftpm/Package.resolved"))
+        #expect(!FileManager.default.fileExists(atPath: workspace + "/xcshareddata/swiftpm/configuration"))
     }
 
     @Test func withNoResolvedPackagesXcodebuildResolvesThemIntoTheScratchFolder() async throws {
@@ -173,7 +253,7 @@ import XcdevTestSupport
         let lines = Mutex<[String]>([])
         _ = try await detector(progress: .plain { line in lines.withLock { $0.append(line) } })
             .detect(root: root, container: "Configured.xcodeproj")
-        #expect(!fake.calls.contains { $0.argv.first == "cp" })
+        #expect(clones.all.isEmpty)
         for call in fake.calls {
             let args = call.arguments
             #expect(args[args.firstIndex(of: "-clonedSourcePackagesDirPath")! + 1] == scratch + "/.xcdev/SourcePackages")

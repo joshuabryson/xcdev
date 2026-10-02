@@ -75,6 +75,8 @@ public struct PackageCacheCheck: DoctorCheck {
         let lock = directory + ".lock"
         let ran: Void? = try await FileLock.withLockIfFree(at: lock) {
             try FileManager.default.removeItem(atPath: directory)
+            // Unlinking a lock file while holding it is safe here: an earlier xcd that opens the path afterwards
+            // creates a new file and locks that, and it finds no cache to use, so nothing relies on the old one.
             try? FileManager.default.removeItem(atPath: lock)
         }
         guard ran != nil else { throw DoctorLeftAlone(note: Self.busyNote(directory)) }

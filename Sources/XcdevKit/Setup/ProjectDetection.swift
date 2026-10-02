@@ -50,10 +50,11 @@ public struct AppTarget: Codable, Sendable, Equatable {
             guard seen.insert(entry.target).inserted else { return nil }
             let s = entry.buildSettings
             let isApp = (s["PRODUCT_TYPE"] ?? "").hasPrefix("com.apple.product-type.application")
-            let platforms = Set((s["SUPPORTED_PLATFORMS"] ?? "").split(separator: " ").compactMap { AppPlatform(sdk: String($0)) })
+            var platforms = Set((s["SUPPORTED_PLATFORMS"] ?? "").split(separator: " ").compactMap { AppPlatform(sdk: String($0)) }).sorted()
+            if s["IS_MACCATALYST"] == "YES" || s["SUPPORTS_MACCATALYST"] == "YES" { platforms = Catalyst.asIOS(platforms) }
             let families = (s["TARGETED_DEVICE_FAMILY"] ?? "").split(separator: ",")
-                .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-            return AppTarget(name: entry.target, isApp: isApp, platforms: platforms.sorted(), deviceFamilies: families)
+                .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }.filter { $0 != Catalyst.deviceFamily }
+            return AppTarget(name: entry.target, isApp: isApp, platforms: platforms, deviceFamilies: families)
         }
     }
 }
@@ -125,13 +126,23 @@ public struct ProjectDetector: Sendable {
     static let noResolution = ["-disableAutomaticPackageResolution", "-onlyUsePackageVersionsFromResolvedFile"]
     static let skippedFolders: Set<String> = ["build", "DerivedData", "Pods", "Carthage", "node_modules"]
 
+    /// Clones a folder tree: 0, or why not (an errno). Tests replace it.
+    let cloneTree: @Sendable (_ source: String, _ destination: String) -> Int32
+
     public init(runner: any ProcessRunning, developerDir: String?, scratch: String,
-                xcodeDerivedData: String = ProjectDetector.defaultXcodeDerivedData, progress: Activity = .silent) {
+                xcodeDerivedData: String = ProjectDetector.defaultXcodeDerivedData, progress: Activity = .silent,
+                cloneTree: @escaping @Sendable (String, String) -> Int32 = ProjectDetector.cloneTree) {
         self.runner = runner
         self.developerDir = developerDir
         self.scratch = scratch
         self.xcodeDerivedData = xcodeDerivedData
         self.progress = progress
+        self.cloneTree = cloneTree
+    }
+
+    /// `clonefile(2)` on the whole tree at once: 0, or the errno.
+    public static func cloneTree(_ source: String, _ destination: String) -> Int32 {
+        clonefile(source, destination, 0) == 0 ? 0 : errno
     }
 
     /// The best containers in `root` or its direct subfolders, relative to `root`: the shallowest ones, preferring
@@ -166,33 +177,37 @@ public struct ProjectDetector: Sendable {
             .sorted { (matchesFolder($0) ? 0 : 1, $0) < (matchesFolder($1) ? 0 : 1, $1) }
     }
 
-    public func detect(root: String, container: String) async throws -> DetectedProject {
+    public func detect(root: String, container: String, projectRoot: String? = nil) async throws -> DetectedProject {
         let resolved = try ProjectContainer.resolve(config: XcdevConfig(version: 1, project: container), worktreeRoot: root)
         if case .package(let directory) = resolved {
             return try await detectPackage(container: container, directory: directory)
         }
         let names = [URL(fileURLWithPath: container).deletingPathExtension().lastPathComponent, URL(fileURLWithPath: root).lastPathComponent]
-        switch await ProjectFileReader(runner: runner, developerDir: developerDir, scratch: scratch, progress: progress).read(resolved) {
+        switch try await ProjectFileReader(runner: runner, developerDir: developerDir, scratch: scratch, progress: progress).read(resolved) {
         case .confident(let schemes):
             let targets = Dictionary(uniqueKeysWithValues: schemes.map { ($0.name, $0.targets) })
             return Self.assemble(container: container, schemes: schemes.map(\.name), read: Self.readOrder(schemes.map(\.name), names: names),
                                  targetsByScheme: targets, names: names, notes: [])
         case .unsure(let reason):
             return try await detectWithXcodebuild(resolved, root: root, container: container, names: names,
-                                                  notes: [reason + "; asked xcodebuild"])
+                                                  notes: [reason + "; asked xcodebuild"], projectRoot: projectRoot)
         }
     }
 
     /// Tiers 2 and 3: `xcodebuild -list`, then `-showBuildSettings` for each scheme up to `maxSchemes`.
+    /// `projectRoot` is the main checkout, whose packages a new worktree can use.
     func detectWithXcodebuild(_ resolved: ProjectContainer, root: String, container: String, names: [String],
-                              notes: [String]) async throws -> DetectedProject {
+                              notes: [String], projectRoot: String? = nil) async throws -> DetectedProject {
         var notes = notes
+        let created = Self.foldersXcodebuildMayCreate(resolved).filter { !FileManager.default.fileExists(atPath: $0) }
+        defer { Self.removeEmpty(created) }
         let scratchPaths = WorktreePaths(root: scratch)
         let packages = scratchPaths.sourcePackages
         var list: ProcessOutput?
         var extra: [String] = []
-        if let resolvedPackages = Self.resolvedPackages(for: resolved, worktree: root, xcodeDerivedData: xcodeDerivedData),
-           await clone(resolvedPackages, to: packages, container: container) {
+        if let resolvedPackages = Self.resolvedPackages(for: resolved, container: container, worktree: root, projectRoot: projectRoot,
+                                                        xcodeDerivedData: xcodeDerivedData),
+           await clone(resolvedPackages, to: packages, container: container, notes: &notes) {
             do {
                 list = try await listSchemes(resolved, container: container, packages: packages, paths: scratchPaths,
                                              extra: Self.noResolution, alreadyResolved: true)
@@ -274,16 +289,27 @@ public struct ProjectDetector: Sendable {
     }
 
     /// Swift packages already resolved for this container: this worktree's own (from `xcd build`), else the most
-    /// recently resolved of Xcode's DerivedData folders whose info.plist names the container.
-    static func resolvedPackages(for container: ProjectContainer, worktree: String, xcodeDerivedData: String) -> String? {
-        let fm = FileManager.default
+    /// recently resolved of Xcode's DerivedData folders whose info.plist names the container, else (for a new
+    /// worktree) one that names the same container in the main checkout `projectRoot`. `container` is relative to
+    /// the worktree.
+    static func resolvedPackages(for resolved: ProjectContainer, container: String, worktree: String, projectRoot: String?,
+                                 xcodeDerivedData: String) -> String? {
         let own = WorktreePaths(root: worktree).sourcePackages
-        if fm.fileExists(atPath: own + "/workspace-state.json") { return own }
+        if FileManager.default.fileExists(atPath: own + "/workspace-state.json") { return own }
         let path: String
-        switch container {
+        switch resolved {
         case .workspace(let p), .project(let p): path = p
         case .package: return nil
         }
+        if let found = xcodeResolved(path, in: xcodeDerivedData) { return found }
+        guard let projectRoot else { return nil }
+        let main = URL(fileURLWithPath: projectRoot).appendingPathComponent(container).standardizedFileURL.path
+        return main == path ? nil : xcodeResolved(main, in: xcodeDerivedData)
+    }
+
+    /// The most recently resolved SourcePackages in Xcode's DerivedData for the workspace or project at `path`.
+    static func xcodeResolved(_ path: String, in xcodeDerivedData: String) -> String? {
+        let fm = FileManager.default
         func canonical(_ path: String) -> String { URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path }
         let wanted = canonical(path)
         var best: (folder: String, modified: Date)?
@@ -299,21 +325,37 @@ public struct ProjectDetector: Sendable {
         return best?.folder
     }
 
-    /// Clones `source` to `destination` with `cp -c` (clonefile: no extra space, but a file at a time, so a 1 GB
-    /// folder takes seconds). xcodebuild rewrites checkouts' git indexes and workspace-state.json even with package
-    /// resolution off, so it never gets the original. False when the clone fails (say, another volume).
-    func clone(_ source: String, to destination: String, container: String) async -> Bool {
+    /// Clones `source` to `destination` with one `clonefile(2)` of the whole tree: instant, and no extra space.
+    /// xcodebuild rewrites checkouts' git indexes and workspace-state.json even with package resolution off, so it
+    /// never gets the original. False, with a note, when the clone fails (EXDEV across volumes, ENOTSUP off APFS).
+    func clone(_ source: String, to destination: String, container: String, notes: inout [String]) async -> Bool {
         try? FileManager.default.createDirectory(atPath: (destination as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        let copy = Invocation("/bin/cp", ["-cR", source, destination], timeout: .seconds(600))
-        let output = try? await progress.step("copying the Swift packages already resolved for \(container) from \(source)…",
-                                              done: "copied the resolved Swift packages") {
-            try await runner.run(copy)
-        }
-        guard output?.succeeded == true else {
+        let code = (try? await progress.step("copying the Swift packages already resolved for \(container) from \(source)…",
+                                             done: "copied the resolved Swift packages") { [cloneTree] in cloneTree(source, destination) }) ?? -1
+        guard code == 0 else {
             try? FileManager.default.removeItem(atPath: destination)
+            let reason = code > 0 ? String(cString: strerror(code)) : "interrupted"
+            notes.append("could not clone the Swift packages already resolved in \(source) (\(reason)), so xcodebuild resolved them again")
             return false
         }
         return true
+    }
+
+    /// The folders `xcodebuild -list` creates in a project or workspace if they're missing, outermost first.
+    static func foldersXcodebuildMayCreate(_ resolved: ProjectContainer) -> [String] {
+        let outer: [String]
+        switch resolved {
+        case .project(let path): outer = [path + "/project.xcworkspace", path + "/project.xcworkspace/xcshareddata"]
+        case .workspace(let path): outer = [path + "/xcshareddata"]
+        case .package: return []
+        }
+        let shared = outer.last!
+        return outer + [shared + "/swiftpm", shared + "/swiftpm/configuration"]
+    }
+
+    /// Removes each folder that is empty, innermost first; a folder with anything in it stays.
+    static func removeEmpty(_ folders: [String]) {
+        for folder in folders.reversed() { rmdir(folder) }
     }
 
     /// `xcodebuild -list`. Without `alreadyResolved` it first resolves the Swift packages into `packages`, and a

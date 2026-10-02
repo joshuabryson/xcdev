@@ -48,11 +48,11 @@ import XcdevTestSupport
           {"name": "AcceptanceTests", "type": "test", "dependencies": [{"product": ["Shared", "Shared", null, null]}]}]}
         """
 
-    /// The Phone fixture plus what git wouldn't keep in the fixture: a user scheme and the packages' folders.
+    /// The Phone fixture plus what git wouldn't keep in the fixture: this user's scheme and the packages' folders.
     func makePhone() throws {
         try Fixture.copy("ProjectFiles/Phone", to: root)
         try write(Self.scheme(building: "A10000000000000000000103", "PhoneUITests", container: "Phone.xcodeproj"),
-                  to: "Phone.xcodeproj/xcuserdata/someone.xcuserdatad/xcschemes/PhoneUITests.xcscheme")
+                  to: "Phone.xcodeproj/xcuserdata/\(NSUserName()).xcuserdatad/xcschemes/PhoneUITests.xcscheme")
         try write("", to: "Packages/Shared/Package.swift")
         try write("", to: "Packages/Acceptance/Package.swift")
         stubPackages(["Shared": Self.shared, "Acceptance": Self.acceptance])
@@ -108,7 +108,7 @@ import XcdevTestSupport
     @Test func eachSchemeBuildsItsTargetsWithTheirPlatforms() async throws {
         defer { cleanUp() }
         try makePhone()
-        let outcome = await ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch)
+        let outcome = try await ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch)
             .read(.project(root + "/Phone.xcodeproj"))
         guard case .confident(let schemes) = outcome else { Issue.record("\(outcome)"); return }
         let byName = Dictionary(uniqueKeysWithValues: schemes.map { ($0.name, $0.targets) })
@@ -134,10 +134,10 @@ import XcdevTestSupport
         defer { cleanUp() }
         try Fixture.copy("ProjectFiles/Configured", to: root)
         let reader = ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch)
-        #expect(await reader.read(.project(root + "/Configured.xcodeproj"))
+        #expect(try await reader.read(.project(root + "/Configured.xcodeproj"))
                 == .unsure("the project files don't say which platform Configured builds for (its SDKROOT is $(APP_SDK) in App.xcconfig)"))
         try FileManager.default.removeItem(atPath: root + "/App.xcconfig")
-        #expect(await reader.read(.project(root + "/Configured.xcodeproj"))
+        #expect(try await reader.read(.project(root + "/Configured.xcodeproj"))
                 == .unsure("the project files don't say which platform Configured builds for "
                            + "(its SUPPORTED_PLATFORMS may come from App.xcconfig, which couldn't be read)"))
     }
@@ -148,7 +148,7 @@ import XcdevTestSupport
         try write("// the app's settings\n#include \"Shared/Base.xcconfig\"\n#include? \"Local.xcconfig\"\nPRODUCT_NAME = Configured\n",
                   to: "App.xcconfig")
         try write("SDKROOT = iphoneos // the iOS SDK\nTARGETED_DEVICE_FAMILY = 1,2;\n", to: "Shared/Base.xcconfig")
-        let outcome = await ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch)
+        let outcome = try await ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch)
             .read(.project(root + "/Configured.xcodeproj"))
         #expect(outcome == .confident([.init(name: "Configured", targets: [
             AppTarget(name: "Configured", isApp: true, platforms: [.iOS], deviceFamilies: [1, 2])])]))
@@ -161,7 +161,7 @@ import XcdevTestSupport
         let text = try String(contentsOfFile: pbxproj, encoding: .utf8)
         try text.replacingOccurrences(of: "SDKROOT = watchos;", with: "SDKROOT = \"$(WATCH_SDK)\";")
             .write(toFile: pbxproj, atomically: true, encoding: .utf8)
-        let outcome = await ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch)
+        let outcome = try await ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch)
             .read(.project(root + "/Phone.xcodeproj"))
         #expect(outcome == .unsure("the project files don't say which platform Phone Watch App builds for (its SDKROOT is $(WATCH_SDK))"))
     }
@@ -170,17 +170,92 @@ import XcdevTestSupport
         defer { cleanUp() }
         try makePhone()
         stubPackages(["Shared": Self.shared])
-        let outcome = await ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch)
+        let outcome = try await ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch)
             .read(.project(root + "/Phone.xcodeproj"))
         guard case .unsure(let reason) = outcome else { Issue.record("\(outcome)"); return }
         #expect(reason.hasPrefix("could not read Packages/Acceptance/Package.swift (`swift package dump-package` exit 1"))
+    }
+
+    /// xcodebuild reads only the current user's schemes, so another user's (committed by mistake) don't count.
+    @Test func anotherUsersSchemesAreIgnored() async throws {
+        defer { cleanUp() }
+        try makePhone()
+        try write(Self.scheme(building: "A10000000000000000000101", "Phone", container: "Phone.xcodeproj"),
+                  to: "Phone.xcodeproj/xcuserdata/someone-else.xcuserdatad/xcschemes/Alpha.xcscheme")
+        let detected = try await detector().detect(root: root, container: "Phone.xcodeproj")
+        #expect(!detected.schemes.contains("Alpha"))
+        #expect(detected.appSchemes == ["Phone"])
+    }
+
+    /// The Suite fixture's Mac app project, copied in as `Sub/Other.xcodeproj`, with a Phone scheme "Main" that builds it.
+    func addOutsideScheme() throws {
+        let tools = Fixture.url("ProjectFiles/Suite/Tools/Tools.xcodeproj").path
+        try FileManager.default.createDirectory(atPath: root + "/Sub", withIntermediateDirectories: true)
+        try FileManager.default.copyItem(atPath: tools, toPath: root + "/Sub/Other.xcodeproj")
+        try write(Self.scheme(building: "D10000000000000000000101", "Mac Tool", container: "Sub/Other.xcodeproj"),
+                  to: "Phone.xcodeproj/xcshareddata/xcschemes/Main.xcscheme")
+    }
+
+    /// A scheme can name any project, but xcodebuild builds only those the container includes or its projects reference.
+    @Test func aSchemeBuildingAProjectOutsideTheContainerIsNotEnough() async throws {
+        defer { cleanUp() }
+        try makePhone()
+        try addOutsideScheme()
+        let outcome = try await ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch)
+            .read(.project(root + "/Phone.xcodeproj"))
+        #expect(outcome == .unsure("scheme \"Main\" builds Mac Tool in Sub/Other.xcodeproj, which Phone.xcodeproj doesn't include"))
+    }
+
+    @Test func aProjectTheContainerReferencesCanBeBuilt() async throws {
+        defer { cleanUp() }
+        try makePhone()
+        try addOutsideScheme()
+        let pbxproj = root + "/Phone.xcodeproj/project.pbxproj"
+        let text = try String(contentsOfFile: pbxproj, encoding: .utf8)
+        try text.replacingOccurrences(of: "\t\t\t\tA10000000000000000000003 /* Packages */,\n", with: """
+                \t\t\t\tA10000000000000000000003 /* Packages */,
+                \t\t\t\tA10000000000000000000012 /* Other.xcodeproj */,
+
+                """)
+            .replacingOccurrences(of: "\t\tA10000000000000000000101 /* Phone */ = {", with: """
+                \t\tA10000000000000000000012 /* Other.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = Sub/Other.xcodeproj; sourceTree = "<group>"; };
+                \t\tA10000000000000000000101 /* Phone */ = {
+                """)
+            .write(toFile: pbxproj, atomically: true, encoding: .utf8)
+        let outcome = try await ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch).read(.project(root + "/Phone.xcodeproj"))
+        guard case .confident = outcome else { Issue.record("\(outcome)"); return }
+        let detected = try await detector().detect(root: root, container: "Phone.xcodeproj")
+        #expect(detected.notes.isEmpty && detected.schemes.contains("Main"))
+        #expect(detected.platforms == [.iOS, .watchOS, .macOS])
+    }
+
+    /// A Mac Catalyst app is an iOS app to a simulator-first tool, whichever tier reads it.
+    @Test func aCatalystAppIsAnIOSApp() async throws {
+        defer { cleanUp() }
+        try makePhone()
+        let pbxproj = root + "/Phone.xcodeproj/project.pbxproj"
+        let text = try String(contentsOfFile: pbxproj, encoding: .utf8)
+        try text.replacingOccurrences(of: "TARGETED_DEVICE_FAMILY = \"1,2\";", with: "SUPPORTS_MACCATALYST = YES; TARGETED_DEVICE_FAMILY = \"1,2\";")
+            .write(toFile: pbxproj, atomically: true, encoding: .utf8)
+        let detected = try await detector().detect(root: root, container: "Phone.xcodeproj")
+        #expect(detected.notes.isEmpty && detected.platforms == [.iOS, .watchOS])
+    }
+
+    /// Cancelling detection (Ctrl-C) ends it, rather than reading as "the files aren't enough, ask xcodebuild".
+    @Test func cancellationIsNotUnsure() async throws {
+        defer { cleanUp() }
+        try makePhone()
+        fake.stub(["xcrun", "swift", "package"]) { _ in throw CancellationError() }
+        await #expect(throws: CancellationError.self) {
+            _ = try await ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch).read(.project(root + "/Phone.xcodeproj"))
+        }
     }
 
     @Test func aSchemeFileThatIsNotXMLIsNotEnough() async throws {
         defer { cleanUp() }
         try makePhone()
         try write("<Scheme", to: "Phone.xcodeproj/xcshareddata/xcschemes/Broken.xcscheme")
-        let outcome = await ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch)
+        let outcome = try await ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch)
             .read(.project(root + "/Phone.xcodeproj"))
         #expect(outcome == .unsure("could not read Phone.xcodeproj/xcshareddata/xcschemes/Broken.xcscheme"))
     }
@@ -188,7 +263,7 @@ import XcdevTestSupport
     @Test func aMissingProjectFileIsNotEnough() async throws {
         defer { cleanUp() }
         try FileManager.default.createDirectory(atPath: root + "/Empty.xcodeproj", withIntermediateDirectories: true)
-        let outcome = await ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch)
+        let outcome = try await ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch)
             .read(.project(root + "/Empty.xcodeproj"))
         #expect(outcome == .unsure("could not read Empty.xcodeproj/project.pbxproj"))
     }
@@ -203,12 +278,41 @@ import XcdevTestSupport
                          {"name": "FeatureTests", "type": "test", "dependencies": [{"target": ["Feature", null]}]}]}
             """])
         let detected = try await detector().detect(root: root, container: "Suite.xcworkspace")
-        // Everything builds both apps, so neither gets a scheme of its own; Helper does.
+        // Everything builds both apps, so neither gets a scheme of its own; Helper does. So does AppTests: no scheme
+        // tests it, it depends on no target, and its project gets no other autocreated scheme to hold it.
         #expect(detected == DetectedProject(
-            container: "Suite.xcworkspace", kind: .workspace, schemes: ["Everything", "Feature", "Helper"],
-            appSchemes: ["Everything"], testSchemes: ["Everything"],
+            container: "Suite.xcworkspace", kind: .workspace, schemes: ["AppTests", "Everything", "Feature", "Helper"],
+            appSchemes: ["Everything"], testSchemes: ["AppTests", "Everything"],
             platforms: [.iOS, .visionOS, .macOS], deviceFamilies: [1, 2, 7]))
         #expect(xcodebuildCalls.isEmpty)
+    }
+
+    /// As observed with Xcode 27: a test bundle that depends on a target (its host app), or that a scheme file
+    /// tests, gets no scheme of its own.
+    @Test func aTestBundleThatDependsOnATargetGetsNoScheme() async throws {
+        defer { cleanUp() }
+        try Fixture.copy("ProjectFiles/Suite", to: root)
+        let pbxproj = root + "/App/App.xcodeproj/project.pbxproj"
+        let text = try String(contentsOfFile: pbxproj, encoding: .utf8)
+        try text.replacingOccurrences(of: "\t\t\tname = AppTests;", with: "\t\t\tdependencies = (C10000000000000000000301);\n\t\t\tname = AppTests;")
+            .replacingOccurrences(of: "\t\tC10000000000000000000101 /* App */ = {", with: """
+                \t\tC10000000000000000000301 = {isa = PBXTargetDependency; target = C10000000000000000000101; };
+                \t\tC10000000000000000000101 /* App */ = {
+                """)
+            .write(toFile: pbxproj, atomically: true, encoding: .utf8)
+        var detected = try await detector().detect(root: root, container: "Suite.xcworkspace")
+        #expect(detected.schemes == ["Everything", "Helper"] && detected.notes.isEmpty)
+
+        try text.write(toFile: pbxproj, atomically: true, encoding: .utf8)                       // no dependency again
+        try write("""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <Scheme version = "1.7"><TestAction><Testables><TestableReference skipped = "NO">
+            <BuildableReference BuildableIdentifier = "primary" BlueprintIdentifier = "C10000000000000000000102"
+             BlueprintName = "AppTests" ReferencedContainer = "container:App/App.xcodeproj"></BuildableReference>
+            </TestableReference></Testables></TestAction></Scheme>
+            """, to: "Suite.xcworkspace/xcshareddata/xcschemes/Checks.xcscheme")
+        detected = try await detector().detect(root: root, container: "Suite.xcworkspace")
+        #expect(detected.schemes == ["Checks", "Everything", "Helper"] && detected.notes.isEmpty)
     }
 
     @Test func packageSchemesFollowXcodesRules() throws {

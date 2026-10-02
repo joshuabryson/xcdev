@@ -35,12 +35,17 @@ public struct ProjectFileReader: Sendable {
         case unsure(String)
     }
 
-    public func read(_ container: ProjectContainer) async -> Outcome {
+    /// Throws only when cancelled (Ctrl-C), which ends detection rather than sending it to xcodebuild.
+    public func read(_ container: ProjectContainer) async throws -> Outcome {
         do {
             return try await readFiles(container)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch let unreadable as Unreadable {
+            try Task.checkCancellation()
             return .unsure(unreadable.reason)
         } catch {
+            try Task.checkCancellation()
             return .unsure("could not read the project files (\(error))")
         }
     }
@@ -80,21 +85,36 @@ public struct ProjectFileReader: Sendable {
             schemeFolders += Self.schemeFolders(in: path).map { ($0, (path as NSString).deletingLastPathComponent) }
         }
 
+        // A scheme may name any project, but xcodebuild builds only the container's projects and those they reference.
+        let includes = Set(projects.flatMap { [$0.path] + $0.referencedProjects })
+        let containerName: String
+        switch container {
+        case .project(let path), .workspace(let path): containerName = relative(path)
+        case .package: containerName = ""
+        }
         var schemes: [Scheme] = []
         var built: [String: Set<String>] = [:]      // project path → blueprint IDs and names some scheme builds
+        var tested: [String: Set<String>] = [:]     // project path → blueprint IDs and names some scheme tests
         var apps: [XcodeProjectFile.Target] = []
         func taken(_ name: String) -> Bool { schemes.contains { $0.name == name } }
         for (folder, schemeBase) in schemeFolders {
             for file in Self.files(in: folder, ending: ".xcscheme") {
                 let name = String(file.dropLast(".xcscheme".count))
                 guard !taken(name) else { continue }
-                guard let references = SchemeFile.buildables(folder + "/" + file) else {
+                guard let references = SchemeFile.read(folder + "/" + file) else {
                     throw Unreadable(reason: "could not read \(relative(folder + "/" + file))")
                 }
+                for reference in references.tested {
+                    let path = URL(fileURLWithPath: schemeBase + "/" + reference.container).standardizedFileURL.path
+                    tested[path, default: []].formUnion([reference.id, reference.name])
+                }
                 var targets: [AppTarget] = []
-                for reference in references {
+                for reference in references.built {
                     let path = URL(fileURLWithPath: schemeBase + "/" + reference.container).standardizedFileURL.path
                     guard path.hasSuffix(".xcodeproj") else { continue }      // a package's product: never an app
+                    guard includes.contains(path) else {
+                        throw Unreadable(reason: "scheme \"\(name)\" builds \(reference.name) in \(relative(path)), which \(containerName) doesn't include")
+                    }
                     guard let project = projects.first(where: { $0.path == path }) ?? XcodeProjectFile.read(path) else {
                         throw Unreadable(reason: "scheme \"\(name)\" builds \(reference.name) in \(relative(path)), which could not be read")
                     }
@@ -111,12 +131,22 @@ public struct ProjectFileReader: Sendable {
         }
 
         if Self.autocreatesSchemes(settingsFile) {
-            // Xcode makes a scheme for each target no scheme builds, except test bundles (a scheme tests them).
+            // Xcode makes a scheme for each target no scheme builds. A test bundle gets one only when no scheme builds
+            // or tests it, it depends on no target (a host app's scheme would test it), and its project gets no other
+            // autocreated scheme (which would test it): the rule observed with Xcode 27.
             for project in projects {
+                var autocreated = 0
                 for target in project.targets where !target.isTest && !built[project.path, default: []].contains(target.id) {
                     guard !taken(target.name) else { continue }
                     schemes.append(Scheme(name: target.name, targets: [target.appTarget]))
+                    autocreated += 1
                     if target.isApp { apps.append(target) }
+                }
+                guard autocreated == 0 else { continue }
+                let covered = built[project.path, default: []].union(tested[project.path, default: []])
+                for target in project.targets where target.isTest && !target.hasDependencies && !covered.contains(target.id)
+                    && !covered.contains(target.name) && !taken(target.name) {
+                    schemes.append(Scheme(name: target.name, targets: [target.appTarget]))
                 }
             }
             // And for local packages: a package reference gets a scheme per product; a package folder in the project
@@ -156,7 +186,7 @@ public struct ProjectFileReader: Sendable {
     /// The packages' scheme names, in order, each manifest read with `swift package dump-package` side by side.
     /// `label` names the manifest in a failure.
     func packageSchemes(_ packages: [(folder: String, style: PackageLayout.Style, label: String)]) async throws -> [String] {
-        let results = await withTaskGroup(of: (Int, Result<[String], Unreadable>).self) { group in
+        let results = await withTaskGroup(of: (Int, Result<[String], any Error>).self) { group in
             for (index, package) in packages.enumerated() {
                 group.addTask {
                     let dump = Self.dumpPackage(in: package.folder, scratchPath: scratch + "/swiftpm-\(index)", developerDir: developerDir)
@@ -170,12 +200,14 @@ public struct ProjectFileReader: Sendable {
                         }
                         let layout = try PackageLayout.parse(output.stdout)
                         return (index, .success(layout.schemes(as: package.style)))
+                    } catch is CancellationError {
+                        return (index, .failure(CancellationError()))
                     } catch {
                         return (index, .failure(Unreadable(reason: "could not read \(manifest) (\(error))")))
                     }
                 }
             }
-            var results: [Int: Result<[String], Unreadable>] = [:]
+            var results: [Int: Result<[String], any Error>] = [:]
             for await (index, result) in group { results[index] = result }
             return results
         }
@@ -184,7 +216,8 @@ public struct ProjectFileReader: Sendable {
 
     /// `swift package dump-package`, which evaluates the manifest and fetches nothing. PATH holds no git: SwiftPM
     /// would otherwise run `git describe`, `rev-parse`, and `status` in the package's repository (the user's
-    /// project), and `git status` can rewrite the index, racing the user's own git commands.
+    /// project), and `git status` can rewrite the index, racing the user's own git commands. So the manifest sees
+    /// `Context.gitInformation` as nil; one that declares products depending on it could list others than in Xcode.
     static func dumpPackage(in folder: String, scratchPath: String, developerDir: String?) -> Invocation {
         var dump = Invocation.xcrun(["swift", "package", "--scratch-path", scratchPath, "dump-package"],
                                     developerDir: developerDir, timeout: .seconds(120))
@@ -193,10 +226,10 @@ public struct ProjectFileReader: Sendable {
         return dump
     }
 
-    /// The shared schemes folder, then each user's.
-    static func schemeFolders(in container: String) -> [String] {
-        let users = files(in: container + "/xcuserdata", ending: ".xcuserdatad")
-        return [container + "/xcshareddata/xcschemes"] + users.map { container + "/xcuserdata/" + $0 + "/xcschemes" }
+    /// The shared schemes folder, then this user's. Like xcodebuild, other users' schemes (committed by mistake)
+    /// are not read.
+    static func schemeFolders(in container: String, user: String = NSUserName()) -> [String] {
+        [container + "/xcshareddata/xcschemes", container + "/xcuserdata/" + user + ".xcuserdatad/xcschemes"]
     }
 
     static func files(in folder: String, ending suffix: String) -> [String] {
@@ -221,6 +254,8 @@ struct XcodeProjectFile: Sendable {
     let localPackages: [String]
     /// Folder references in the project navigator that hold a Package.swift.
     let packageFolders: [String]
+    /// Other projects this one references (subprojects), standardized.
+    let referencedProjects: [String]
 
     struct Target: Sendable {
         let id: String
@@ -230,6 +265,8 @@ struct XcodeProjectFile: Sendable {
         let deviceFamilies: [Int]
         /// Why `platforms` (or, for an iOS app, `deviceFamilies`) isn't known; nil when it is.
         let unknown: String?
+        /// Whether it depends on another target (a test bundle on its host app, say).
+        let hasDependencies: Bool
 
         var isApp: Bool { productType.hasPrefix("com.apple.product-type.application") }
         var isTest: Bool {
@@ -292,14 +329,20 @@ struct XcodeProjectFile: Sendable {
                                               baseFile: baseFile)
             let runsOn = settings.platforms(isApp: productType.hasPrefix("com.apple.product-type.application"))
             return Target(id: id, name: name, productType: productType, platforms: runsOn.platforms,
-                          deviceFamilies: runsOn.families, unknown: runsOn.unknown)
+                          deviceFamilies: runsOn.families, unknown: runsOn.unknown,
+                          hasDependencies: !(object["dependencies"] as? [String] ?? []).isEmpty)
         }
         let packageFolders = objects.filter { _, object in
             object["isa"] as? String == "PBXFileReference"
                 && (object["lastKnownFileType"] as? String == "folder" || object["explicitFileType"] as? String == "folder")
         }.compactMap { location(of: $0.key) }
             .filter { FileManager.default.fileExists(atPath: $0 + "/Package.swift") }.sorted()
-        return XcodeProjectFile(path: path, targets: targets, localPackages: localPackages, packageFolders: packageFolders)
+        let referencedProjects = objects.filter { _, object in
+            object["isa"] as? String == "PBXFileReference"
+                && (object["lastKnownFileType"] as? String == "wrapper.pb-project" || object["explicitFileType"] as? String == "wrapper.pb-project")
+        }.compactMap { location(of: $0.key) }.sorted()
+        return XcodeProjectFile(path: path, targets: targets, localPackages: localPackages, packageFolders: packageFolders,
+                                referencedProjects: referencedProjects)
     }
 }
 
@@ -349,7 +392,7 @@ struct BuildSettingLevels {
     func platforms(isApp: Bool) -> (platforms: [AppPlatform], families: [Int], unknown: String?) {
         var seen: (platforms: [AppPlatform], families: [Int])?
         for configuration in target {
-            let platforms: [AppPlatform]
+            var platforms: [AppPlatform]
             switch value("SUPPORTED_PLATFORMS", configuration: configuration) {
             case .set(let list):
                 platforms = Set(list.split(separator: " ").compactMap { AppPlatform(sdk: String($0)) }).sorted()
@@ -367,6 +410,9 @@ struct BuildSettingLevels {
                 case .absent: return ([], [], "it sets no SDKROOT")
                 }
             }
+            if value("SUPPORTS_MACCATALYST", configuration: configuration) == .set("YES") {
+                platforms = Catalyst.asIOS(platforms)
+            }
             var families: [Int] = []
             switch value("TARGETED_DEVICE_FAMILY", configuration: configuration) {
             case .set(let list):
@@ -376,6 +422,7 @@ struct BuildSettingLevels {
             case .absent:
                 if platforms.contains(.iOS) { families = [1] }               // the iOS SDK's default: iPhone
             }
+            families.removeAll { $0 == Catalyst.deviceFamily }
             if let seen, seen != (platforms, families) {
                 return ([], [], "its build configurations build for different devices")
             }
@@ -423,7 +470,7 @@ enum Xcconfig {
     }
 }
 
-/// The BuildableReferences of a scheme's build action, in order.
+/// The BuildableReferences of a scheme's build action, in order, and of its test action's Testables.
 enum SchemeFile {
     struct Buildable: Sendable, Equatable {
         let id: String
@@ -432,29 +479,34 @@ enum SchemeFile {
         let container: String
     }
 
-    static func buildables(_ path: String) -> [Buildable]? {
+    static func read(_ path: String) -> (built: [Buildable], tested: [Buildable])? {
         guard let parser = XMLParser(contentsOf: URL(fileURLWithPath: path)) else { return nil }
         let delegate = Delegate()
         parser.delegate = delegate
         guard parser.parse() else { return nil }
-        return delegate.buildables
+        return (delegate.built, delegate.tested)
     }
 
     final class Delegate: NSObject, XMLParserDelegate {
-        var buildables: [Buildable] = []
+        var built: [Buildable] = []
+        var tested: [Buildable] = []
         var inBuildAction = false
+        var inTestables = false
 
         func parser(_ parser: XMLParser, didStartElement element: String, namespaceURI: String?, qualifiedName: String?,
                     attributes: [String: String] = [:]) {
             if element == "BuildAction" { inBuildAction = true }
-            guard inBuildAction, element == "BuildableReference", let container = attributes["ReferencedContainer"],
-                  container.hasPrefix("container:") else { return }
-            buildables.append(Buildable(id: attributes["BlueprintIdentifier"] ?? "", name: attributes["BlueprintName"] ?? "",
-                                        container: String(container.dropFirst("container:".count))))
+            if element == "Testables" { inTestables = true }
+            guard inBuildAction || inTestables, element == "BuildableReference",
+                  let container = attributes["ReferencedContainer"], container.hasPrefix("container:") else { return }
+            let buildable = Buildable(id: attributes["BlueprintIdentifier"] ?? "", name: attributes["BlueprintName"] ?? "",
+                                      container: String(container.dropFirst("container:".count)))
+            if inBuildAction { built.append(buildable) } else { tested.append(buildable) }
         }
 
         func parser(_ parser: XMLParser, didEndElement element: String, namespaceURI: String?, qualifiedName: String?) {
             if element == "BuildAction" { inBuildAction = false }
+            if element == "Testables" { inTestables = false }
         }
     }
 }
@@ -578,5 +630,16 @@ public struct PackageLayout: Sendable, Equatable {
             let tests = targets.filter { $0.kind == "test" && !$0.dependencies.contains(where: productTargets.contains) }.map(\.name)
             return declared + executables + tests
         }
+    }
+}
+
+/// A Mac Catalyst app runs in the iOS simulator, so xcd counts it as an iOS app, whether the project files say
+/// SUPPORTS_MACCATALYST or `-showBuildSettings` (with no destination) reports its Mac variant.
+enum Catalyst {
+    /// TARGETED_DEVICE_FAMILY's Mac Catalyst value; no simulator has it.
+    static let deviceFamily = 6
+
+    static func asIOS(_ platforms: [AppPlatform]) -> [AppPlatform] {
+        Set(platforms.filter { $0 != .macOS } + [.iOS]).sorted()
     }
 }

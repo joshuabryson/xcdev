@@ -86,7 +86,7 @@ public struct InitService: Sendable {
         }
         let detector = ProjectDetector(runner: runner, developerDir: selected?.developerDir, scratch: scratch,
                                        xcodeDerivedData: xcodeDerivedData, progress: progress)
-        let detected = try await detector.detect(root: root, container: container ?? best)
+        let detected = try await detector.detect(root: root, container: container ?? best, projectRoot: location.projectRoot)
         let catalog = try await SimctlClient(runner: runner, developerDir: selected?.developerDir).catalog()
         return InitPlanner.plan(detected: detected, containers: containers, folder: URL(fileURLWithPath: root).lastPathComponent,
                                 catalog: catalog, xcodes: installs, selected: selected)
