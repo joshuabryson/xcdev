@@ -32,6 +32,8 @@ xcd help                  # every command, project command, and plugin
 - `skills/xcdev/SKILL.md` is an agent skill, and `docs/agents/AGENTS-snippet.md` is a snippet for a project's
   `AGENTS.md`, that teach agents to use `xcd`.
 - Every failure ends with a `next:` line, and `--json` prints one JSON object per command.
+- Ctrl-C (or SIGTERM) stops what xcd started, xcodebuild and its compilers included, and exits 130 (143 for
+  SIGTERM) with one `xcd: interrupted` line on stderr.
 - `xcd doctor` checks simulators, worktrees, xcd's scratch folders and package caches, and the project's setup;
   `xcd doctor --fix` repairs what it can. It may restart CoreSimulator, which shuts down every agent's simulators, so
   read the problems first.
@@ -42,6 +44,8 @@ xcd help                  # every command, project command, and plugin
   environment variables.
 - **Plugins**: any `xcd-<name>` executable on `PATH` runs as `xcd <name>`; `xcd-<name> --xcd-describe` gives `xcd help`
   its one-line description.
+- Project commands and plugins share xcd's terminal, so they can prompt and read input, and Ctrl-C reaches them
+  directly; `xcd <name>` exits with their exit code (128 + the signal if one ended them, 130 for Ctrl-C).
 - **Hooks** (`hooks:`): `post-worktree-create`, `pre-build`, `post-launch`, and `pre-worktree-remove`.
 
 `xcd config explain <key>` documents every setting.
