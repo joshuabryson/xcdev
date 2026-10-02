@@ -183,13 +183,100 @@ import XcdevTestSupport
         #expect(orphans.compactMap(\.subject).sorted() == [gone, other].sorted())
         #expect(orphans.first { $0.subject == gone }?.message == "xcd · Sample App · deleted · iphone (\(gone)) is orphaned: its worktree no longer exists")
         #expect(report.failure?.code == .doctorProblems)
-        #expect(report.failure?.next == "run `xcd doctor --fix` to fix 2 of them")
+        #expect(report.failure?.next == "run `xcd doctor --fix` to fix 1 of them; the others say what to do")
         #expect(sims.devices == before)                                           // nothing changed without --fix
 
+        // `other` is from a project this registry doesn't know: maybe another XCDEV_HOME's, so it is only reported.
         let fixed = await doctor(project).run(fix: true, from: nil)
-        #expect(fixed.problems.filter(\.fixed).count == 2 && fixed.failure == nil)
-        #expect(Set(sims.devices.map(\.udid)).isSuperset(of: [owned, inFlight]))
-        #expect(!sims.devices.contains { $0.udid == gone || $0.udid == other })
+        #expect(fixed.problems.filter(\.fixed).map(\.subject) == [gone])
+        #expect(fixed.remaining.map(\.subject) == [other] && fixed.remaining[0].fixError == nil)
+        #expect(Set(sims.devices.map(\.udid)).isSuperset(of: [owned, inFlight, other]))
+        #expect(!sims.devices.contains { $0.udid == gone })
+    }
+
+    /// Makes `path`'s folder look created `seconds` ago, and returns a dataPath inside it.
+    func agedDevice(_ path: String, seconds: TimeInterval) throws -> String {
+        try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.creationDate: Date().addingTimeInterval(-seconds)], ofItemAtPath: path)
+        return path + "/data"
+    }
+
+    /// With no registry.json (a fresh or different XCDEV_HOME), no clone has a known owner,
+    /// so none is deleted; each is reported with the command to delete it by hand.
+    @Test func aMissingRegistryNeverDeletesClones() async throws {
+        let (project, sims, _, _) = try await setup()
+        defer { project.remove() }
+        try FileManager.default.removeItem(atPath: GlobalPaths(base: project.home).registryFile)
+        let clone = sims.add(name: "xcd · Sample App · main · iphone",
+                             dataPath: try agedDevice(project.base + "/old-device", seconds: 3600))
+
+        let report = await doctor(project).run(fix: true, from: nil)
+        #expect(sims.devices.contains { $0.udid == clone })
+        let problem = try #require(report.problems.first { $0.check == "orphaned-clones" })
+        #expect(problem.message == "xcd · Sample App · main · iphone (\(clone)) is orphaned: no worktree in this registry is from its project")
+        #expect(problem.next == "it may belong to another xcd state folder (XCDEV_HOME); if not, delete it with `xcrun simctl delete \(clone)`")
+        #expect(problem.action == nil && !problem.fixed && problem.fixError == nil)
+        #expect(report.failure?.next == problem.next)
+        #expect(!fake.calls.contains { $0.argv.starts(with: ["xcrun", "simctl", "delete"]) })
+    }
+
+    /// A clone of a known project whose worktree is no longer registered is deleted, however old it is.
+    @Test func aCloneOfAKnownProjectsGoneWorktreeIsDeleted() async throws {
+        let (project, sims, _, _) = try await setup()
+        defer { project.remove() }
+        let clone = sims.add(name: "xcd · Sample App · gone · iphone",
+                             dataPath: try agedDevice(project.base + "/old-device", seconds: 601))
+        let report = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: nil)
+        #expect(report.problems.map(\.message) == ["xcd · Sample App · gone · iphone (\(clone)) is orphaned: its worktree no longer exists"])
+        #expect(report.problems.allSatisfy { $0.fixed } && report.failure == nil)
+        #expect(!sims.devices.contains { $0.udid == clone })
+    }
+
+    /// Project names are folder names, so two checkouts of one repo each have a
+    /// "Sample App/main". Their clones look the same; one is spared if either worktree would spare it.
+    @Test func aCloneIsSparedIfAnyWorktreeOfItsNameWouldSpareIt() async throws {
+        let (project, sims, _, _) = try await setup()
+        defer { project.remove() }
+        // A second checkout named "Sample App", registered after ours, whose worktree.json can't be read.
+        let twin = project.base + "/zz/Sample App"
+        try FileManager.default.createDirectory(atPath: twin + "/.xcdev", withIntermediateDirectories: true)
+        try Data("{ not json".utf8).write(to: URL(fileURLWithPath: WorktreePaths(root: twin).stateFile))
+        let twinState = WorktreeState(id: "twin-id", name: "main", project: "Sample App", projectRoot: twin, path: twin,
+                                      branch: "main", xcode: nil, devices: [:], status: .ready, createdAt: Date())
+        let registry = Registry(paths: GlobalPaths(base: project.home))
+        try await registry.upsert(RegistryEntry(twinState))
+        #expect(try registry.entries().map(\.projectRoot) == [project.root, twin].sorted())
+        let clone = sims.add(name: "xcd · Sample App · main · ipad",
+                             dataPath: try agedDevice(project.base + "/old-device", seconds: 3600))
+
+        let report = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: nil)
+        #expect(report.problems.isEmpty)
+        #expect(sims.devices.contains { $0.udid == clone })
+
+        try await registry.remove(id: "twin-id")                                // with only ours, it is an orphan
+        let alone = await doctor(project).run(fix: false, checks: [OrphanedClonesCheck()], from: nil)
+        #expect(alone.problems.map(\.subject) == [clone])
+    }
+
+    /// Ownership is by name prefix, so " · " inside a device key or project name doesn't
+    /// make a young clone of a registered worktree look ownerless.
+    @Test func namesContainingTheSeparatorKeepTheirOwner() async throws {
+        let (project, sims, _, _) = try await setup()
+        defer { project.remove() }
+        let odd = project.base + "/Odd · Name"
+        try FileManager.default.createDirectory(atPath: odd, withIntermediateDirectories: true)
+        let state = WorktreeState(id: "odd-id", name: "main", project: "Odd · Name", projectRoot: odd, path: odd,
+                                  branch: "main", xcode: nil, devices: [:], status: .ready, createdAt: Date())
+        try WorktreeStateStore.save(state, WorktreePaths(root: odd))
+        try await Registry(paths: GlobalPaths(base: project.home)).upsert(RegistryEntry(state))
+        let key = sims.add(name: "xcd · Sample App · main · iPhone · Pro",
+                           dataPath: try agedDevice(project.base + "/young-1", seconds: 5))
+        let name = sims.add(name: "xcd · Odd · Name · main · iphone",
+                            dataPath: try agedDevice(project.base + "/young-2", seconds: 5))
+
+        let report = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: nil)
+        #expect(report.problems.isEmpty)
+        #expect(Set(sims.devices.map(\.udid)).isSuperset(of: [key, name]))
     }
 
     /// An unrecorded clone of a registered worktree is spared only while it is young.
@@ -445,7 +532,7 @@ import XcdevTestSupport
         let (project, sims, _, _) = try await setup()
         defer { project.remove() }
         sims.add(name: "xcd-template · iPhone 18 Pro · iOS 27.0", state: "Booted")
-        let orphan = sims.add(name: "xcd · Gone · x · iphone")
+        let orphan = sims.add(name: "xcd · Sample App · gone · iphone")
         let report = await doctor(project).run(fix: true, checks: DoctorService.pruneChecks, from: nil, includeDisk: false)
         #expect(report.checks.map(\.id) == ["missing-worktrees", "orphaned-clones"])
         #expect(report.problems.count == 1 && report.problems[0].subject == orphan && report.problems[0].fixed)

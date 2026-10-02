@@ -101,12 +101,16 @@ public struct TemplatesCheck: DoctorCheck {
     }
 }
 
-/// xcd-named clones that no worktree records. A clone younger than `graceSeconds` whose worktree is registered
-/// is left alone: another agent may be cloning it right now.
+/// xcd-named clones that no worktree records.
 ///
-/// Nothing is reported while the registry can't be read: every clone would look orphaned, including other
-/// agents'. Nor is a clone whose worktree a `wt create` or `wt remove` is working on, or whose worktree.json
-/// couldn't be read, or whose age is unknown while its worktree is registered.
+/// Only a clone of a project this registry knows is deleted by `--fix`: another xcd state folder (a different
+/// `XCDEV_HOME`, or a fresh one with no registry.json yet) has its own registry and clones, which this one can't
+/// tell apart from orphans. Those are reported with the command to delete them by hand, and never fixed.
+///
+/// A clone is left alone while any registry entry it could belong to says so: that worktree is being created or
+/// removed, its worktree.json can't be read, or the clone is younger than `graceSeconds` (or of unknown age), as
+/// another agent may be cloning it right now. Nothing at all is reported while the registry can't be read.
+/// Ownership is decided by name prefix against every entry, since project and device names may contain " · ".
 public struct OrphanedClonesCheck: DoctorCheck {
     public let id = "orphaned-clones"
     public let graceSeconds: TimeInterval
@@ -117,19 +121,25 @@ public struct OrphanedClonesCheck: DoctorCheck {
         let recorded = env.recordedClones
         return catalog.devices.compactMap { device in
             guard device.name.hasPrefix(SimNaming.clonePrefix), !recorded.contains(device.udid) else { return nil }
-            let parts = device.name.dropFirst(SimNaming.clonePrefix.count).components(separatedBy: " · ")
-            let entry = parts.count == 3 ? env.registry.first { $0.project == parts[0] && $0.name == parts[1] } : nil
+            let label = "\(device.name) (\(device.udid)) is orphaned"
+            guard env.registry.contains(where: { device.name.hasPrefix(SimNaming.clonePrefix + $0.project + " · ") }) else {
+                return DoctorProblem(check: id, message: "\(label): no worktree in this registry is from its project",
+                                     next: "it may belong to another xcd state folder (XCDEV_HOME); if not, delete it with `xcrun simctl delete \(device.udid)`",
+                                     subject: device.udid)
+            }
+            let entries = env.registry.filter {
+                device.name.hasPrefix(SimNaming.clone(project: $0.project, worktree: $0.name, device: ""))
+            }
             var owner: RegistryEntry?
-            if let entry {
+            for entry in entries {
                 if env.isBusy(entry) { return nil }
-                if FileManager.default.fileExists(atPath: entry.path) {
-                    guard env.states[entry.id] != nil else { return nil }        // its worktree.json is unreadable
-                    guard let age = env.age(of: device), age >= graceSeconds else { return nil }
-                    owner = entry
-                }
+                guard FileManager.default.fileExists(atPath: entry.path) else { continue }
+                guard env.states[entry.id] != nil else { return nil }          // its worktree.json is unreadable
+                guard let age = env.age(of: device), age >= graceSeconds else { return nil }
+                owner = owner ?? entry
             }
             let why = owner.map { "\($0.project)/\($0.name) doesn't record it" } ?? "its worktree no longer exists"
-            return DoctorProblem(check: id, message: "\(device.name) (\(device.udid)) is orphaned: \(why)",
+            return DoctorProblem(check: id, message: "\(label): \(why)",
                                  action: .deleteSimulator, fix: "shut it down and delete it", subject: device.udid)
         }
     }
