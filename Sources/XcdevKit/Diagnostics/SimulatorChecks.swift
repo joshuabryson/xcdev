@@ -105,7 +105,7 @@ public struct TemplatesCheck: DoctorCheck {
 ///
 /// Only a clone of a project this registry knows is deleted by `--fix`: another xcd state folder (a different
 /// `XCDEV_HOME`, or a fresh one with no registry.json yet) has its own registry and clones, which this one can't
-/// tell apart from orphans. Those are reported with the command to delete them by hand, and never fixed.
+/// tell apart from orphans. Entries an earlier fix in this run dropped (`formerEntries`) still count as known. Those are reported with the command to delete them by hand, and never fixed.
 ///
 /// A clone is left alone while any registry entry it could belong to says so: that worktree is being created or
 /// removed, its worktree.json can't be read, or the clone is younger than `graceSeconds` (or of unknown age), as
@@ -119,22 +119,24 @@ public struct OrphanedClonesCheck: DoctorCheck {
     public func detect(_ env: DoctorEnvironment) async -> [DoctorProblem] {
         guard env.registryError == nil, let catalog = env.catalog else { return [] }
         let recorded = env.recordedClones
+        // Entries this run dropped still name their clones' owner: a gone worktree, whose clones can go too.
+        let known = env.registry + env.formerEntries
         return catalog.devices.compactMap { device in
             guard device.name.hasPrefix(SimNaming.clonePrefix), !recorded.contains(device.udid) else { return nil }
             let label = "\(device.name) (\(device.udid)) is orphaned"
-            guard env.registry.contains(where: { device.name.hasPrefix(SimNaming.clonePrefix + $0.project + " · ") }) else {
+            guard known.contains(where: { device.name.hasPrefix(SimNaming.clonePrefix + $0.project + " · ") }) else {
                 return DoctorProblem(check: id, message: "\(label): no worktree in this registry is from its project",
                                      next: "it may belong to another xcd state folder (XCDEV_HOME); if not, delete it with `xcrun simctl delete \(device.udid)`",
                                      subject: device.udid)
             }
-            let entries = env.registry.filter {
+            let entries = known.filter {
                 device.name.hasPrefix(SimNaming.clone(project: $0.project, worktree: $0.name, device: ""))
             }
             var owner: RegistryEntry?
             for entry in entries {
                 if env.isBusy(entry) { return nil }
                 guard FileManager.default.fileExists(atPath: entry.path) else { continue }
-                guard env.states[entry.id] != nil else { return nil }          // its worktree.json is unreadable
+                guard env.states[entry.id] != nil else { return nil }          // its worktree.json is unreadable, or it was dropped
                 guard let age = env.age(of: device), age >= graceSeconds else { return nil }
                 owner = owner ?? entry
             }

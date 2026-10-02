@@ -127,11 +127,19 @@ public struct DoctorService: Sendable {
                     }
                 }
                 problems = problems.indices.filter { !leftAlone.contains($0) }.map { problems[$0] }
+                let before = env
                 env = await environment(from: directory)
+                env.formerEntries = Self.formerEntries(before, now: env.registry)
             }
             results.append(.init(id: check.id, problems: problems, inProgress: inProgress))
         }
         return DoctorReport(fixMode: fix, checks: results, disk: includeDisk ? await disk(env) : nil)
+    }
+
+    /// The entries `before` (or a snapshot before it) had that `now` lacks, each once.
+    static func formerEntries(_ before: DoctorEnvironment, now: [RegistryEntry]) -> [RegistryEntry] {
+        var seen = Set(now.map(\.id))
+        return (before.formerEntries + before.registry).filter { seen.insert($0.id).inserted }
     }
 
     public func environment(from directory: String?) async -> DoctorEnvironment {

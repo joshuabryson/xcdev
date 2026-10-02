@@ -232,6 +232,26 @@ import XcdevTestSupport
         #expect(!sims.devices.contains { $0.udid == clone })
     }
 
+    /// Deleting a whole project folder by hand drops its last registry entry during the fix. Its clones
+    /// were that entry's, so they are still deleted in the same run rather than becoming of unknown owner.
+    @Test func aProjectDeletedByHandLeavesNothingBehindAfterFix() async throws {
+        let (project, sims, worktrees, _) = try await setup()
+        defer { project.remove() }
+        let solo = try TempProject.make(config: WorktreeServiceTests.config, name: "Solo")
+        defer { try? FileManager.default.removeItem(atPath: solo.base) }
+        var soloMain = try await worktrees.open(from: solo.root)                 // Solo's only registry entry
+        let clone = sims.add(name: "xcd · Solo · main · iphone")
+        try record(clone, as: "iphone", in: &soloMain)
+        try FileManager.default.removeItem(atPath: solo.base)
+
+        let report = await doctor(project).run(fix: true, from: nil)
+        #expect(report.problems.map(\.check) == ["missing-worktrees", "orphaned-clones"])
+        #expect(report.problems.allSatisfy { $0.fixed } && report.failure == nil)
+        #expect(try worktrees.list(projectRoot: nil).map(\.project) == ["Sample App"])
+        #expect(!sims.devices.contains { $0.udid == clone })
+        #expect(await doctor(project).run(fix: false, from: nil).problems.isEmpty)
+    }
+
     /// Project names are folder names, so two checkouts of one repo each have a
     /// "Sample App/main". Their clones look the same; one is spared if either worktree would spare it.
     @Test func aCloneIsSparedIfAnyWorktreeOfItsNameWouldSpareIt() async throws {

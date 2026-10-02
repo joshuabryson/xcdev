@@ -88,6 +88,10 @@ public struct DoctorEnvironment: Sendable {
     /// Registry ids of worktrees whose lock a `wt create` or `wt remove` holds, probed once for this snapshot so
     /// every check sees the same answer (an entry is never both a problem and in progress).
     public var busy: Set<String> = []
+    /// Registry entries an earlier snapshot of this same doctor run had and this one doesn't, typically because
+    /// a fix dropped them. Their clones still have a known owner (a gone worktree), so they can be deleted in
+    /// the same run even when the dropped entry was its project's last one.
+    public var formerEntries: [RegistryEntry] = []
 
     public var simctl: SimctlClient { SimctlClient(runner: runner, developerDir: nil, sleep: sleep) }
 
