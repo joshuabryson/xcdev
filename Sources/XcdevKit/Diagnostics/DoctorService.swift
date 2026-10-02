@@ -106,7 +106,7 @@ public struct DoctorService: Sendable {
     /// `directory` is where doctor was run; inside a project, its setup is checked too.
     public func run(fix: Bool, checks: [any DoctorCheck] = allChecks, from directory: String?,
                     includeDisk: Bool = true) async -> DoctorReport {
-        var env = await environment(from: directory)
+        var env = await environment(from: directory, fixing: fix)
         var results: [DoctorReport.CheckResult] = []
         for check in checks where check.applies(env) {
             var problems = await check.detect(env)
@@ -128,7 +128,7 @@ public struct DoctorService: Sendable {
                 }
                 problems = problems.indices.filter { !leftAlone.contains($0) }.map { problems[$0] }
                 let before = env
-                env = await environment(from: directory)
+                env = await environment(from: directory, fixing: fix)
                 env.formerEntries = Self.formerEntries(before, now: env.registry)
             }
             results.append(.init(id: check.id, problems: problems, inProgress: inProgress))
@@ -142,7 +142,7 @@ public struct DoctorService: Sendable {
         return (before.formerEntries + before.registry).filter { seen.insert($0.id).inserted }
     }
 
-    public func environment(from directory: String?) async -> DoctorEnvironment {
+    public func environment(from directory: String?, fixing: Bool = false) async -> DoctorEnvironment {
         var catalog: SimCatalog?
         var catalogFailure: XcdError?
         do {
@@ -171,7 +171,7 @@ public struct DoctorService: Sendable {
         return DoctorEnvironment(runner: runner, globalPaths: globalPaths, catalog: catalog, catalogFailure: catalogFailure,
                                  registry: registry, registryError: registryError, states: states,
                                  project: await project(from: directory), discovery: discovery, now: now(), sleep: sleep,
-                                 busy: busy)
+                                 busy: busy, fixing: fixing)
     }
 
     /// The project at `directory`, read-only: a missing or invalid .xcdev.yml is recorded, not thrown.

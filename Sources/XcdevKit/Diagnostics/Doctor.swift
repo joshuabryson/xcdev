@@ -92,6 +92,9 @@ public struct DoctorEnvironment: Sendable {
     /// a fix dropped them. Their clones still have a known owner (a gone worktree), so they can be deleted in
     /// the same run even when the dropped entry was its project's last one.
     public var formerEntries: [RegistryEntry] = []
+    /// Whether this is a `--fix` run. A plain `doctor` reports a clone that is still booting as in progress, since
+    /// only the fix waits to see whether it settles.
+    public var fixing = false
 
     public var simctl: SimctlClient { SimctlClient(runner: runner, developerDir: nil, sleep: sleep) }
 

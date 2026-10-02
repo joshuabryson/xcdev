@@ -29,10 +29,13 @@ public struct SimctlClient: Sendable {
         return out.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// How long `simctl boot` may take, which is about how long a clone may sit in `Booting` while xcd boots it.
+    public static let bootTimeout = Duration.seconds(180)
+
     /// Boots and waits until the device has finished booting. Returns how many transient-state retries happened.
     @discardableResult
     public func boot(udid: String) async throws -> Int {
-        let retries = try await retrying(["boot", udid], alreadyDone: "current state: Booted", timeout: .seconds(180))
+        let retries = try await retrying(["boot", udid], alreadyDone: "current state: Booted", timeout: Self.bootTimeout)
         try await runner.runChecked(simctl(["bootstatus", udid, "-b"], timeout: .seconds(300)),
                                     code: .simulatorFailed, next: "run `xcd doctor`")
         return retries

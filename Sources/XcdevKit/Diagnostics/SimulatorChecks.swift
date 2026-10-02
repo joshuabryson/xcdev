@@ -158,14 +158,17 @@ public struct OrphanedClonesCheck: DoctorCheck {
 }
 
 /// Recorded clones that are unavailable (their runtime was removed) or stuck booting or shutting down.
+///
+/// The clones of a worktree another xcd is creating or removing are left to it. A plain `doctor` lists a clone
+/// that is still `Booting` as in progress, since a cold boot can take minutes; only `--fix` waits to see.
 public struct StuckClonesCheck: DoctorCheck {
     public let id = "stuck-clones"
     static let transient: Set<String> = ["Booting", "Shutting Down", "Creating"]
     /// How long a transient state must last to be reported as stuck.
     public let patience: Duration
-    /// How long the fix waits for a stuck clone to settle by itself before shutting it down: a cold boot of a
-    /// fresh clone can take a minute or two, and another agent may be waiting on it.
-    static let settleTimeout = Duration.seconds(120)
+    /// How long the fix waits for a stuck clone to settle by itself before shutting it down: longer than xcd's
+    /// own `simctl boot` may take, since another agent may be booting it and waiting on it.
+    static let settleTimeout = SimctlClient.bootTimeout + .seconds(60)
     static let settlePoll = Duration.seconds(5)
 
     public init(patience: Duration = .seconds(5)) { self.patience = patience }
@@ -173,23 +176,50 @@ public struct StuckClonesCheck: DoctorCheck {
     public func detect(_ env: DoctorEnvironment) async -> [DoctorProblem] {
         guard let catalog = env.catalog else { return [] }
         let recorded = env.recordedClones
-        let clones = catalog.devices.filter { recorded.contains($0.udid) }
+        let clones = catalog.devices.filter { recorded.contains($0.udid) && Self.busyOwner(of: $0.udid, env) == nil }
         var problems = clones.filter { !$0.isAvailable }.map { device in
             DoctorProblem(check: id, message: "\(device.name) (\(device.udid)) is unavailable; its runtime may have been removed",
                           action: .deleteSimulator, fix: "delete it; it is cloned again on next use", subject: device.udid)
         }
-        let busy = clones.filter { $0.isAvailable && Self.transient.contains($0.state) }
-        guard !busy.isEmpty else { return problems }
+        let settling = clones.filter {
+            $0.isAvailable && Self.transient.contains($0.state) && (env.fixing || $0.state != "Booting")
+        }
+        guard !settling.isEmpty else { return problems }
         try? await env.sleep(patience)
         let later = (try? await env.simctl.catalog()) ?? catalog
-        for device in busy {
+        for device in settling {
             guard let now = later.device(udid: device.udid), Self.transient.contains(now.state) else { continue }
             problems.append(DoctorProblem(check: id, message: "\(device.name) (\(device.udid)) is stuck in \(now.state)",
                                           action: .shutDownSimulator,
-                                          fix: "if it is still stuck in 2 minutes, shut it down, or delete it if that fails (it is cloned again on next use)",
+                                          fix: "if it is still stuck in \(Self.settleMinutes) minutes, shut it down, or delete it if that fails (it is cloned again on next use)",
                                           subject: device.udid))
         }
         return problems
+    }
+
+    /// Clones of busy worktrees that would otherwise be problems, and, without `--fix`, clones still booting.
+    public func inProgress(_ env: DoctorEnvironment) -> [String] {
+        guard let catalog = env.catalog else { return [] }
+        let recorded = env.recordedClones
+        return catalog.devices.filter { recorded.contains($0.udid) }.compactMap { device in
+            let label = "\(device.name) (\(device.udid))"
+            if let owner = Self.busyOwner(of: device.udid, env) {
+                guard !device.isAvailable || Self.transient.contains(device.state) else { return nil }
+                let state = device.isAvailable ? device.state : "unavailable"
+                return "\(label) is \(state) while \(owner.project)/\(owner.name) is being created or removed by another xcd; left alone"
+            }
+            guard !env.fixing, device.isAvailable, device.state == "Booting" else { return nil }
+            return "\(label) is Booting, which can take a few minutes; `--fix` shuts it down if it is still booting after \(Self.settleMinutes) minutes"
+        }
+    }
+
+    static var settleMinutes: Int64 { settleTimeout.components.seconds / 60 }
+
+    /// The worktree recording `udid` whose `wt create` or `wt remove` is running, if any.
+    static func busyOwner(of udid: String, _ env: DoctorEnvironment) -> RegistryEntry? {
+        env.registry.first { entry in
+            env.isBusy(entry) && env.states[entry.id]?.devices.values.contains { $0.udid == udid } == true
+        }
     }
 
     public func fix(_ problem: DoctorProblem, _ env: DoctorEnvironment) async throws {
