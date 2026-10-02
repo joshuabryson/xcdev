@@ -12,7 +12,7 @@ public struct XcodeDiscovery: Sendable {
     /// Installed Xcodes, newest first. Spotlight plus a scan of Xcode*.app in the applications directories.
     public func installs() async -> [XcodeInstall] {
         var paths: [String] = []
-        let query = Invocation("/usr/bin/mdfind", ["kMDItemCFBundleIdentifier == 'com.apple.dt.Xcode'"],
+        let query = Invocation("/usr/bin/mdfind", ["kMDItemCFBundleIdentifier == '\(Self.bundleIdentifier)'"],
                                timeout: .seconds(10))
         if let spotlight = try? await runner.run(query), spotlight.succeeded {
             paths += spotlight.stdoutString.split(separator: "\n").map(String.init)
@@ -49,8 +49,12 @@ public struct XcodeDiscovery: Sendable {
         return try XcodeResolver.resolve(spec: resolveSpec, installs: all, selectedDeveloperDir: await selectedDeveloperDir())
     }
 
+    public static let bundleIdentifier = "com.apple.dt.Xcode"
+
+    /// Nil unless `path` is an Xcode: the /Applications scan also matches apps such as Xcodes.app, a version manager.
     public static func readInstall(atPath path: String) -> XcodeInstall? {
         guard let info = NSDictionary(contentsOfFile: path + "/Contents/Info.plist"),
+              info["CFBundleIdentifier"] as? String == bundleIdentifier,
               let version = info["CFBundleShortVersionString"] as? String else { return nil }
         let build = NSDictionary(contentsOfFile: path + "/Contents/version.plist")?["ProductBuildVersion"] as? String
         return XcodeInstall(path: path, version: version, build: build ?? "unknown")

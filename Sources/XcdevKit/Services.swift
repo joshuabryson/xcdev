@@ -40,6 +40,7 @@ public struct Services: Sendable {
     public var projectCommands: ProjectCommandRunner {
         ProjectCommandRunner(builds: builds, output: output, environment: environment)
     }
+    public var setup: InitService { InitService(runner: runner, globalPaths: globalPaths) }
     public var externalCommands: ExternalCommands { ExternalCommands(services: self) }
     public var help: HelpService { HelpService(services: self) }
     public var logs: LogService { LogService(runner: runner, provisioner: provisioner) }

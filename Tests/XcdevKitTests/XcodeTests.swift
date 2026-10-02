@@ -60,6 +60,9 @@ import XcdevTestSupport
         try Self.makeFakeXcode(at: apps + "/Xcode.app", version: "27.0", build: "27A266a")
         try Self.makeFakeXcode(at: apps + "/Xcode-beta.app", version: "27.1", build: "27B5024e")
         try FileManager.default.createDirectory(atPath: apps + "/Notes.app", withIntermediateDirectories: true)
+        // Xcodes.app (a version manager) matches the Xcode*.app scan but is not an Xcode.
+        try Self.makeFakeXcode(at: apps + "/Xcodes.app", version: "1.6.0", build: "x",
+                               bundleIdentifier: "com.robotsandpencils.XcodesApp")
 
         let fake = FakeProcessRunner()
         fake.stub(["mdfind"], stdout: apps + "/Xcode.app\n")          // duplicate of the directory scan
@@ -100,9 +103,11 @@ import XcdevTestSupport
         #expect(XcodeInstall(path: "/Volumes/beta/Xcode.app", version: "27.0", build: "x").isBeta == false)
     }
 
-    static func makeFakeXcode(at path: String, version: String, build: String) throws {
+    static func makeFakeXcode(at path: String, version: String, build: String,
+                              bundleIdentifier: String = XcodeDiscovery.bundleIdentifier) throws {
         try FileManager.default.createDirectory(atPath: path + "/Contents", withIntermediateDirectories: true)
-        (["CFBundleShortVersionString": version] as NSDictionary).write(toFile: path + "/Contents/Info.plist", atomically: true)
+        (["CFBundleShortVersionString": version, "CFBundleIdentifier": bundleIdentifier] as NSDictionary)
+            .write(toFile: path + "/Contents/Info.plist", atomically: true)
         (["ProductBuildVersion": build] as NSDictionary).write(toFile: path + "/Contents/version.plist", atomically: true)
     }
 }
