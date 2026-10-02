@@ -70,8 +70,9 @@ public struct WorktreeService: Sendable {
             .sorted { ($0.project, $0.name) < ($1.project, $1.name) }
     }
 
-    /// `list` plus each worktree's branch, clones, and their boot state. Boot state comes from one
-    /// `simctl list` call (skipped when no worktree has clones); if it fails, states are "unknown".
+    /// `list` plus each worktree's branch, clones, their boot state, and the size of its `.xcdev/` folder.
+    /// Boot state comes from one `simctl list` call (skipped when no worktree has clones); if it fails, states
+    /// are "unknown". Sizes come from one `du` call; if it fails, sizes are left out.
     public func listDetails(projectRoot: String?) async throws -> [WorktreeListItem] {
         let fm = FileManager.default
         let loaded = try list(projectRoot: projectRoot).map { entry -> (RegistryEntry, WorktreeState?, Bool) in
@@ -83,13 +84,15 @@ public struct WorktreeService: Sendable {
         if loaded.contains(where: { !($0.1?.devices.isEmpty ?? true) }) {
             catalog = try? await SimctlClient(runner: runner, developerDir: nil).catalog()
         }
+        let sizes = await DiskUsage(runner: runner).bytes(of: loaded.filter(\.2).map { WorktreePaths(root: $0.0.path).stateDirectory })
         return loaded.map { entry, state, exists in
             let devices = (state?.devices ?? [:]).sorted { $0.key < $1.key }.map { name, device in
                 let simState = catalog.map { $0.device(udid: device.udid)?.state ?? "gone" } ?? "unknown"
                 return WorktreeListItem.Device(name: name, udid: device.udid, state: simState)
             }
             let status: WorktreeListItem.Status = !exists ? .missing : entry.status == .ready ? .ready : .incomplete
-            return WorktreeListItem(entry: entry, status: status, branch: state?.branch, devices: devices)
+            return WorktreeListItem(entry: entry, status: status, branch: state?.branch, devices: devices,
+                                    diskBytes: sizes[WorktreePaths(root: entry.path).stateDirectory])
         }
     }
 
@@ -432,13 +435,16 @@ public struct WorktreeListItem: Codable, Sendable, Equatable {
     public let branch: String?
     /// Sorted by name.
     public let devices: [Device]
+    /// Size of the worktree's `.xcdev/` folder (DerivedData, logs, results), when known.
+    public let diskBytes: Int64?
 
-    public init(entry: RegistryEntry, status: Status, branch: String?, devices: [Device]) {
+    public init(entry: RegistryEntry, status: Status, branch: String?, devices: [Device], diskBytes: Int64? = nil) {
         project = entry.project
         name = entry.name
         path = entry.path
         self.status = status
         self.branch = branch
         self.devices = devices
+        self.diskBytes = diskBytes
     }
 }

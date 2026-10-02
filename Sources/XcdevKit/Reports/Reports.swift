@@ -35,7 +35,8 @@ public struct WorktreeListReport: Reportable {
         return worktrees.map { item in
             let name = includeProject ? "\(item.project)/\(item.name)" : item.name
             let devices = item.devices.isEmpty ? "none" : item.devices.map { "\($0.name):\($0.state)" }.joined(separator: ",")
-            return "\(name)  \(item.status.rawValue)  branch=\(item.branch ?? "-")  devices=\(devices)  \(item.path)"
+            let disk = item.diskBytes.map { "  disk=" + ByteText.format($0) } ?? ""
+            return "\(name)  \(item.status.rawValue)  branch=\(item.branch ?? "-")  devices=\(devices)\(disk)  \(item.path)"
         }.joined(separator: "\n")
     }
 }

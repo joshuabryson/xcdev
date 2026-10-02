@@ -11,6 +11,11 @@ public final class FakeSimulators: Sendable {
         public var typeIdentifier: String
         public var runtimeIdentifier: String
         public var state: String
+        public var isAvailable = true
+        /// Reported as `dataPath`; defaults to a path that doesn't exist (`/sims/<udid>/data`).
+        public var dataPath: String?
+        /// Reported as `dataPathSize`.
+        public var dataPathSize: Int64 = 1_048_576
     }
 
     private struct State {
@@ -28,11 +33,15 @@ public final class FakeSimulators: Sendable {
         var initial: [Device] = []
         for (runtime, list) in object["devices"] as? [String: [[String: Any]]] ?? [:] {
             for d in list {
-                initial.append(Device(udid: d["udid"] as? String ?? UUID().uuidString,
-                                      name: d["name"] as? String ?? "",
-                                      typeIdentifier: d["deviceTypeIdentifier"] as? String ?? "",
-                                      runtimeIdentifier: runtime,
-                                      state: d["state"] as? String ?? "Shutdown"))
+                var device = Device(udid: d["udid"] as? String ?? UUID().uuidString,
+                                    name: d["name"] as? String ?? "",
+                                    typeIdentifier: d["deviceTypeIdentifier"] as? String ?? "",
+                                    runtimeIdentifier: runtime,
+                                    state: d["state"] as? String ?? "Shutdown")
+                device.isAvailable = d["isAvailable"] as? Bool ?? true
+                device.dataPath = d["dataPath"] as? String
+                if let size = d["dataPathSize"] as? Int64 { device.dataPathSize = size }
+                initial.append(device)
             }
         }
         object["devices"] = [String: Any]()
@@ -47,6 +56,27 @@ public final class FakeSimulators: Sendable {
     public var pairs: [[String]] { state.withLock { $0.pairs } }
     public func device(named name: String) -> Device? { devices.first { $0.name == name } }
     public func deleteExternally(udid: String) { state.withLock { $0.devices.removeAll { $0.udid == udid } } }
+
+    /// Adds a device as if something outside xcd made it (another run, a crash, a user). Returns its udid.
+    @discardableResult
+    public func add(name: String, typeIdentifier: String = "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro",
+                    runtimeIdentifier: String = "com.apple.CoreSimulator.SimRuntime.iOS-27-0", state: String = "Shutdown",
+                    isAvailable: Bool = true, dataPath: String? = nil) -> String {
+        let udid = UUID().uuidString
+        var device = Device(udid: udid, name: name, typeIdentifier: typeIdentifier, runtimeIdentifier: runtimeIdentifier,
+                            state: state)
+        device.isAvailable = isAvailable
+        device.dataPath = dataPath
+        self.state.withLock { $0.devices.append(device) }
+        return udid
+    }
+
+    /// Sets a device's state, e.g. to leave it stuck in "Booting".
+    public func setState(_ value: String, udid: String) {
+        state.withLock { st in
+            if let index = st.devices.firstIndex(where: { $0.udid == udid }) { st.devices[index].state = value }
+        }
+    }
 
     /// `xcodebuild -showsdks -json` for an Xcode whose simulator SDKs are all 27.0 (matches simctl-list.json).
     public static let sdksJSON = #"[{"platform":"iphonesimulator","sdkVersion":"27.0"},{"platform":"watchsimulator","sdkVersion":"27.0"},{"platform":"appletvsimulator","sdkVersion":"27.0"},{"platform":"xrsimulator","sdkVersion":"27.0"}]"#
@@ -123,8 +153,9 @@ public final class FakeSimulators: Sendable {
         var grouped: [String: [[String: Any]]] = [:]
         for d in devices {
             grouped[d.runtimeIdentifier, default: []].append([
-                "udid": d.udid, "name": d.name, "state": d.state, "isAvailable": true,
-                "deviceTypeIdentifier": d.typeIdentifier,
+                "udid": d.udid, "name": d.name, "state": d.state, "isAvailable": d.isAvailable,
+                "deviceTypeIdentifier": d.typeIdentifier, "dataPath": d.dataPath ?? "/sims/\(d.udid)/data",
+                "dataPathSize": d.dataPathSize,
             ])
         }
         object["devices"] = grouped

@@ -32,6 +32,13 @@ public struct SimDevice: Codable, Sendable, Equatable {
     public let deviceTypeIdentifier: String?
     /// Not in simctl's per-device JSON; filled in from the enclosing runtime key.
     public var runtimeIdentifier: String?
+    /// `~/Library/Developer/CoreSimulator/Devices/<udid>/data`; its parent folder is the device.
+    public var dataPath: String?
+    /// Bytes simctl reports for `dataPath`.
+    public var dataPathSize: Int64?
+
+    /// The device's folder, whose creation date is when the device was created or cloned.
+    public var deviceDirectory: String? { dataPath.map { ($0 as NSString).deletingLastPathComponent } }
 }
 
 public struct SimCatalog: Sendable, Equatable {

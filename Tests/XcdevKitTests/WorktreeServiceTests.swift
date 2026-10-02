@@ -235,7 +235,7 @@ import XcdevTestSupport
         let svc = service(project)
         _ = try await svc.open(from: project.root)
         #expect(try await svc.listDetails(projectRoot: project.root).map(\.name) == ["main"])
-        #expect(fake.calls.isEmpty)
+        #expect(!fake.commandLines.contains { $0.hasPrefix("xcrun simctl") })      // only `du` ran
     }
 
     @Test func openByNameOfDeletedWorktreeExplains() async throws {
