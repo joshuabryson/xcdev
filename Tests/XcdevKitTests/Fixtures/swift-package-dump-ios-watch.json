@@ -1,0 +1,15 @@
+{
+  "name": "Multi Lib",
+  "platforms": [
+    {
+      "options": [],
+      "platformName": "ios",
+      "version": "18.0"
+    },
+    {
+      "options": [],
+      "platformName": "watchos",
+      "version": "11.0"
+    }
+  ]
+}

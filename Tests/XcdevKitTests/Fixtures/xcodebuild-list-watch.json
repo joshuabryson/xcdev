@@ -1,0 +1,18 @@
+{
+  "project" : {
+    "configurations" : [
+      "Debug",
+      "Release"
+    ],
+    "name" : "SampleApp",
+    "schemes" : [
+      "SampleApp",
+      "SampleWatch Watch App"
+    ],
+    "targets" : [
+      "SampleApp",
+      "SampleAppTests",
+      "SampleWatch Watch App"
+    ]
+  }
+}

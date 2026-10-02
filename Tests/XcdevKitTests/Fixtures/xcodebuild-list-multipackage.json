@@ -1,0 +1,10 @@
+{
+  "workspace" : {
+    "name" : "Multi Lib",
+    "schemes" : [
+      "A",
+      "B",
+      "Multi Lib-Package"
+    ]
+  }
+}

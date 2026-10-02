@@ -1,0 +1,24 @@
+[
+  {
+    "action": "build",
+    "buildSettings": {
+      "PLATFORM_NAME": "watchos",
+      "PRODUCT_TYPE": "com.apple.product-type.application",
+      "SUPPORTED_PLATFORMS": "watchos watchsimulator",
+      "TARGETED_DEVICE_FAMILY": "4",
+      "WRAPPER_EXTENSION": "app"
+    },
+    "target": "SampleWatch Watch App"
+  },
+  {
+    "action": "build",
+    "buildSettings": {
+      "PLATFORM_NAME": "iphoneos",
+      "PRODUCT_TYPE": "com.apple.product-type.application",
+      "SUPPORTED_PLATFORMS": "iphoneos iphonesimulator",
+      "TARGETED_DEVICE_FAMILY": "1,2",
+      "WRAPPER_EXTENSION": "app"
+    },
+    "target": "SampleApp"
+  }
+]

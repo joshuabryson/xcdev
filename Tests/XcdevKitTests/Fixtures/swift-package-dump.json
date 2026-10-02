@@ -1,0 +1,35 @@
+{
+  "name": "SamplePackage",
+  "platforms": [
+    {
+      "options": [],
+      "platformName": "macos",
+      "version": "15.0"
+    },
+    {
+      "options": [],
+      "platformName": "ios",
+      "version": "18.0"
+    }
+  ],
+  "products": [
+    {
+      "name": "SampleLib",
+      "type": {
+        "library": [
+          "automatic"
+        ]
+      }
+    }
+  ],
+  "targets": [
+    {
+      "name": "SampleLib",
+      "type": "regular"
+    },
+    {
+      "name": "SampleLibTests",
+      "type": "test"
+    }
+  ]
+}
