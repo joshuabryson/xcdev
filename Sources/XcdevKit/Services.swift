@@ -40,6 +40,8 @@ public struct Services: Sendable {
     public var projectCommands: ProjectCommandRunner {
         ProjectCommandRunner(builds: builds, output: output, environment: environment)
     }
+    public var externalCommands: ExternalCommands { ExternalCommands(services: self) }
+    public var help: HelpService { HelpService(services: self) }
     public var logs: LogService { LogService(runner: runner, provisioner: provisioner) }
 
     /// Opens the worktree; `xcode` is a one-off `--xcode` override that is never pinned.
