@@ -159,9 +159,7 @@ public struct ProjectFileReader: Sendable {
         let results = await withTaskGroup(of: (Int, Result<[String], Unreadable>).self) { group in
             for (index, package) in packages.enumerated() {
                 group.addTask {
-                    var dump = Invocation.xcrun(["swift", "package", "--scratch-path", scratch + "/swiftpm-\(index)", "dump-package"],
-                                                developerDir: developerDir, timeout: .seconds(120))
-                    dump.workingDirectory = package.folder
+                    let dump = Self.dumpPackage(in: package.folder, scratchPath: scratch + "/swiftpm-\(index)", developerDir: developerDir)
                     let manifest = package.label
                     do {
                         let output = try await runner.run(dump)
@@ -182,6 +180,17 @@ public struct ProjectFileReader: Sendable {
             return results
         }
         return try packages.indices.flatMap { try results[$0]!.get() }
+    }
+
+    /// `swift package dump-package`, which evaluates the manifest and fetches nothing. PATH holds no git: SwiftPM
+    /// would otherwise run `git describe`, `rev-parse`, and `status` in the package's repository (the user's
+    /// project), and `git status` can rewrite the index, racing the user's own git commands.
+    static func dumpPackage(in folder: String, scratchPath: String, developerDir: String?) -> Invocation {
+        var dump = Invocation.xcrun(["swift", "package", "--scratch-path", scratchPath, "dump-package"],
+                                    developerDir: developerDir, timeout: .seconds(120))
+        dump.workingDirectory = folder
+        dump.environment["PATH"] = "/var/empty"
+        return dump
     }
 
     /// The shared schemes folder, then each user's.

@@ -378,9 +378,7 @@ public struct ProjectDetector: Sendable {
 
     /// A package is read from its manifest alone: `dump-package` fetches none of its dependencies (xcodebuild would).
     func detectPackage(container: String, directory: String) async throws -> DetectedProject {
-        var dump = Invocation.xcrun(["swift", "package", "--scratch-path", scratch + "/swiftpm", "dump-package"],
-                                    developerDir: developerDir, timeout: .seconds(120))
-        dump.workingDirectory = directory
+        let dump = ProjectFileReader.dumpPackage(in: directory, scratchPath: scratch + "/swiftpm", developerDir: developerDir)
         let out = try await progress.step("reading Package.swift with `swift package dump-package`…", done: "read Package.swift") {
             try await runner.runChecked(dump, next: "run `swift package dump-package` in the package folder to check Package.swift")
         }

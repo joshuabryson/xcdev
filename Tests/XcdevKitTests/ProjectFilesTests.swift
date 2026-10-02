@@ -101,6 +101,8 @@ import XcdevTestSupport
         let dumps = fake.calls.filter { $0.arguments.starts(with: ["swift", "package"]) }
         #expect(dumps.count == 2)
         #expect(dumps.allSatisfy { $0.arguments[2] == "--scratch-path" && $0.arguments[3].hasPrefix(scratch + "/") && $0.arguments.last == "dump-package" })
+        // With no git on PATH, SwiftPM doesn't run `git status` in the project's repository (which can rewrite its index).
+        #expect(dumps.allSatisfy { $0.environment["PATH"] == "/var/empty" })
     }
 
     @Test func eachSchemeBuildsItsTargetsWithTheirPlatforms() async throws {

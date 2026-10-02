@@ -215,6 +215,7 @@ import XcdevTestSupport
         #expect(fake.calls.count == 1)
         let dump = try #require(fake.calls.first { $0.arguments.starts(with: ["swift", "package"]) })
         #expect(dump.arguments == ["swift", "package", "--scratch-path", scratch + "/swiftpm", "dump-package"])
+        #expect(dump.environment["PATH"] == "/var/empty")
         #expect(dump.workingDirectory == URL(fileURLWithPath: root).standardizedFileURL.path)
     }
 
