@@ -208,7 +208,18 @@ import XcdevTestSupport
         let container = try makeConfigured()
         stubXcodebuild()
         let resolved = try xcodeResolved(container, name: "Configured-xcode")
-        let detected = try await detector(clone: { _, _ in EXDEV }).detect(root: root, container: "Configured.xcodeproj")
+        let copy = scratch + "/.xcdev/SourcePackages"
+        let partialRemoved = Counter()
+        // A clone that fails partway can leave part of the tree behind; it is deleted before xcodebuild resolves afresh.
+        fake.stub(["xcrun", "xcodebuild", "-list"]) { _ in
+            if !FileManager.default.fileExists(atPath: copy + "/checkouts") { partialRemoved.increment() }
+            return ProcessOutput(stdout: Fixture.string("xcodebuild-list-project.json"))
+        }
+        let detected = try await detector(clone: { _, destination in
+            try? FileManager.default.createDirectory(atPath: destination + "/checkouts", withIntermediateDirectories: true)
+            return EXDEV
+        }).detect(root: root, container: "Configured.xcodeproj")
+        #expect(partialRemoved.value == 1)
         #expect(detected.notes == [configuredNote, "could not clone the Swift packages already resolved in \(resolved) "
                                    + "(Cross-device link), so xcodebuild resolved them again"])
         #expect(!fake.calls.contains { $0.arguments.contains("-disableAutomaticPackageResolution") })

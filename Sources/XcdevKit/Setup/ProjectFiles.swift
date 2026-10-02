@@ -131,22 +131,35 @@ public struct ProjectFileReader: Sendable {
         }
 
         if Self.autocreatesSchemes(settingsFile) {
-            // Xcode makes a scheme for each target no scheme builds. A test bundle gets one only when no scheme builds
-            // or tests it, it depends on no target (a host app's scheme would test it), and its project gets no other
-            // autocreated scheme (which would test it): the rule observed with Xcode 27.
+            // Xcode makes a scheme for each target no scheme file builds. A test bundle gets one too, unless a scheme file
+            // builds or tests it, or it depends on a target that gets an autocreated scheme (which then tests it): the
+            // rule observed with Xcode 27 (ProjectFilesParityTests pins each case). Where the files can't tell which
+            // applies, tier 1 asks xcodebuild.
             for project in projects {
-                var autocreated = 0
+                var autocreated: Set<String> = []
+                var shadowed: Set<String> = []      // no scheme file builds it, but one already has its name
                 for target in project.targets where !target.isTest && !built[project.path, default: []].contains(target.id) {
-                    guard !taken(target.name) else { continue }
+                    guard !taken(target.name) else { shadowed.insert(target.id); continue }
                     schemes.append(Scheme(name: target.name, targets: [target.appTarget]))
-                    autocreated += 1
+                    autocreated.insert(target.id)
                     if target.isApp { apps.append(target) }
                 }
-                guard autocreated == 0 else { continue }
                 let covered = built[project.path, default: []].union(tested[project.path, default: []])
-                for target in project.targets where target.isTest && !target.hasDependencies && !covered.contains(target.id)
-                    && !covered.contains(target.name) && !taken(target.name) {
-                    schemes.append(Scheme(name: target.name, targets: [target.appTarget]))
+                for test in project.targets where test.isTest && !covered.contains(test.id) && !covered.contains(test.name) {
+                    func unsure(_ why: String) -> Unreadable {
+                        Unreadable(reason: "the project files don't say whether \(test.name) gets a scheme of its own (it depends on \(why))")
+                    }
+                    var absorbed = false
+                    for dependency in test.dependencies {
+                        guard case .target(let id) = dependency else { throw unsure("a target in another project") }
+                        guard let target = project.targets.first(where: { $0.id == id }) else {
+                            throw unsure("a target \(relative(project.path)) doesn't list")
+                        }
+                        if target.isTest { throw unsure("\(target.name), a test bundle") }
+                        if shadowed.contains(id) { throw unsure("\(target.name), whose name a scheme file already has") }
+                        if autocreated.contains(id) { absorbed = true }
+                    }
+                    if !absorbed && !taken(test.name) { schemes.append(Scheme(name: test.name, targets: [test.appTarget])) }
                 }
             }
             // And for local packages: a package reference gets a scheme per product; a package folder in the project
@@ -257,6 +270,13 @@ struct XcodeProjectFile: Sendable {
     /// Other projects this one references (subprojects), standardized.
     let referencedProjects: [String]
 
+    enum Dependency: Sendable, Equatable {
+        /// A target in the same project, by ID.
+        case target(String)
+        /// A target in another project (a subproject's).
+        case elsewhere
+    }
+
     struct Target: Sendable {
         let id: String
         let name: String
@@ -265,8 +285,8 @@ struct XcodeProjectFile: Sendable {
         let deviceFamilies: [Int]
         /// Why `platforms` (or, for an iOS app, `deviceFamilies`) isn't known; nil when it is.
         let unknown: String?
-        /// Whether it depends on another target (a test bundle on its host app, say).
-        let hasDependencies: Bool
+        /// The targets it depends on (a test bundle on its host app, say).
+        let dependencies: [Dependency]
 
         var isApp: Bool { productType.hasPrefix("com.apple.product-type.application") }
         var isTest: Bool {
@@ -322,6 +342,14 @@ struct XcodeProjectFile: Sendable {
             }
             return nil
         }
+        // A PBXTargetDependency names its target directly, or through a proxy whose container is this project or another.
+        func dependency(_ id: String) -> Dependency {
+            guard let object = objects[id] else { return .elsewhere }
+            if let target = object["target"] as? String { return .target(target) }
+            guard let proxyID = object["targetProxy"] as? String, let proxy = objects[proxyID],
+                  proxy["containerPortal"] as? String == rootID, let remote = proxy["remoteGlobalIDString"] as? String else { return .elsewhere }
+            return .target(remote)
+        }
         let targets: [Target] = (root["targets"] as? [String] ?? []).compactMap { id in
             guard let object = objects[id], let name = object["name"] as? String else { return nil }
             let productType = object["productType"] as? String ?? ""
@@ -330,7 +358,7 @@ struct XcodeProjectFile: Sendable {
             let runsOn = settings.platforms(isApp: productType.hasPrefix("com.apple.product-type.application"))
             return Target(id: id, name: name, productType: productType, platforms: runsOn.platforms,
                           deviceFamilies: runsOn.families, unknown: runsOn.unknown,
-                          hasDependencies: !(object["dependencies"] as? [String] ?? []).isEmpty)
+                          dependencies: (object["dependencies"] as? [String] ?? []).map(dependency))
         }
         let packageFolders = objects.filter { _, object in
             object["isa"] as? String == "PBXFileReference"

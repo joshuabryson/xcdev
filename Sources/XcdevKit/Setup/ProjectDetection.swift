@@ -207,7 +207,7 @@ public struct ProjectDetector: Sendable {
         var extra: [String] = []
         if let resolvedPackages = Self.resolvedPackages(for: resolved, container: container, worktree: root, projectRoot: projectRoot,
                                                         xcodeDerivedData: xcodeDerivedData),
-           await clone(resolvedPackages, to: packages, container: container, notes: &notes) {
+           try await clone(resolvedPackages, to: packages, container: container, notes: &notes) {
             do {
                 list = try await listSchemes(resolved, container: container, packages: packages, paths: scratchPaths,
                                              extra: Self.noResolution, alreadyResolved: true)
@@ -294,6 +294,11 @@ public struct ProjectDetector: Sendable {
     /// the worktree.
     static func resolvedPackages(for resolved: ProjectContainer, container: String, worktree: String, projectRoot: String?,
                                  xcodeDerivedData: String) -> String? {
+        // workspace-state.json records the packages (identity, location, version), not the project they were
+        // resolved for, so this folder can't be checked against the container. It is this worktree's own, from
+        // `xcd build` of its configured project, almost always this container. If it isn't, and its packages don't
+        // satisfy this container's Package.resolved, xcodebuild -list fails with resolution off and detection
+        // resolves afresh (the fallback in `detectWithXcodebuild`); extra packages it doesn't need are harmless.
         let own = WorktreePaths(root: worktree).sourcePackages
         if FileManager.default.fileExists(atPath: own + "/workspace-state.json") { return own }
         let path: String
@@ -328,13 +333,13 @@ public struct ProjectDetector: Sendable {
     /// Clones `source` to `destination` with one `clonefile(2)` of the whole tree: instant, and no extra space.
     /// xcodebuild rewrites checkouts' git indexes and workspace-state.json even with package resolution off, so it
     /// never gets the original. False, with a note, when the clone fails (EXDEV across volumes, ENOTSUP off APFS).
-    func clone(_ source: String, to destination: String, container: String, notes: inout [String]) async -> Bool {
+    func clone(_ source: String, to destination: String, container: String, notes: inout [String]) async throws -> Bool {
         try? FileManager.default.createDirectory(atPath: (destination as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        let code = (try? await progress.step("copying the Swift packages already resolved for \(container) from \(source)…",
-                                             done: "copied the resolved Swift packages") { [cloneTree] in cloneTree(source, destination) }) ?? -1
+        let code = try await progress.step("copying the Swift packages already resolved for \(container) from \(source)…",
+                                           done: "copied the resolved Swift packages") { [cloneTree] in cloneTree(source, destination) }
         guard code == 0 else {
             try? FileManager.default.removeItem(atPath: destination)
-            let reason = code > 0 ? String(cString: strerror(code)) : "interrupted"
+            let reason = String(cString: strerror(code))
             notes.append("could not clone the Swift packages already resolved in \(source) (\(reason)), so xcodebuild resolved them again")
             return false
         }

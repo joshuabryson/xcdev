@@ -80,12 +80,13 @@ struct ProjectFilesParityTests {
         try await expectSame("SampleApp.xcodeproj")
     }
 
-    /// Autocreated target schemes (never for tests), a watch app, this user's scheme, and both kinds of local package.
-    @Test func phone() async throws {
-        defer { try? FileManager.default.removeItem(atPath: base) }
+    /// The Phone fixture with real local packages, and this user's PhoneUITests scheme when `userScheme`.
+    func makePhone(userScheme: Bool = true) throws {
         try copy(Self.handWritten + "Phone")
-        try scheme("Phone.xcodeproj/xcuserdata/\(NSUserName()).xcuserdatad/xcschemes/PhoneUITests.xcscheme",
-                   id: "A10000000000000000000103", target: "PhoneUITests", container: "Phone.xcodeproj")
+        if userScheme {
+            try scheme("Phone.xcodeproj/xcuserdata/\(NSUserName()).xcuserdatad/xcschemes/PhoneUITests.xcscheme",
+                       id: "A10000000000000000000103", target: "PhoneUITests", container: "Phone.xcodeproj")
+        }
         try package("Packages/Shared", manifest: """
             let package = Package(name: "Shared", products: [.library(name: "Shared", targets: ["Shared"]),
                 .library(name: "SharedTestSupport", targets: ["SharedTestSupport"])],
@@ -97,7 +98,40 @@ struct ProjectFilesParityTests {
               targets: [.executableTarget(name: "victim", dependencies: [.product(name: "Shared", package: "Shared")]),
                 .testTarget(name: "AcceptanceTests", dependencies: [.product(name: "Shared", package: "Shared")])])
             """, targets: [("victim", false), ("AcceptanceTests", true)])
+    }
+
+    /// Autocreated target schemes, a watch app, this user's scheme, and both kinds of local package.
+    @Test func phone() async throws {
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        try makePhone()
         try await expectSame("Phone.xcodeproj")
+    }
+
+    /// The setups the test-bundle rule rests on, the same as the unit tests': no user scheme, the shared Phone
+    /// scheme testing nothing (or removed), and PhoneTests depending on a target (or not).
+    func barePhone(sharedScheme: Bool, phoneTestsDependOn target: (id: String, name: String)? = nil) async throws {
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        try makePhone(userScheme: false)
+        let shared = root + "/Phone.xcodeproj/xcshareddata/xcschemes/Phone.xcscheme"
+        if sharedScheme { try FixtureEdit.removeTestables(scheme: shared) } else { try FileManager.default.removeItem(atPath: shared) }
+        if let target {
+            try FixtureEdit.addDependency(pbxproj: root + "/Phone.xcodeproj/project.pbxproj", dependent: "A10000000000000000000102",
+                                          on: target.id, targetName: target.name, project: "A10000000000000000000001",
+                                          ids: ("A10000000000000000000301", "A10000000000000000000302"))
+        }
+        try await expectSame("Phone.xcodeproj")
+    }
+
+    @Test func testBundlesNoSchemeFileTests() async throws { try await barePhone(sharedScheme: true) }
+    @Test func testBundlesWithNoSchemeFiles() async throws { try await barePhone(sharedScheme: false) }
+    @Test func aTestBundleDependingOnAnAutocreatedApp() async throws {
+        try await barePhone(sharedScheme: false, phoneTestsDependOn: ("A10000000000000000000101", "Phone"))
+    }
+    @Test func aTestBundleDependingOnAnAutocreatedFramework() async throws {
+        try await barePhone(sharedScheme: true, phoneTestsDependOn: ("A10000000000000000000105", "Kit"))
+    }
+    @Test func aTestBundleDependingOnAnAppASchemeFileBuilds() async throws {
+        try await barePhone(sharedScheme: true, phoneTestsDependOn: ("A10000000000000000000101", "Phone"))
     }
 
     /// A workspace of two projects (one in a workspace group) and a package folder.
@@ -108,6 +142,20 @@ struct ProjectFilesParityTests {
             let package = Package(name: "Feature", products: [.library(name: "Feature", targets: ["Feature"])],
               targets: [.target(name: "Feature"), .testTarget(name: "FeatureTests", dependencies: ["Feature"])])
             """, targets: [("Feature", false), ("FeatureTests", true)])
+        try await expectSame("Suite.xcworkspace")
+    }
+
+    /// AppTests depends on App, which the workspace's Everything scheme builds, so App gets no autocreated scheme.
+    @Test func aWorkspaceTestBundleDependingOnAnAppASchemeFileBuilds() async throws {
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        try copy(Self.handWritten + "Suite")
+        try package("Packages/Feature", manifest: """
+            let package = Package(name: "Feature", products: [.library(name: "Feature", targets: ["Feature"])],
+              targets: [.target(name: "Feature"), .testTarget(name: "FeatureTests", dependencies: ["Feature"])])
+            """, targets: [("Feature", false), ("FeatureTests", true)])
+        try FixtureEdit.addDependency(pbxproj: root + "/App/App.xcodeproj/project.pbxproj", dependent: "C10000000000000000000102",
+                                      on: "C10000000000000000000101", targetName: "App", project: "C10000000000000000000001",
+                                      ids: ("C10000000000000000000301", "C10000000000000000000302"))
         try await expectSame("Suite.xcworkspace")
     }
 

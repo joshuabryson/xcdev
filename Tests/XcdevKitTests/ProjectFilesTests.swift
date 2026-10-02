@@ -49,10 +49,12 @@ import XcdevTestSupport
         """
 
     /// The Phone fixture plus what git wouldn't keep in the fixture: this user's scheme and the packages' folders.
-    func makePhone() throws {
+    func makePhone(userScheme: Bool = true) throws {
         try Fixture.copy("ProjectFiles/Phone", to: root)
-        try write(Self.scheme(building: "A10000000000000000000103", "PhoneUITests", container: "Phone.xcodeproj"),
-                  to: "Phone.xcodeproj/xcuserdata/\(NSUserName()).xcuserdatad/xcschemes/PhoneUITests.xcscheme")
+        if userScheme {
+            try write(Self.scheme(building: "A10000000000000000000103", "PhoneUITests", container: "Phone.xcodeproj"),
+                      to: "Phone.xcodeproj/xcuserdata/\(NSUserName()).xcuserdatad/xcschemes/PhoneUITests.xcscheme")
+        }
         try write("", to: "Packages/Shared/Package.swift")
         try write("", to: "Packages/Acceptance/Package.swift")
         stubPackages(["Shared": Self.shared, "Acceptance": Self.acceptance])
@@ -287,23 +289,72 @@ import XcdevTestSupport
         #expect(xcodebuildCalls.isEmpty)
     }
 
-    /// As observed with Xcode 27: a test bundle that depends on a target (its host app), or that a scheme file
-    /// tests, gets no scheme of its own.
-    @Test func aTestBundleThatDependsOnATargetGetsNoScheme() async throws {
+    /// The Phone fixture without its user scheme: a shared Phone scheme (made to test nothing, or removed), and
+    /// optionally PhoneTests depending on a target. The setups the parity tests run through real xcodebuild.
+    func makeBarePhone(sharedScheme: Bool, phoneTestsDependOn target: (id: String, name: String)? = nil) throws {
+        try makePhone(userScheme: false)
+        let scheme = root + "/Phone.xcodeproj/xcshareddata/xcschemes/Phone.xcscheme"
+        if sharedScheme { try FixtureEdit.removeTestables(scheme: scheme) } else { try FileManager.default.removeItem(atPath: scheme) }
+        if let target {
+            try FixtureEdit.addDependency(pbxproj: root + "/Phone.xcodeproj/project.pbxproj", dependent: "A10000000000000000000102",
+                                          on: target.id, targetName: target.name, project: "A10000000000000000000001",
+                                          ids: ("A10000000000000000000301", "A10000000000000000000302"))
+        }
+    }
+
+    func testBundleSchemes() async throws -> [String] {
+        let suite = FileManager.default.fileExists(atPath: root + "/Suite.xcworkspace")
+        let detected = try await detector().detect(root: root, container: suite ? "Suite.xcworkspace" : "Phone.xcodeproj")
+        #expect(detected.notes.isEmpty, "\(detected.notes)")
+        return detected.schemes.filter { ["PhoneTests", "PhoneUITests", "AppTests"].contains($0) }
+    }
+
+    /// Xcode 27 gives a test bundle its own scheme unless a scheme file builds or tests it, or it depends on a target
+    /// that gets an autocreated scheme (which then tests it). Each setup is also run through xcodebuild in
+    /// ProjectFilesParityTests.
+    @Test func aTestBundleWithNoSchemeFileGetsOneOfItsOwn() async throws {
+        defer { cleanUp() }
+        try makeBarePhone(sharedScheme: true)                                    // Kit is autocreated; nothing tests the bundles
+        #expect(try await testBundleSchemes() == ["PhoneTests", "PhoneUITests"])
+    }
+
+    @Test func withNoSchemeFilesEveryIndependentTestBundleGetsOne() async throws {
+        defer { cleanUp() }
+        try makeBarePhone(sharedScheme: false)
+        #expect(try await testBundleSchemes() == ["PhoneTests", "PhoneUITests"])
+    }
+
+    @Test func aTestBundleDependingOnAnAutocreatedTargetGoesInItsScheme() async throws {
+        defer { cleanUp() }
+        try makeBarePhone(sharedScheme: false, phoneTestsDependOn: ("A10000000000000000000101", "Phone"))
+        #expect(try await testBundleSchemes() == ["PhoneUITests"])
+    }
+
+    @Test func aTestBundleDependingOnAnAutocreatedFrameworkGoesInItsScheme() async throws {
+        defer { cleanUp() }
+        try makeBarePhone(sharedScheme: true, phoneTestsDependOn: ("A10000000000000000000105", "Kit"))
+        #expect(try await testBundleSchemes() == ["PhoneUITests"])
+    }
+
+    @Test func aTestBundleDependingOnATargetASchemeFileBuildsGetsItsOwn() async throws {
+        defer { cleanUp() }
+        try makeBarePhone(sharedScheme: true, phoneTestsDependOn: ("A10000000000000000000101", "Phone"))
+        #expect(try await testBundleSchemes() == ["PhoneTests", "PhoneUITests"])
+    }
+
+    @Test func aWorkspaceTestBundleDependingOnAnAppTheWorkspaceSchemeBuildsGetsItsOwn() async throws {
         defer { cleanUp() }
         try Fixture.copy("ProjectFiles/Suite", to: root)
-        let pbxproj = root + "/App/App.xcodeproj/project.pbxproj"
-        let text = try String(contentsOfFile: pbxproj, encoding: .utf8)
-        try text.replacingOccurrences(of: "\t\t\tname = AppTests;", with: "\t\t\tdependencies = (C10000000000000000000301);\n\t\t\tname = AppTests;")
-            .replacingOccurrences(of: "\t\tC10000000000000000000101 /* App */ = {", with: """
-                \t\tC10000000000000000000301 = {isa = PBXTargetDependency; target = C10000000000000000000101; };
-                \t\tC10000000000000000000101 /* App */ = {
-                """)
-            .write(toFile: pbxproj, atomically: true, encoding: .utf8)
-        var detected = try await detector().detect(root: root, container: "Suite.xcworkspace")
-        #expect(detected.schemes == ["Everything", "Helper"] && detected.notes.isEmpty)
+        try FixtureEdit.addDependency(pbxproj: root + "/App/App.xcodeproj/project.pbxproj", dependent: "C10000000000000000000102",
+                                      on: "C10000000000000000000101", targetName: "App", project: "C10000000000000000000001",
+                                      ids: ("C10000000000000000000301", "C10000000000000000000302"))
+        #expect(try await testBundleSchemes() == ["AppTests"])
+    }
 
-        try text.write(toFile: pbxproj, atomically: true, encoding: .utf8)                       // no dependency again
+    /// A scheme file that only tests the bundle is enough to keep it from getting one of its own.
+    @Test func aSchemeFileThatTestsABundleTakesIt() async throws {
+        defer { cleanUp() }
+        try Fixture.copy("ProjectFiles/Suite", to: root)
         try write("""
             <?xml version="1.0" encoding="UTF-8"?>
             <Scheme version = "1.7"><TestAction><Testables><TestableReference skipped = "NO">
@@ -311,8 +362,33 @@ import XcdevTestSupport
              BlueprintName = "AppTests" ReferencedContainer = "container:App/App.xcodeproj"></BuildableReference>
             </TestableReference></Testables></TestAction></Scheme>
             """, to: "Suite.xcworkspace/xcshareddata/xcschemes/Checks.xcscheme")
-        detected = try await detector().detect(root: root, container: "Suite.xcworkspace")
+        let detected = try await detector().detect(root: root, container: "Suite.xcworkspace")
         #expect(detected.schemes == ["Checks", "Everything", "Helper"] && detected.notes.isEmpty)
+    }
+
+    /// When the files can't tell whether the target a test bundle depends on gets an autocreated scheme, tier 1
+    /// asks xcodebuild rather than guess.
+    @Test func aTestBundleDependingOnATestBundleOrAnotherProjectIsNotEnough() async throws {
+        defer { cleanUp() }
+        try makeBarePhone(sharedScheme: true, phoneTestsDependOn: ("A10000000000000000000103", "PhoneUITests"))
+        let reader = ProjectFileReader(runner: fake, developerDir: nil, scratch: scratch)
+        #expect(try await reader.read(.project(root + "/Phone.xcodeproj")) == .unsure(
+            "the project files don't say whether PhoneTests gets a scheme of its own (it depends on PhoneUITests, a test bundle)"))
+
+        cleanUp()
+        try makeBarePhone(sharedScheme: true)
+        let pbxproj = root + "/Phone.xcodeproj/project.pbxproj"
+        let text = try String(contentsOfFile: pbxproj, encoding: .utf8)
+        try text.replacingOccurrences(of: "\t\t\tname = PhoneTests;", with: "\t\t\tdependencies = (A10000000000000000000301);\n\t\t\tname = PhoneTests;")
+            .replacingOccurrences(of: "\tobjects = {\n", with: """
+                \tobjects = {
+                \t\tA10000000000000000000302 = {isa = PBXContainerItemProxy; containerPortal = A10000000000000000000011; proxyType = 1; remoteGlobalIDString = D10000000000000000000101; remoteInfo = "Mac Tool"; };
+                \t\tA10000000000000000000301 = {isa = PBXTargetDependency; name = "Mac Tool"; targetProxy = A10000000000000000000302; };
+
+                """)
+            .write(toFile: pbxproj, atomically: true, encoding: .utf8)
+        #expect(try await reader.read(.project(root + "/Phone.xcodeproj")) == .unsure(
+            "the project files don't say whether PhoneTests gets a scheme of its own (it depends on a target in another project)"))
     }
 
     @Test func packageSchemesFollowXcodesRules() throws {
