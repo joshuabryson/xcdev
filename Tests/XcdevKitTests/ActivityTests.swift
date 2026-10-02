@@ -4,7 +4,8 @@ import Testing
 import XcdevTestSupport
 @testable import XcdevKit
 
-@Suite struct ActivityTests {
+/// Serialized: tests that install SIGINT handlers would otherwise restore each other's dispositions out of order.
+@Suite(.serialized) struct ActivityTests {
     /// Everything a reporter wrote, in order.
     final class Recorder: Sendable {
         private let writes = Mutex<[String]>([])
@@ -20,7 +21,7 @@ import XcdevTestSupport
     }
 
     func animated(_ recorder: Recorder, clock: SteppingClock = SteppingClock()) -> Activity {
-        .animated(write: recorder.write, now: clock.now, tick: { await Task.yield() })
+        .animated(write: recorder.write, now: clock.now, tick: { await Task.yield() }, catchesInterrupt: false)
     }
 
     /// Runs until the spinner has drawn at least `frames` frames, without sleeping.
@@ -83,6 +84,70 @@ import XcdevTestSupport
         let count = recorder.all.count
         await Task.yield()
         #expect(recorder.all.count == count)
+    }
+
+    @Test func anInterruptClearsTheLineAndRemovesTheRunsScratch() throws {
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("init-\(UUID().uuidString)").path
+        let other = FileManager.default.temporaryDirectory.appendingPathComponent("init-\(UUID().uuidString)").path
+        try FileManager.default.createDirectory(atPath: scratch + "/.xcdev", withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: other, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: other) }
+        Activity.removeOnInterrupt(scratch)
+        Activity.removeOnInterrupt(other)
+        Activity.keepOnInterrupt(other)                                        // that run ended normally
+        let recorder = Recorder()
+        let stopped = Counter()
+        #expect(Activity.interrupted(write: recorder.write, stopChildren: { stopped.increment() }) == 130)
+        #expect(stopped.value == 1)
+        #expect(recorder.all == ["\r\u{1B}[K"])
+        #expect(!FileManager.default.fileExists(atPath: scratch))
+        #expect(FileManager.default.fileExists(atPath: other))
+    }
+
+    @Test func catchingInterruptsRestoresTheEarlierDisposition() {
+        func current() -> Int {
+            var action = sigaction()
+            sigaction(SIGINT, nil, &action)
+            return unsafeBitCast(action.__sigaction_u.__sa_handler, to: Int.self)
+        }
+        let before = current()
+        let handler = InterruptHandler.install {}
+        #expect(current() == unsafeBitCast(SIG_IGN, to: Int.self))            // the dispatch source gets it instead
+        handler.remove()
+        #expect(current() == before)
+    }
+
+    /// The step checks `fired` after its body, so a body that ends because Ctrl-C stopped its children prints nothing
+    /// more while the handler cleans up and exits.
+    @Test func aSIGINTRunsTheActionAndMarksTheHandlerFired() async throws {
+        let ran = Counter()
+        let handler = InterruptHandler.install { ran.increment() }
+        defer { handler.remove() }
+        #expect(!handler.fired)
+        raise(SIGINT)                                                          // ignored by the process, seen by the source
+        while ran.value == 0 { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(handler.fired && ran.value == 1)
+    }
+
+    /// Process resets the children's signals, so ignoring SIGINT in xcd doesn't make them ignore it.
+    @Test func childrenStartedDuringAStepDontIgnoreSIGINT() async throws {
+        let handler = InterruptHandler.install {}
+        defer { handler.remove() }
+        let output = try await SystemProcessRunner().run(Invocation("/bin/sh", ["-c", "kill -INT $$; echo survived"]))
+        #expect(output.stdoutString.isEmpty && output.exitCode != 0)
+    }
+
+    /// Process starts each child in its own process group, which the terminal's Ctrl-C doesn't reach, so an
+    /// interrupt stops them itself; otherwise an xcodebuild would outlive xcd and refill the scratch folder.
+    @Test func anInterruptStopsTheRunningChildren() async throws {
+        let argv = ["sleep", "30.\(Int.random(in: 1000...9999))"]               // other tests' children are left alone
+        func mine() -> Bool { SystemProcessRunner.runningChildren.values.contains(argv) }
+        let child = Task { try await SystemProcessRunner().run(Invocation("/bin/sleep", [argv[1]])) }
+        while !mine() { try await Task.sleep(for: .milliseconds(5)) }
+        SystemProcessRunner.terminateChildren { $0 == argv }
+        #expect(!mine())                                                       // gone before the scratch is removed
+        let output = try await child.value
+        #expect(output.exitCode != 0)
     }
 
     @Test func animatesOnlyOnATerminalThatIsNotDumbAndNotForJSON() {

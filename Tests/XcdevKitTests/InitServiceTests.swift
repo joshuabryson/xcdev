@@ -129,6 +129,58 @@ import XcdevTestSupport
         #expect(leftoverScratch(project).isEmpty)
     }
 
+    @Test func aWorktreeSharesItsMainCheckoutsPackageCache() async throws {
+        let (project, service) = try setup()
+        defer { project.remove() }
+        let worktree = project.base + "/wt"
+        try TempProject.git(["worktree", "add", "-q", "-b", "wt", worktree, "HEAD"], in: project.root)
+        try project.write("", to: "SampleApp.xcodeproj/project.pbxproj", in: worktree)
+        _ = try await service.plan(from: project.root)
+        _ = try await service.plan(from: worktree)
+        let packages = xcodebuildPaths().packages
+        #expect(packages == [PackageCache(globalPaths: GlobalPaths(base: project.home), root: project.root).sourcePackages])
+        #expect(fake.calls.contains { $0.arguments.contains { $0.hasPrefix(Paths.canonical(worktree)) } })   // it did look at the worktree
+    }
+
+    @Test func theCacheRecordsWhichProjectOwnsIt() async throws {
+        let (project, service) = try setup()
+        defer { project.remove() }
+        _ = try await service.plan(from: project.root)
+        let cache = PackageCache(globalPaths: GlobalPaths(base: project.home), root: project.root)
+        #expect(try String(contentsOfFile: cache.rootFile, encoding: .utf8) == project.root)
+        #expect(cache.rootFile == cache.directory + "/root")
+    }
+
+    @Test func aFailedListSaysWhichPackageFolderToDeleteIfACheckoutIsDamaged() async throws {
+        let (project, service) = try setup()
+        defer { project.remove() }
+        fake.stub(["xcrun", "xcodebuild", "-list"], exitCode: 74, stderr: "xcodebuild: error: Could not resolve package dependencies.\n")
+        let error = await #expect(throws: XcdError.self) { try await service.plan(from: project.root) }
+        let packages = PackageCache(globalPaths: GlobalPaths(base: project.home), root: project.root).sourcePackages
+        #expect(error?.code == .subprocessFailed)
+        #expect(error?.next?.contains("if a package checkout is damaged, delete \(Shell.quote(packages)) and run `xcd init --plan` again") == true)
+    }
+
+    @Test func waitingForTheLockNamesIt() async throws {
+        let lines = Mutex<[String]>([])
+        let (project, service) = try setup(progress: .plain { line in lines.withLock { $0.append(line) } })
+        defer { project.remove() }
+        let cache = PackageCache(globalPaths: GlobalPaths(base: project.home), root: project.root)
+        let release = Counter()
+        let held = Task {
+            try await FileLock.withLock(at: cache.lockPath) {
+                while release.value == 0 { try await Task.sleep(for: .milliseconds(10)) }
+            }
+        }
+        while !FileLock.isHeld(at: cache.lockPath) { try await Task.sleep(for: .milliseconds(5)) }
+        let plan = Task { try await service.plan(from: project.root) }
+        while !lines.withLock({ $0.contains { $0.hasPrefix("waiting") } }) { try await Task.sleep(for: .milliseconds(5)) }
+        release.increment()
+        _ = try await plan.value
+        try await held.value
+        #expect(lines.withLock { $0.first } == "waiting for another `xcd init` of this project to finish with its package cache (\(cache.lockPath))…")
+    }
+
     @Test func initReportsEachLongStep() async throws {
         let lines = Mutex<[String]>([])
         let (project, service) = try setup(progress: .plain { line in lines.withLock { $0.append(line) } })

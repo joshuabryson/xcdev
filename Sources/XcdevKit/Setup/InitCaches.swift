@@ -3,7 +3,9 @@ import Foundation
 
 /// Where `xcd init` keeps a project's Swift package checkouts between runs: `<home>/cache/packages/<key>/SourcePackages`,
 /// locked by `<home>/cache/packages/<key>.lock` while xcodebuild uses it. A second run finds the checkouts and
-/// fetches only what changed, instead of cloning every package again (1.2 GB for a Firebase app).
+/// fetches only what changed, instead of cloning every package again (1.2 GB for a Firebase app). Keyed on the
+/// main checkout, so every worktree of a project shares one cache. `<key>/root` records that checkout's path, so
+/// `xcd doctor` can tell when its project is gone.
 public struct PackageCache: Sendable, Equatable {
     public let directory: String
     public let lockPath: String
@@ -16,6 +18,30 @@ public struct PackageCache: Sendable, Equatable {
 
     /// For `-clonedSourcePackagesDirPath`.
     public var sourcePackages: String { directory + "/SourcePackages" }
+    /// Holds the path of the project's main checkout.
+    public var rootFile: String { directory + "/root" }
+
+    /// Writes `root` to `rootFile`, creating the cache folder.
+    public func recordOwner(_ root: String) throws {
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        try root.write(toFile: rootFile, atomically: true, encoding: .utf8)
+    }
+
+    /// The checkout `rootFile` names; nil when there is no readable record.
+    public static func owner(of directory: String) -> String? {
+        guard let text = try? String(contentsOfFile: directory + "/root", encoding: .utf8), !text.isEmpty else { return nil }
+        return text
+    }
+
+    /// Every cache folder under `<home>/cache/packages`, sorted (lock files left out).
+    public static func all(in globalPaths: GlobalPaths) -> [String] {
+        let packages = globalPaths.cacheDirectory + "/packages"
+        return ((try? FileManager.default.contentsOfDirectory(atPath: packages)) ?? []).sorted().compactMap { name in
+            var isDirectory: ObjCBool = false
+            let path = packages + "/" + name
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue ? path : nil
+        }
+    }
 
     /// `<folder name>-<first 16 hex digits of the SHA-256 of root>`, e.g. "SampleApp-1f2e3d4c5b6a7980": readable, stable,
     /// and different for two checkouts with the same folder name. Characters other than letters, digits, `.`, `_`, and

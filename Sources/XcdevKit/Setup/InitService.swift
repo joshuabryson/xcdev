@@ -21,8 +21,9 @@ public struct InitService: Sendable {
     /// `xcd init --plan`: writes nothing in the project.
     public func plan(from directory: String) async throws -> InitPlanReport {
         InitScratch.removeStale(in: globalPaths.cacheDirectory, now: now())
-        let root = try await projectRoot(from: directory)
-        let plan = try await makePlan(root: root, container: nil)
+        let location = try await WorktreeLocator(runner: runner).locate(from: directory)
+        let root = location.worktreeRoot
+        let plan = try await makePlan(location, container: nil)
         return InitPlanReport(plan: plan, root: root, configExists: configExists(root))
     }
 
@@ -30,7 +31,8 @@ public struct InitService: Sendable {
     /// .xcdev/ and .xcdev.local.yml to .gitignore. An existing .xcdev.yml is kept unless `force`.
     public func write(answers: [String: String], force: Bool, from directory: String) async throws -> InitReport {
         InitScratch.removeStale(in: globalPaths.cacheDirectory, now: now())
-        let root = try await projectRoot(from: directory)
+        let location = try await WorktreeLocator(runner: runner).locate(from: directory)
+        let root = location.worktreeRoot
         let path = root + "/" + ConfigLoader.fileName
         if configExists(root), !force {
             guard answers.isEmpty else {
@@ -41,27 +43,24 @@ public struct InitService: Sendable {
             return InitReport(status: .unchanged, path: path, summary: project.map { ["project: \($0)"] } ?? [],
                               gitignoreAdded: [])
         }
-        let plan = try await makePlan(root: root, container: answers["project"])
+        let plan = try await makePlan(location, container: answers["project"])
         let generated = try plan.config(answers: answers)
         try generated.yaml.write(toFile: path, atomically: true, encoding: .utf8)
         let added = try Gitignore.ensure([".xcdev/", ConfigLoader.localFileName], in: root)
         return InitReport(status: .written, path: path, summary: generated.summary, gitignoreAdded: added)
     }
 
-    func projectRoot(from directory: String) async throws -> String {
-        try await WorktreeLocator(runner: runner).locate(from: directory).worktreeRoot
-    }
-
     func configExists(_ root: String) -> Bool {
         FileManager.default.fileExists(atPath: root + "/" + ConfigLoader.fileName)
     }
 
-    /// Detects `container` (or the best one found) and plans the config. xcodebuild and SwiftPM work in a
-    /// scratch folder under the cache directory, deleted afterwards; package checkouts go to the project's
-    /// `PackageCache`, kept for the next run and locked while in use. Another `init` of the same project holds the
-    /// lock at most as long as its xcodebuild deadlines (10 minutes to list, 2 to read build settings), so the
-    /// wait is bounded by those.
-    func makePlan(root: String, container: String?) async throws -> InitPlan {
+    /// Detects `container` (or the best one found) in the worktree and plans the config. xcodebuild and SwiftPM work
+    /// in a scratch folder under the cache directory, deleted afterwards (also on Ctrl-C during a spinner); package
+    /// checkouts go to the main checkout's `PackageCache`, kept for the next run and locked while in use. Another
+    /// `init` of the same project holds the lock at most as long as its xcodebuild deadlines (10 minutes to list, 2
+    /// to read build settings), so the wait is bounded by those.
+    func makePlan(_ location: ProjectLocation, container: String?) async throws -> InitPlan {
+        let root = location.worktreeRoot
         let containers = ProjectDetector.containers(in: root)
         guard let best = containers.first else {
             throw XcdError(.notInProject, "no .xcworkspace, .xcodeproj, or Package.swift in \(root) or its subfolders",
@@ -74,11 +73,18 @@ public struct InitService: Sendable {
         let installs = await discovery.installs()
         let selected = try? await discovery.resolve(spec: nil)
         let scratch = InitScratch.make(in: globalPaths.cacheDirectory)
-        defer { try? FileManager.default.removeItem(atPath: scratch) }
-        let packages = PackageCache(globalPaths: globalPaths, root: root)
+        Activity.removeOnInterrupt(scratch)
+        defer {
+            Activity.keepOnInterrupt(scratch)
+            try? FileManager.default.removeItem(atPath: scratch)
+        }
+        let packages = PackageCache(globalPaths: globalPaths, root: location.projectRoot)
         let detector = ProjectDetector(runner: runner, developerDir: selected?.developerDir, scratch: scratch,
                                        sourcePackages: packages.sourcePackages, progress: progress)
-        let detect = { try await detector.detect(root: root, container: container ?? best) }
+        let detect = {
+            try packages.recordOwner(location.projectRoot)
+            return try await detector.detect(root: root, container: container ?? best)
+        }
         let detected: DetectedProject
         while true {
             if let free = try await FileLock.withLockIfFree(at: packages.lockPath, detect) {
@@ -86,7 +92,7 @@ public struct InitService: Sendable {
                 break
             }
             // Waits without holding the lock, so detection's own steps aren't shown under this one.
-            try await progress.step("waiting for another `xcd init` of this project to finish with its package cache…",
+            try await progress.step("waiting for another `xcd init` of this project to finish with its package cache (\(packages.lockPath))…",
                                     done: "the package cache is free") {
                 try await FileLock.withLock(at: packages.lockPath) {}
             }

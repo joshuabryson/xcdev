@@ -46,6 +46,7 @@ public struct SystemProcessRunner: ProcessRunning {
         process.terminationHandler = { exit.finish($0.terminationStatus) }
         do {
             try process.run()
+            Self.running.withLock { $0[process.processIdentifier] = invocation.argv }
         } catch {
             throw XcdError(.subprocessFailed,
                            "could not launch \(invocation.executable): \(error.localizedDescription)",
@@ -67,6 +68,7 @@ public struct SystemProcessRunner: ProcessRunning {
         } onCancel: {
             _ = handle.terminate()
         }
+        _ = Self.running.withLock { $0.removeValue(forKey: process.processIdentifier) }
         timer.cancel()
         let (out, err) = await (outData, errData)
 
@@ -84,6 +86,30 @@ public struct SystemProcessRunner: ProcessRunning {
         }
         if Task.isCancelled { throw CancellationError() }
         return ProcessOutput(exitCode: status, stdoutData: out, stderrData: err)
+    }
+
+    /// Children running now, by pid. Process starts each child in its own process group, which the terminal's
+    /// Ctrl-C doesn't reach, so an interrupted xcd stops them itself (`terminateChildren`).
+    private static let running = Mutex<[pid_t: [String]]>([:])
+
+    /// The argv of each child running now, by pid.
+    public static var runningChildren: [pid_t: [String]] { running.withLock { $0 } }
+
+    /// Sends SIGTERM to the running children whose argv matches, then SIGKILL to any still running after `grace`.
+    /// Returns once they have all exited, or after `grace` plus a second.
+    public static func terminateChildren(grace: Duration = .seconds(2), where matches: ([String]) -> Bool = { _ in true }) {
+        let targets = runningChildren.filter { matches($0.value) }.keys
+        for pid in targets { kill(pid, SIGTERM) }
+        let clock = ContinuousClock()
+        let start = clock.now
+        var killed = false
+        while !Set(runningChildren.keys).intersection(targets).isEmpty, clock.now - start < grace + .seconds(1) {
+            if !killed, clock.now - start >= grace {
+                for pid in Set(runningChildren.keys).intersection(targets) { kill(pid, SIGKILL) }
+                killed = true
+            }
+            usleep(20_000)
+        }
     }
 
     private static func readToEnd(_ pipe: Pipe?) async -> Data {

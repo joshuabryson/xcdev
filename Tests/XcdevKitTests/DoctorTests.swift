@@ -37,7 +37,7 @@ import XcdevTestSupport
         let report = await doctor(project).run(fix: false, from: nil)
         #expect(report.problems.isEmpty && report.failure == nil)
         #expect(report.checks.map(\.id) == ["coresimulator", "missing-worktrees", "incomplete-worktrees", "orphaned-clones",
-                                            "stuck-clones", "templates", "init-scratch"])   // no project check outside a project
+                                            "stuck-clones", "templates", "init-scratch", "package-caches"])   // no project check outside a project
         #expect(report.text.hasPrefix("doctor: 0 problems\nok       coresimulator\n"))
     }
 
@@ -769,6 +769,84 @@ import XcdevTestSupport
         #expect(stale.allSatisfy { !fm.fileExists(atPath: $0) })
         #expect(([recent] + others).allSatisfy { fm.fileExists(atPath: $0) })
         #expect(await service.run(fix: false, checks: [InitScratchCheck()], from: nil, includeDisk: false).problems.isEmpty)
+    }
+
+    @Test func theScratchFixTriesEveryFolderAndNamesTheOnesItCouldNotDelete() async throws {
+        let (project, _, _, _) = try await setup()
+        defer { project.remove() }
+        let now = Date()
+        let cache = GlobalPaths(base: project.home).cacheDirectory
+        let fm = FileManager.default
+        var stale: [String] = []
+        for _ in 0..<3 {
+            let path = cache + "/init-" + UUID().uuidString
+            try fm.createDirectory(atPath: path + "/.xcdev", withIntermediateDirectories: true)
+            fm.createFile(atPath: path + "/.xcdev/file", contents: Data())
+            try fm.setAttributes([.modificationDate: now.addingTimeInterval(-7200)], ofItemAtPath: path)
+            stale.append(path)
+        }
+        let stuck = stale.sorted()[0]                                          // the first one tried
+        try fm.setAttributes([.posixPermissions: 0o500], ofItemAtPath: stuck + "/.xcdev")
+        defer { try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: stuck + "/.xcdev") }
+        fake.stub(["du", "-sk"], stdout: "")
+        let service = DoctorService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home),
+                                    discovery: XcodeDiscovery(runner: fake, applicationsDirectories: []), now: { now })
+        let report = await service.run(fix: true, checks: [InitScratchCheck()], from: nil, includeDisk: false)
+        let problem = try #require(report.problems.first)
+        #expect(!problem.fixed && problem.fixError?.hasPrefix("could not delete 1 of the scratch folders; delete them by hand: \(stuck): ") == true)
+        #expect(stale.filter { fm.fileExists(atPath: $0) } == [stuck])
+    }
+
+    @Test func packageCachesOfProjectsThatAreGoneAreDeletedOnlyByFix() async throws {
+        let (project, _, _, _) = try await setup()
+        defer { project.remove() }
+        let paths = GlobalPaths(base: project.home)
+        let fm = FileManager.default
+        func cache(for root: String, recorded: Bool = true) throws -> PackageCache {
+            let cache = PackageCache(globalPaths: paths, root: root)
+            try fm.createDirectory(atPath: cache.sourcePackages + "/checkouts", withIntermediateDirectories: true)
+            if recorded { try cache.recordOwner(root) }
+            return cache
+        }
+        let gone = try cache(for: project.base + "/Deleted App")
+        let live = try cache(for: project.root)
+        let unrecorded = try cache(for: project.base + "/Who Knows", recorded: false)
+        let busy = try cache(for: project.base + "/Busy Gone")
+        fake.stub(["du", "-sk"]) { inv in
+            ProcessOutput(stdout: inv.arguments.dropFirst().map { "1258291\t\($0)\n" }.joined())       // 1.2 GB each
+        }
+        let release = Counter()
+        let holder = Task {
+            try await FileLock.withLock(at: busy.lockPath) {
+                while release.value == 0 { try await Task.sleep(for: .milliseconds(10)) }
+            }
+        }
+        defer { release.increment() }
+        while !FileLock.isHeld(at: busy.lockPath) { try await Task.sleep(for: .milliseconds(5)) }
+
+        let report = await doctor(project).run(fix: false, checks: [PackageCacheCheck()], from: nil, includeDisk: false)
+        let check = try #require(report.checks.first)
+        #expect(check.problems.map(\.subject) == [gone.directory, unrecorded.directory].sorted())
+        let goneProblem = try #require(check.problems.first { $0.subject == gone.directory })
+        #expect(goneProblem.action == .deletePackageCache)
+        #expect(goneProblem.message == "the Swift package cache \(gone.directory) (1.2GB) belongs to \(project.base)/Deleted App, which no longer exists")
+        let unknown = try #require(check.problems.first { $0.subject == unrecorded.directory })
+        #expect(unknown.action == nil && unknown.next == "if no project of yours uses it any more, delete \(Shell.quote(unrecorded.directory))")
+        #expect(check.inProgress == ["the Swift package cache \(busy.directory) is in use by another `xcd init`; left alone"])
+        #expect([gone, live, unrecorded, busy].allSatisfy { fm.fileExists(atPath: $0.sourcePackages) })   // doctor alone deletes nothing
+
+        // The busy cache's project is gone too, but a fix that finds its lock held leaves it alone.
+        let fixed = await doctor(project).run(fix: true, checks: [PackageCacheCheck()], from: nil, includeDisk: false)
+        #expect(fixed.problems.first { $0.subject == gone.directory }?.fixed == true)
+        #expect(!fm.fileExists(atPath: gone.directory))
+        #expect([live, unrecorded, busy].allSatisfy { fm.fileExists(atPath: $0.sourcePackages) })
+        // Locked after doctor looked: the fix takes the lock without waiting, and leaves the cache alone.
+        let late = DoctorProblem(check: "package-caches", message: "", action: .deletePackageCache, subject: busy.directory)
+        let env = await doctor(project).environment(from: nil)
+        await #expect(throws: DoctorLeftAlone.self) { try await PackageCacheCheck().fix(late, env) }
+        #expect(fm.fileExists(atPath: busy.sourcePackages))
+        release.increment()
+        try await holder.value
     }
 
     @Test func pruneOnlyLooksForOrphans() async throws {

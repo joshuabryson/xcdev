@@ -95,10 +95,12 @@ public struct DoctorService: Sendable {
     }
 
     /// Every check, in the order fixes should happen: worktrees before the clones they leave behind. Scratch
-    /// folders depend on nothing else, so they come after the simulators, before the project's own setup.
+    /// folders and package caches depend on nothing else, so they come after the simulators, before the project's
+    /// own setup.
     public static var allChecks: [any DoctorCheck] {
         [CoreSimulatorCheck(), MissingWorktreesCheck(), IncompleteWorktreesCheck(), OrphanedClonesCheck(),
-         StuckClonesCheck(), TemplatesCheck(), InitScratchCheck(), ProjectCheck()]
+         StuckClonesCheck(), TemplatesCheck(), InitScratchCheck(), PackageCacheCheck(),
+         ProjectCheck()]
     }
 
     /// `xcd prune`: worktrees that are gone, and clones nothing owns.

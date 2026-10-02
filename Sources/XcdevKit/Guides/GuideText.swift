@@ -8,7 +8,7 @@ Use this guide when a project has no `.xcdev.yml`, or when the user wants to cha
 
 ## Steps
 
-1. Run `xcd init --plan`. It detects the project, its schemes and platforms, and the simulators and Xcode versions on this Mac, then prints the decisions to make. It writes nothing in the project. Add `--json` to get `{detected, decisions: [{key, ask, options, recommended, reason}]}`. The first run on a project can take a minute while xcodebuild fetches its Swift packages; xcd keeps them in `~/Library/Application Support/xcdev/cache/packages/<project>-<hash>/`, so later runs are fast.
+1. Run `xcd init --plan`. It detects the project, its schemes and platforms, and the simulators and Xcode versions on this Mac, then prints the decisions to make. It writes nothing in the project. Add `--json` to get `{detected, decisions: [{key, ask, options, recommended, reason}]}`. The first run on a project can take a minute while xcodebuild fetches its Swift packages; xcd keeps them in `~/Library/Application Support/xcdev/cache/packages/<project>-<hash>/`, shared by all the project's worktrees, so later runs are fast.
 2. Ask the user one decision at a time. Lead with the recommendation and its reason, for example: "Which iPhone should agents build and test on by default? I recommend iPhone 18 Pro, the newest installed." The `ask` text can be relayed as-is.
 3. Skip any decision the user wants left at the default: don't pass it to `--set`, and it gets its recommendation.
 4. When the user asks what a setting means, run `xcd config explain <key>` (for example `xcd config explain xcode`) and answer from it. `xcd config explain` with no key lists every key.

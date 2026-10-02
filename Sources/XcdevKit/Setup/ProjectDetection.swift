@@ -232,11 +232,16 @@ public struct ProjectDetector: Sendable {
         do {
             return try await progress.step("listing the schemes of \(container) and resolving any Swift packages (the first run can take a minute)…",
                                            done: "listed the schemes of \(container)") {
-                try await runner.runChecked(invocation, next: "run `xcodebuild -list` in the project folder to see why")
+                try await runner.runChecked(invocation)
             }
-        } catch var error as XcdError where error.code == .timeout {
-            error.next = "it was resolving the Swift packages of \(container) into \(packages); check the network and the "
-                + "package URLs, then run `xcd init --plan` again (packages already fetched are kept)"
+        } catch var error as XcdError {
+            if error.code == .timeout {
+                error.next = "it was resolving the Swift packages of \(container) into \(packages); check the network and the "
+                    + "package URLs, then run `xcd init --plan` again (packages already fetched are kept)"
+            } else {
+                error.next = "run `xcodebuild -list` in the project folder to see why; if a package checkout is damaged, "
+                    + "delete \(Shell.quote(packages)) and run `xcd init --plan` again"
+            }
             throw error
         }
     }
