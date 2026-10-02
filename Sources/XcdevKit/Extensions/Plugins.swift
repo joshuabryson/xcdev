@@ -80,7 +80,15 @@ public struct PluginRunner: Sendable {
     public func run(_ plugin: Plugin, arguments: [String], environment: [String: String],
                     workingDirectory: String) async throws -> Int32 {
         fflush(stdout)    // anything xcd printed before the plugin must not land after the plugin's output
-        return try await runner.run(Invocation(plugin.path, arguments, environment: environment,
-                                               workingDirectory: workingDirectory, timeout: timeout, passthrough: true)).exitCode
+        do {
+            return try await runner.run(Invocation(plugin.path, arguments, environment: environment,
+                                                   workingDirectory: workingDirectory, timeout: timeout, passthrough: true)).exitCode
+        } catch var error as XcdError where error.code == .timeout {
+            // Arguments pass through to the plugin, so xcd has no `--timeout` to offer here.
+            let limit = DurationText.format(timeout)
+            error.message = "`xcd \(plugin.name)` ran longer than \(limit) and was stopped"
+            error.next = "xcd stops a plugin after \(limit); its options, such as how to make it finish sooner, are in its own documentation (\(plugin.path))"
+            throw error
+        }
     }
 }

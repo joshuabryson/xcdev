@@ -89,6 +89,18 @@ import XcdevTestSupport
         #expect(shellCall == nil)
     }
 
+    @Test func aTimeoutPointsAtTheCommandsTimeoutKey() async throws {
+        defer { worktree.remove() }
+        fake.stub(["sh"]) { _ in
+            throw XcdError(.timeout, "`/bin/sh -c ./seed.sh` timed out after 600 seconds", next: "re-run with a larger --timeout")
+        }
+        var ctx = try context("  seed-db: { run: ./seed.sh, timeout: 10m }")
+        let error = await #expect(throws: XcdError.self) { try await runner().run("seed-db", arguments: [], in: &ctx) }
+        #expect(error?.code == .timeout)
+        #expect(error?.message == "`xcd seed-db` timed out after 10m00s")
+        #expect(error?.next == "make it finish sooner, or raise commands.seed-db.timeout in .xcdev.yml, then re-run")
+    }
+
     @Test func needsDeviceWithoutDevicesSaysWhatToAdd() async throws {
         defer { worktree.remove() }
         var ctx = try worktree.context("version: 1\nproject: Package.swift\ncommands:\n  seed: { run: x, needs: [device] }",

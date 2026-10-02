@@ -53,4 +53,19 @@ import XcdevTestSupport
         #expect(call.arguments == ["--fix", "a b"] && call.passthrough && call.workingDirectory == "/w")
         #expect(call.environment == ["XCD_OUTPUT": "text"] && call.timeout == .seconds(1800))
     }
+
+    @Test func aTimeoutSaysThePluginRanTooLongWithoutSuggestingTimeout() async throws {
+        let fake = FakeProcessRunner()
+        fake.stub(["xcd-lint"]) { _ in
+            throw XcdError(.timeout, "`/opt/bin/xcd-lint` timed out after 1800 seconds", next: "re-run with a larger --timeout")
+        }
+        let plugin = Plugin(name: "lint", path: "/opt/bin/xcd-lint")
+        let error = await #expect(throws: XcdError.self) {
+            try await PluginRunner(runner: fake).run(plugin, arguments: [], environment: [:], workingDirectory: "/w")
+        }
+        #expect(error?.code == .timeout)
+        #expect(error?.message == "`xcd lint` ran longer than 30m00s and was stopped")
+        #expect(error?.next == "xcd stops a plugin after 30m00s; its options, such as how to make it finish sooner, are in its own documentation (/opt/bin/xcd-lint)")
+        #expect(error?.next?.contains("--timeout") == false)
+    }
 }

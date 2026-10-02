@@ -37,7 +37,15 @@ public struct ProjectCommandRunner: Sendable {
                                     environment: context.environment, workingDirectory: ctx.location.worktreeRoot,
                                     timeout: spec.timeoutDuration, passthrough: true)
         fflush(stdout)    // anything xcd printed before the child must not land after the child's output
-        let result = try await builds.runner.run(invocation)
+        let result: ProcessOutput
+        do {
+            result = try await builds.runner.run(invocation)
+        } catch var error as XcdError where error.code == .timeout {
+            // Arguments pass through to the script, so `--timeout` would be the script's, not xcd's.
+            error.message = "`xcd \(name)` timed out after \(DurationText.format(spec.timeoutDuration))"
+            error.next = "make it finish sooner, or raise commands.\(name).timeout in .xcdev.yml, then re-run"
+            throw error
+        }
         switch result.exitCode {
         case 127: builds.progress("`xcd \(name)` exited 127: its command was not found; check commands.\(name).run in .xcdev.yml")
         case 126: builds.progress("`xcd \(name)` exited 126: its script is not executable; run `chmod +x` on it")
