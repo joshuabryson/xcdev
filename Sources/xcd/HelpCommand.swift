@@ -44,7 +44,8 @@ enum HelpCommand {
     }
 }
 
-/// `xcd <name> [args…]` for a project command or plugin: their output and exit code pass straight through.
+/// `xcd <name> [args…]` for a project command or plugin: their output and exit code pass straight through. A
+/// command ended by a signal exits 128 + the signal (130 after Ctrl-C), as a shell reports it.
 enum External {
     static func run(_ name: String, arguments: [String]) async {
         let services = Services.live()
@@ -53,11 +54,11 @@ enum External {
                                                                builtins: Xcd.builtins.map(\.name))
             Foundation.exit(code)
         } catch let error as XcdError {
-            print(Renderer.failure(error, command: name, format: services.output))
+            await services.interrupts.output { print(Renderer.failure(error, command: name, format: services.output)) }
             Foundation.exit(error.code.exitCode)
         } catch {
             let wrapped = XcdError(.internalError, "\(error)", next: "this is a bug in xcd; please report it")
-            print(Renderer.failure(wrapped, command: name, format: services.output))
+            await services.interrupts.output { print(Renderer.failure(wrapped, command: name, format: services.output)) }
             Foundation.exit(wrapped.code.exitCode)
         }
     }

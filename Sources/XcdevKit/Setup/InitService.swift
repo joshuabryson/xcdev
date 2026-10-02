@@ -7,14 +7,17 @@ public struct InitService: Sendable {
     public let discovery: XcodeDiscovery
     /// Shows the slow steps (resolving packages, reading build settings) on stderr.
     public let progress: Activity
+    /// Removes the run's scratch folder if Ctrl-C ends xcd during detection.
+    public let interrupts: Interrupts
     let now: @Sendable () -> Date
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, discovery: XcodeDiscovery? = nil,
-                progress: Activity = .silent, now: @escaping @Sendable () -> Date = { Date() }) {
+                progress: Activity = .silent, interrupts: Interrupts = .shared, now: @escaping @Sendable () -> Date = { Date() }) {
         self.runner = runner
         self.globalPaths = globalPaths
         self.discovery = discovery ?? XcodeDiscovery(runner: runner)
         self.progress = progress
+        self.interrupts = interrupts
         self.now = now
     }
 
@@ -55,7 +58,7 @@ public struct InitService: Sendable {
     }
 
     /// Detects `container` (or the best one found) in the worktree and plans the config. xcodebuild and SwiftPM work
-    /// in a scratch folder under the cache directory, deleted afterwards (also on Ctrl-C during a spinner); package
+    /// in a scratch folder under the cache directory, deleted afterwards (also on Ctrl-C, once the children are stopped); package
     /// checkouts go to the main checkout's `PackageCache`, kept for the next run and locked while in use. Another
     /// `init` of the same project holds the lock at most as long as its xcodebuild deadlines (10 minutes to list, 2
     /// to read build settings), so the wait is bounded by those.
@@ -73,9 +76,9 @@ public struct InitService: Sendable {
         let installs = await discovery.installs()
         let selected = try? await discovery.resolve(spec: nil)
         let scratch = InitScratch.make(in: globalPaths.cacheDirectory)
-        Activity.removeOnInterrupt(scratch)
+        let cleanup = interrupts.addCleanup { try? FileManager.default.removeItem(atPath: scratch) }
         defer {
-            Activity.keepOnInterrupt(scratch)
+            interrupts.removeCleanup(cleanup)
             try? FileManager.default.removeItem(atPath: scratch)
         }
         let packages = PackageCache(globalPaths: globalPaths, root: location.projectRoot)

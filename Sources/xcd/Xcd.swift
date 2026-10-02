@@ -25,8 +25,10 @@ struct Xcd: AsyncParsableCommand {
     static var builtinNames: Set<String> { Set(builtins.flatMap { [$0.name] + $0.aliases }).union(["help"]) }
 
     /// `xcd help …` and unknown command names are handled here; everything else goes to ArgumentParser.
+    /// Ctrl-C and SIGTERM are handled for every command from the start (see `Interrupts`).
     static func main() async {
         assert(builtinNames.isSubset(of: BuiltinCommands.reservedNames), "add new built-in names to BuiltinCommands.reservedNames")
+        Interrupts.shared.install()
         let arguments = Array(CommandLine.arguments.dropFirst())
         switch CommandRoute.route(arguments, builtins: builtinNames) {
         case .builtin:

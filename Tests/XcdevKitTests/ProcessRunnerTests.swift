@@ -34,13 +34,15 @@ import XcdevTestSupport
         #expect(out.stdoutString.contains("XCD_TEST_VAR=yes"))
     }
 
+    /// The bounds in these timing tests are far below the child's own run time, not tight wall-clock limits: they
+    /// prove the deadline ended the child, and hold on a machine with a load average of 70.
     @Test func timeoutTerminatesAndThrows() async throws {
         let start = ContinuousClock.now
         let error = await #expect(throws: XcdError.self) {
-            try await runner.run(Invocation("/bin/sleep", ["5"], timeout: .milliseconds(300)))
+            try await runner.run(Invocation("/bin/sleep", ["30"], timeout: .milliseconds(500)))
         }
         #expect(error?.code == .timeout)
-        #expect(ContinuousClock.now - start < .seconds(3))
+        #expect(ContinuousClock.now - start < .seconds(15))                  // the sleep would take 30
     }
 
     @Test func missingExecutableThrowsSubprocessFailed() async throws {
@@ -76,7 +78,7 @@ import XcdevTestSupport
                                             timeout: .milliseconds(300)))
         }
         #expect(error?.code == .timeout)
-        #expect(ContinuousClock.now - start < .seconds(8))
+        #expect(ContinuousClock.now - start < .seconds(20))                  // the loop never ends by itself
     }
 
     @Test func cancellationThrowsCancellationError() async throws {
@@ -86,7 +88,7 @@ import XcdevTestSupport
         try await Task.sleep(for: .milliseconds(200))
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
-        #expect(ContinuousClock.now - start < .seconds(3))
+        #expect(ContinuousClock.now - start < .seconds(15))                  // the sleep would take 30
     }
 
     @Test func outputFileReceivesBothStreamsAndAppends() async throws {
@@ -104,11 +106,11 @@ import XcdevTestSupport
 
     @Test func stopAtTimeoutReturnsWhatWasCaptured() async throws {
         let start = ContinuousClock.now
-        let out = try await runner.run(Invocation("/bin/sh", ["-c", "echo started; exec sleep 10"],
+        let out = try await runner.run(Invocation("/bin/sh", ["-c", "echo started; exec sleep 30"],
                                                   timeout: .milliseconds(500), stopAtTimeout: true))
         #expect(out.stdoutString == "started\n")
-        #expect(out.stoppedAtDeadline && !out.succeeded)
-        #expect(ContinuousClock.now - start < .seconds(4))
+        #expect(out.stoppedAtDeadline && out.exitCode == 143)                // 128 + SIGTERM
+        #expect(ContinuousClock.now - start < .seconds(15))                  // the sleep would take 30
     }
 
     @Test func aProcessThatEndsBeforeItsDeadlineWasNotStopped() async throws {
@@ -133,6 +135,31 @@ import XcdevTestSupport
         let out = try await runner.run(Invocation("/bin/sh", ["-c", "exit 7"], passthrough: true))
         #expect(out.exitCode == 7)
         #expect(out.stdout.isEmpty && out.stderr.isEmpty)
+    }
+
+    /// A timeout ends the child's whole process group, so a background job can't keep the output pipe open.
+    @Test func aTimeoutStopsWhatTheChildStarted() async throws {
+        let start = ContinuousClock.now
+        let out = try await runner.run(Invocation("/bin/sh", ["-c", "sleep 30 & echo $!; wait"],
+                                                  timeout: .milliseconds(500), stopAtTimeout: true))
+        #expect(out.stoppedAtDeadline)
+        #expect(ContinuousClock.now - start < .seconds(15))
+        let sleeper = try #require(pid_t(out.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)))
+        let deadline = ContinuousClock.now + .seconds(10)                     // launchd reaps it soon after
+        while kill(sleeper, 0) == 0, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(kill(sleeper, 0) != 0)
+    }
+
+    @Test func aPassthroughChildEndedByASignalReports128PlusTheSignal() async throws {
+        let out = try await runner.run(Invocation("/bin/sh", ["-c", "kill -INT $$"], passthrough: true))
+        #expect(out.exitCode == 130)
+    }
+
+    @Test func aMissingWorkingDirectoryIsALaunchFailure() async throws {
+        let error = await #expect(throws: XcdError.self) {
+            try await runner.run(Invocation("/bin/echo", [], workingDirectory: "/no/such/folder"))
+        }
+        #expect(error?.code == .subprocessFailed)
     }
 
     @Test func passthroughWinsOverAnOutputFile() async throws {

@@ -9,7 +9,7 @@ import XcdevTestSupport
 
     /// A git repo holding `projects` (empty .xcodeproj folders) and no .xcdev.yml, with xcodebuild and simctl
     /// answering from the recorded iOS + watch app.
-    func setup(projects: [String] = ["SampleApp.xcodeproj"], progress: Activity = .silent,
+    func setup(projects: [String] = ["SampleApp.xcodeproj"], progress: Activity = .silent, interrupts: Interrupts = Interrupts(),
                now: @escaping @Sendable () -> Date = { Date() }) throws -> (TempProject, InitService) {
         let project = try TempProject.make(config: "version: 1\nproject: x\n")
         try FileManager.default.removeItem(atPath: project.root + "/.xcdev.yml")
@@ -30,7 +30,7 @@ import XcdevTestSupport
         let runner = RoutingRunner(fake: fake, realExecutables: ["git"])
         let service = InitService(runner: runner, globalPaths: GlobalPaths(base: project.home),
                                   discovery: XcodeDiscovery(runner: runner, applicationsDirectories: []),
-                                  progress: progress, now: now)
+                                  progress: progress, interrupts: interrupts, now: now)
         return (project, service)
     }
 
@@ -64,6 +64,41 @@ import XcdevTestSupport
         #expect(!fm.fileExists(atPath: project.root + "/.build"))
         #expect(fake.commandLines.contains { $0.contains("-list") })          // detection wrote to the scratch folder…
         #expect(leftoverScratch(project).isEmpty)                             // …which is gone
+    }
+
+    /// Ctrl-C ends xcd before `init`'s own cleanup runs, so the scratch folder is removed by a cleanup on its
+    /// Interrupts, registered only while detection runs.
+    @Test func ctrlCDuringDetectionRemovesTheScratchFolder() async throws {
+        let interrupts = Interrupts(report: { _ in })
+        let (project, service) = try setup(interrupts: interrupts)
+        defer { project.remove() }
+        let cache = GlobalPaths(base: project.home).cacheDirectory
+        let seen = Mutex<(scratch: String?, removed: Bool)>((nil, false))
+        fake.stub(["xcrun", "xcodebuild", "-showBuildSettings"]) { inv in
+            let derivedData = inv.arguments[inv.arguments.firstIndex(of: "-derivedDataPath")! + 1]
+            let scratch = cache + "/" + derivedData.dropFirst(cache.count + 1).prefix { $0 != "/" }
+            if seen.withLock({ $0.scratch == nil }) {                         // the first scheme's call
+                try FileManager.default.createDirectory(atPath: derivedData, withIntermediateDirectories: true)   // as xcodebuild would
+                _ = interrupts.handle(SIGINT)                                // what Ctrl-C runs, minus the exit
+                seen.withLock { $0 = (scratch, !FileManager.default.fileExists(atPath: scratch)) }
+            }
+            return ProcessOutput(stdout: Fixture.string("build-settings-scheme-app.json"))
+        }
+        _ = try? await service.plan(from: project.root)
+        let result = seen.withLock { $0 }
+        #expect(result.scratch?.hasPrefix(cache + "/init-") == true)
+        #expect(result.removed)
+    }
+
+    @Test func detectionLeavesNoCleanupRegistered() async throws {
+        let ran = Counter()
+        let interrupts = Interrupts(report: { _ in })
+        let (project, service) = try setup(interrupts: interrupts)
+        defer { project.remove() }
+        _ = try await service.plan(from: project.root)
+        _ = interrupts.addCleanup { ran.increment() }
+        #expect(interrupts.handle(SIGINT) == 130)
+        #expect(ran.value == 1)                                              // only the one added here
     }
 
     /// The `-clonedSourcePackagesDirPath` and `-derivedDataPath` of each xcodebuild call so far.

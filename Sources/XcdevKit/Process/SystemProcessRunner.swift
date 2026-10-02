@@ -4,56 +4,60 @@ import Synchronization
 public struct SystemProcessRunner: ProcessRunning {
     /// The environment children inherit, before each invocation's own is merged over it.
     private let inheritedEnvironment: [String: String]
+    /// Tracks the children for the SIGINT/SIGTERM handler, and stops a passthrough child's Ctrl-C reaching xcd.
+    private let interrupts: Interrupts
 
-    public init(inheritedEnvironment: [String: String] = ProcessInfo.processInfo.environment) {
+    public init(inheritedEnvironment: [String: String] = ProcessInfo.processInfo.environment,
+                interrupts: Interrupts = .shared) {
         self.inheritedEnvironment = inheritedEnvironment
+        self.interrupts = interrupts
     }
 
+    /// A passthrough child runs in xcd's process group, so it can read the terminal and gets its Ctrl-C; every other
+    /// child leads a group of its own, out of the terminal's reach, which `Interrupts` stops on SIGINT or SIGTERM.
     public func run(_ invocation: Invocation) async throws -> ProcessOutput {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: invocation.executable)
-        process.arguments = invocation.arguments
-        process.environment = ContextInfo.childEnvironment(inherited: inheritedEnvironment,
-                                                          overrides: invocation.environment)
-        if let directory = invocation.workingDirectory {
-            process.currentDirectoryURL = URL(fileURLWithPath: directory)
-        }
+        let environment = ContextInfo.childEnvironment(inherited: inheritedEnvironment, overrides: invocation.environment)
         let pipes: (out: Pipe, err: Pipe)?
         let logHandle: FileHandle?
+        let stdio: ChildProcess.Stdio
         if invocation.passthrough {
             pipes = nil
             logHandle = nil
-            process.standardInput = FileHandle.standardInput
-            process.standardOutput = FileHandle.standardOutput
-            process.standardError = FileHandle.standardError
+            stdio = .shared
         } else if let file = invocation.outputFile {
-            logHandle = try Self.appendHandle(for: file)
+            let handle = try Self.appendHandle(for: file)
+            logHandle = handle
             pipes = nil
-            process.standardOutput = logHandle
-            process.standardError = logHandle
-            process.standardInput = FileHandle.nullDevice
+            stdio = .redirected(output: handle.fileDescriptor, error: handle.fileDescriptor)
         } else {
             let captured = (out: Pipe(), err: Pipe())
             pipes = captured
             logHandle = nil
-            process.standardOutput = captured.out
-            process.standardError = captured.err
-            process.standardInput = FileHandle.nullDevice
+            stdio = .redirected(output: captured.out.fileHandleForWriting.fileDescriptor,
+                                error: captured.err.fileHandleForWriting.fileDescriptor)
         }
         defer { try? logHandle?.close() }
 
-        let exit = ExitSignal()
-        process.terminationHandler = { exit.finish($0.terminationStatus) }
+        let child: ChildProcess
         do {
-            try process.run()
-            Self.running.withLock { $0[process.processIdentifier] = invocation.argv }
+            child = try interrupts.launch(invocation.argv, foreground: invocation.passthrough) {
+                try ChildProcess.spawn(invocation.executable, arguments: invocation.arguments, environment: environment,
+                                       workingDirectory: invocation.workingDirectory, stdio: stdio,
+                                       leadsGroup: !invocation.passthrough)
+            }
+        } catch let error as XcdError {
+            throw error
         } catch {
             throw XcdError(.subprocessFailed,
                            "could not launch \(invocation.executable): \(error.localizedDescription)",
                            details: ["command: \(invocation.commandLine)"])
         }
+        // Only the child writes to the pipes now, so reading them ends when it (and whatever it started) is done.
+        try? pipes?.out.fileHandleForWriting.close()
+        try? pipes?.err.fileHandleForWriting.close()
+        let interrupts = interrupts
+        child.watch(keepZombie: { interrupts.fired })
 
-        let handle = ProcessHandle(process)
         async let outData = Self.readToEnd(pipes?.out)
         async let errData = Self.readToEnd(pipes?.err)
 
@@ -61,14 +65,14 @@ public struct SystemProcessRunner: ProcessRunning {
         let timer = Task {
             try? await Task.sleep(for: invocation.timeout)
             guard !Task.isCancelled else { return }
-            if handle.terminate() { timedOut.set() }
+            if child.terminate() { timedOut.set() }
         }
         let status = await withTaskCancellationHandler {
-            await exit.wait()
+            await child.wait()
         } onCancel: {
-            _ = handle.terminate()
+            child.terminate()
         }
-        _ = Self.running.withLock { $0.removeValue(forKey: process.processIdentifier) }
+        interrupts.finished(child)
         timer.cancel()
         let (out, err) = await (outData, errData)
 
@@ -86,30 +90,6 @@ public struct SystemProcessRunner: ProcessRunning {
         }
         if Task.isCancelled { throw CancellationError() }
         return ProcessOutput(exitCode: status, stdoutData: out, stderrData: err)
-    }
-
-    /// Children running now, by pid. Process starts each child in its own process group, which the terminal's
-    /// Ctrl-C doesn't reach, so an interrupted xcd stops them itself (`terminateChildren`).
-    private static let running = Mutex<[pid_t: [String]]>([:])
-
-    /// The argv of each child running now, by pid.
-    public static var runningChildren: [pid_t: [String]] { running.withLock { $0 } }
-
-    /// Sends SIGTERM to the running children whose argv matches, then SIGKILL to any still running after `grace`.
-    /// Returns once they have all exited, or after `grace` plus a second.
-    public static func terminateChildren(grace: Duration = .seconds(2), where matches: ([String]) -> Bool = { _ in true }) {
-        let targets = runningChildren.filter { matches($0.value) }.keys
-        for pid in targets { kill(pid, SIGTERM) }
-        let clock = ContinuousClock()
-        let start = clock.now
-        var killed = false
-        while !Set(runningChildren.keys).intersection(targets).isEmpty, clock.now - start < grace + .seconds(1) {
-            if !killed, clock.now - start >= grace {
-                for pid in Set(runningChildren.keys).intersection(targets) { kill(pid, SIGKILL) }
-                killed = true
-            }
-            usleep(20_000)
-        }
     }
 
     private static func readToEnd(_ pipe: Pipe?) async -> Data {
@@ -131,47 +111,6 @@ public struct SystemProcessRunner: ProcessRunning {
         }
         handle.seekToEndOfFile()
         return handle
-    }
-}
-
-private final class ProcessHandle: @unchecked Sendable {
-    private let process: Process
-    init(_ process: Process) { self.process = process }
-    /// Sends SIGTERM, then SIGKILL after a grace period if the process is still running.
-    /// Returns whether a running process was signalled.
-    @discardableResult
-    func terminate() -> Bool {
-        guard process.isRunning else { return false }
-        process.terminate()
-        let process = process
-        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
-            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-        }
-        return true
-    }
-}
-
-private final class ExitSignal: Sendable {
-    private let state = Mutex<(status: Int32?, waiters: [CheckedContinuation<Int32, Never>])>((nil, []))
-
-    func finish(_ status: Int32) {
-        let waiters = state.withLock { state in
-            state.status = status
-            defer { state.waiters = [] }
-            return state.waiters
-        }
-        waiters.forEach { $0.resume(returning: status) }
-    }
-
-    func wait() async -> Int32 {
-        await withCheckedContinuation { continuation in
-            let ready: Int32? = state.withLock { state in
-                if let status = state.status { return status }
-                state.waiters.append(continuation)
-                return nil
-            }
-            if let ready { continuation.resume(returning: ready) }
-        }
     }
 }
 

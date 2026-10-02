@@ -12,10 +12,12 @@ public struct Services: Sendable {
     public let terminal: (@Sendable (String) -> Void)?
     /// The output format of this invocation, passed to extensions as XCD_OUTPUT. The CLI sets it from --json.
     public var output: OutputFormat
+    /// The SIGINT/SIGTERM handler's state: cleanups to run, and whether output must stop.
+    public let interrupts: Interrupts
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, currentDirectory: String,
                 environment: [String: String], progress: @escaping @Sendable (String) -> Void = { _ in },
-                terminal: (@Sendable (String) -> Void)? = nil, output: OutputFormat? = nil) {
+                terminal: (@Sendable (String) -> Void)? = nil, output: OutputFormat? = nil, interrupts: Interrupts = .shared) {
         self.runner = runner
         self.globalPaths = globalPaths
         self.currentDirectory = currentDirectory
@@ -23,20 +25,26 @@ public struct Services: Sendable {
         self.progress = progress
         self.terminal = terminal
         self.output = output ?? OutputFormat.resolve(jsonFlag: false, environment: environment)
+        self.interrupts = interrupts
     }
 
+    /// Progress stops once Ctrl-C has fired the handler: what follows would only describe the stopped children.
     public static func live() -> Services {
         let environment = ProcessInfo.processInfo.environment
+        let interrupts = Interrupts.shared
         let stderr: @Sendable (String) -> Void = { FileHandle.standardError.write(Data($0.utf8)) }
         let interactive = Activity.animates(stderrIsTerminal: isatty(STDERR_FILENO) == 1, environment: environment, output: .text)
-        return Services(runner: SystemProcessRunner(), globalPaths: .live(environment: environment),
+        return Services(runner: SystemProcessRunner(interrupts: interrupts), globalPaths: .live(environment: environment),
                         currentDirectory: FileManager.default.currentDirectoryPath, environment: environment,
-                        progress: { stderr("xcd: \($0)\n") }, terminal: interactive ? stderr : nil)
+                        progress: { line in interrupts.perform { stderr("xcd: \(line)\n") } },
+                        terminal: interactive ? stderr : nil, interrupts: interrupts)
     }
 
     /// Long steps: a spinner on a terminal, unless the output is JSON; otherwise `progress` lines.
     public var activity: Activity {
-        if let terminal, output != .json { return .animated(write: terminal, columns: Activity.stderrColumns) }
+        if let terminal, output != .json {
+            return .animated(write: terminal, columns: Activity.stderrColumns, interrupts: interrupts)
+        }
         return .plain(progress)
     }
 
@@ -51,7 +59,9 @@ public struct Services: Sendable {
     public var projectCommands: ProjectCommandRunner {
         ProjectCommandRunner(builds: builds, output: output, environment: environment)
     }
-    public var setup: InitService { InitService(runner: runner, globalPaths: globalPaths, progress: activity) }
+    public var setup: InitService {
+        InitService(runner: runner, globalPaths: globalPaths, progress: activity, interrupts: interrupts)
+    }
     public var doctor: DoctorService { DoctorService(runner: runner, globalPaths: globalPaths) }
     public var externalCommands: ExternalCommands { ExternalCommands(services: self) }
     public var help: HelpService { HelpService(services: self) }
