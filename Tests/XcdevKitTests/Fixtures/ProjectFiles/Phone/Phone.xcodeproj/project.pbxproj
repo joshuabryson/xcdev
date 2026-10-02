@@ -1,0 +1,98 @@
+// !$*UTF8*$!
+/* Hand-written for xcd's tests: only the objects `xcd init` reads. An iOS app whose SDKROOT is set at the project
+   level, unit and UI test targets, a watch app whose SDKROOT is set on the target, a framework, a local package
+   referenced as a package (Packages/Shared) and one referenced as a folder inside a group (Packages/Acceptance). */
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+		A10000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			buildConfigurationList = A10000000000000000000500;
+			mainGroup = A10000000000000000000002;
+			packageReferences = (
+				A10000000000000000000901 /* XCLocalSwiftPackageReference "Packages/Shared" */,
+			);
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A10000000000000000000101 /* Phone */,
+				A10000000000000000000102 /* PhoneTests */,
+				A10000000000000000000103 /* PhoneUITests */,
+				A10000000000000000000104 /* Phone Watch App */,
+				A10000000000000000000105 /* Kit */,
+			);
+		};
+		A10000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000003 /* Packages */,
+			);
+			sourceTree = "<group>";
+		};
+		A10000000000000000000003 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000011 /* Acceptance */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000011 /* Acceptance */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Acceptance; sourceTree = "<group>"; };
+		A10000000000000000000901 /* XCLocalSwiftPackageReference "Packages/Shared" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Shared;
+		};
+		A10000000000000000000101 /* Phone */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000501;
+			name = Phone;
+			productType = "com.apple.product-type.application";
+		};
+		A10000000000000000000102 /* PhoneTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000502;
+			name = PhoneTests;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		A10000000000000000000103 /* PhoneUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000503;
+			name = PhoneUITests;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		A10000000000000000000104 /* Phone Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000504;
+			name = "Phone Watch App";
+			productType = "com.apple.product-type.application";
+		};
+		A10000000000000000000105 /* Kit */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000505;
+			name = Kit;
+			productType = "com.apple.product-type.framework";
+		};
+		A10000000000000000000500 = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000600, A10000000000000000000601); defaultConfigurationName = Release; };
+		A10000000000000000000501 = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000610, A10000000000000000000611); defaultConfigurationName = Release; };
+		A10000000000000000000502 = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000620, A10000000000000000000621); defaultConfigurationName = Release; };
+		A10000000000000000000503 = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000630, A10000000000000000000631); defaultConfigurationName = Release; };
+		A10000000000000000000504 = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000640, A10000000000000000000641); defaultConfigurationName = Release; };
+		A10000000000000000000505 = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000650, A10000000000000000000651); defaultConfigurationName = Release; };
+		A10000000000000000000600 = {isa = XCBuildConfiguration; buildSettings = {SDKROOT = iphoneos; SWIFT_VERSION = 6.0; }; name = Debug; };
+		A10000000000000000000601 = {isa = XCBuildConfiguration; buildSettings = {SDKROOT = iphoneos; SWIFT_VERSION = 6.0; }; name = Release; };
+		A10000000000000000000610 = {isa = XCBuildConfiguration; buildSettings = {PRODUCT_BUNDLE_IDENTIFIER = dev.xcdev.Phone; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+		A10000000000000000000611 = {isa = XCBuildConfiguration; buildSettings = {PRODUCT_BUNDLE_IDENTIFIER = dev.xcdev.Phone; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+		A10000000000000000000620 = {isa = XCBuildConfiguration; buildSettings = {TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Phone.app/Phone"; }; name = Debug; };
+		A10000000000000000000621 = {isa = XCBuildConfiguration; buildSettings = {TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Phone.app/Phone"; }; name = Release; };
+		A10000000000000000000630 = {isa = XCBuildConfiguration; buildSettings = {TEST_TARGET_NAME = Phone; }; name = Debug; };
+		A10000000000000000000631 = {isa = XCBuildConfiguration; buildSettings = {TEST_TARGET_NAME = Phone; }; name = Release; };
+		A10000000000000000000640 = {isa = XCBuildConfiguration; buildSettings = {SDKROOT = watchos; TARGETED_DEVICE_FAMILY = 4; }; name = Debug; };
+		A10000000000000000000641 = {isa = XCBuildConfiguration; buildSettings = {SDKROOT = watchos; TARGETED_DEVICE_FAMILY = 4; }; name = Release; };
+		A10000000000000000000650 = {isa = XCBuildConfiguration; buildSettings = {PRODUCT_NAME = Kit; }; name = Debug; };
+		A10000000000000000000651 = {isa = XCBuildConfiguration; buildSettings = {PRODUCT_NAME = Kit; }; name = Release; };
+	};
+	rootObject = A10000000000000000000001 /* Project object */;
+}

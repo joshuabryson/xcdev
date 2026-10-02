@@ -1,0 +1,41 @@
+// !$*UTF8*$!
+/* Hand-written for xcd's tests: a Mac app and a command-line tool. */
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+		D10000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			buildConfigurationList = D10000000000000000000500;
+			mainGroup = D10000000000000000000002;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D10000000000000000000101 /* Mac Tool */,
+				D10000000000000000000102 /* Helper */,
+			);
+		};
+		D10000000000000000000002 = {isa = PBXGroup; children = (); sourceTree = "<group>"; };
+		D10000000000000000000101 /* Mac Tool */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D10000000000000000000501;
+			name = "Mac Tool";
+			productType = "com.apple.product-type.application";
+		};
+		D10000000000000000000102 /* Helper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D10000000000000000000502;
+			name = Helper;
+			productType = "com.apple.product-type.tool";
+		};
+		D10000000000000000000500 = {isa = XCConfigurationList; buildConfigurations = (D10000000000000000000600); defaultConfigurationName = Debug; };
+		D10000000000000000000501 = {isa = XCConfigurationList; buildConfigurations = (D10000000000000000000610); defaultConfigurationName = Debug; };
+		D10000000000000000000502 = {isa = XCConfigurationList; buildConfigurations = (D10000000000000000000620); defaultConfigurationName = Debug; };
+		D10000000000000000000600 = {isa = XCBuildConfiguration; buildSettings = {SDKROOT = macosx; }; name = Debug; };
+		D10000000000000000000610 = {isa = XCBuildConfiguration; buildSettings = {}; name = Debug; };
+		D10000000000000000000620 = {isa = XCBuildConfiguration; buildSettings = {}; name = Debug; };
+	};
+	rootObject = D10000000000000000000001 /* Project object */;
+}

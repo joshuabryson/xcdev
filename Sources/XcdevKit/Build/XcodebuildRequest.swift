@@ -71,12 +71,10 @@ public struct XcodebuildRequest: Sendable, Equatable {
     public var resultBundle: String?
     public var onlyTesting: [String]
     public var skipTesting: [String]
-    /// Where package checkouts go instead of `paths.sourcePackages` (`xcd init`'s per-project package cache).
-    public var sourcePackages: String?
 
     public init(actions: [Action], container: ProjectContainer, scheme: String, destination: Destination? = nil,
                 configuration: String? = nil, paths: WorktreePaths, resultBundle: String? = nil,
-                onlyTesting: [String] = [], skipTesting: [String] = [], sourcePackages: String? = nil) {
+                onlyTesting: [String] = [], skipTesting: [String] = []) {
         self.actions = actions
         self.container = container
         self.scheme = scheme
@@ -86,7 +84,6 @@ public struct XcodebuildRequest: Sendable, Equatable {
         self.resultBundle = resultBundle
         self.onlyTesting = onlyTesting
         self.skipTesting = skipTesting
-        self.sourcePackages = sourcePackages
     }
 
     public var arguments: [String] {
@@ -119,6 +116,6 @@ public struct XcodebuildRequest: Sendable, Equatable {
         var args = container.arguments + ["-scheme", scheme]
         if let configuration { args += ["-configuration", configuration] }
         if let destination { args += ["-destination", destination.argument] }
-        return args + ["-derivedDataPath", paths.derivedData, "-clonedSourcePackagesDirPath", sourcePackages ?? paths.sourcePackages]
+        return args + ["-derivedDataPath", paths.derivedData, "-clonedSourcePackagesDirPath", paths.sourcePackages]
     }
 }

@@ -11,5 +11,24 @@
       "platformName": "watchos",
       "version": "11.0"
     }
+  ],
+  "products": [
+    {
+      "name": "A",
+      "settings": [],
+      "targets": ["A"],
+      "type": {"library": ["automatic"]}
+    },
+    {
+      "name": "B",
+      "settings": [],
+      "targets": ["B"],
+      "type": {"library": ["automatic"]}
+    }
+  ],
+  "targets": [
+    {"dependencies": [], "name": "A", "type": "regular"},
+    {"dependencies": [{"byName": ["A", null]}], "name": "B", "type": "regular"},
+    {"dependencies": [{"byName": ["A", null]}], "name": "ATests", "type": "test"}
   ]
 }

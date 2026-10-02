@@ -1,0 +1,3 @@
+// Hand-written for xcd's tests: SDKROOT is an expression, which the project files alone can't evaluate.
+APP_SDK = iphoneos
+SDKROOT = $(APP_SDK)

@@ -30,11 +30,12 @@ import XcdevTestSupport
         let runner = RoutingRunner(fake: fake, realExecutables: ["git"])
         let service = InitService(runner: runner, globalPaths: GlobalPaths(base: project.home),
                                   discovery: XcodeDiscovery(runner: runner, applicationsDirectories: []),
-                                  progress: progress, interrupts: interrupts, now: now)
+                                  progress: progress, interrupts: interrupts, xcodeDerivedData: project.home + "/DerivedData",
+                                  now: now)
         return (project, service)
     }
 
-    /// Like real xcodebuild, leaves package state in the folder `-clonedSourcePackagesDirPath` names (the package cache).
+    /// Like real xcodebuild, leaves package state in the folder `-clonedSourcePackagesDirPath` names.
     static func writeState(_ invocation: Invocation) throws {
         let packages = invocation.arguments[invocation.arguments.firstIndex(of: "-clonedSourcePackagesDirPath")! + 1]
         try FileManager.default.createDirectory(atPath: packages, withIntermediateDirectories: true)
@@ -110,45 +111,33 @@ import XcdevTestSupport
         return (values("-clonedSourcePackagesDirPath"), values("-derivedDataPath"))
     }
 
-    @Test func packagesAreKeptInAPerProjectCacheThatLaterRunsReuse() async throws {
+    @Test func packagesXcodebuildResolvesAreDeletedWithTheScratchFolder() async throws {
         let (project, service) = try setup()
         defer { project.remove() }
         _ = try await service.plan(from: project.root)
         _ = try await service.write(answers: [:], force: false, from: project.root)
         let paths = xcodebuildPaths()
         let cache = GlobalPaths(base: project.home).cacheDirectory
-        let packages = try #require(paths.packages.first)
-        #expect(paths.packages.count == 1)                                   // -list and -showBuildSettings, both runs
-        #expect(packages == cache + "/packages/" + PackageCache.key(for: project.root) + "/SourcePackages")
-        #expect(FileManager.default.fileExists(atPath: packages + "/workspace-state.json"))       // kept…
+        #expect(paths.packages.count == 2 && paths.packages.allSatisfy { $0.hasPrefix(cache + "/init-") })   // one per run
         #expect(paths.derivedData.count == 2 && paths.derivedData.allSatisfy { $0.hasPrefix(cache + "/init-") })
-        #expect(leftoverScratch(project).isEmpty)                            // …while the scratch DerivedData is not
+        #expect(leftoverScratch(project).isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: cache + "/packages"))     // no cache kept between runs
         #expect(!FileManager.default.fileExists(atPath: project.root + "/.xcdev"))
     }
 
-    @Test func packageCacheKeysAreReadableStableAndPerRoot() {
-        let key = PackageCache.key(for: "/Users/me/Developer/My App")
-        #expect(key == PackageCache.key(for: "/Users/me/Developer/My App"))
-        #expect(key.hasPrefix("My-App-") && key.count == "My-App-".count + 16)
-        #expect(key.dropFirst("My-App-".count).allSatisfy { $0.isHexDigit })
-        #expect(PackageCache.key(for: "/Users/me/Other/My App") != key)
-        #expect(PackageCache.key(for: "/").count == 16)                       // no readable name, just the hash
-    }
-
-    @Test func theCacheIsLockedWhileXcodebuildUsesIt() async throws {
+    @Test func aProjectWhoseFilesSayEnoughIsDetectedWithoutXcodebuild() async throws {
         let (project, service) = try setup()
         defer { project.remove() }
-        let cache = PackageCache(globalPaths: GlobalPaths(base: project.home), root: project.root)
-        let heldDuringList = Counter()
-        fake.stub(["xcrun", "xcodebuild", "-list"]) { inv in
-            try Self.writeState(inv)
-            if FileLock.isHeld(at: cache.lockPath) { heldDuringList.increment() }
-            return ProcessOutput(stdout: Fixture.string("xcodebuild-list-watch.json"))
+        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
+        for file in ["project.pbxproj", "xcshareddata/xcschemes/SampleApp.xcscheme"] {
+            try project.write(try String(contentsOfFile: repo + "/Fixtures/SampleApp/SampleApp.xcodeproj/" + file, encoding: .utf8),
+                              to: "SampleApp.xcodeproj/" + file)
         }
-        _ = try await service.plan(from: project.root)
-        #expect(heldDuringList.value == 1)
-        #expect(cache.lockPath == GlobalPaths(base: project.home).cacheDirectory + "/packages/" + PackageCache.key(for: project.root) + ".lock")
-        #expect(!FileLock.isHeld(at: cache.lockPath))
+        let report = try await service.plan(from: project.root)
+        #expect(report.detected.appSchemes == ["SampleApp"] && report.detected.platforms == [.iOS])
+        #expect(report.detected.notes.isEmpty)
+        #expect(!fake.calls.contains { $0.arguments.first == "xcodebuild" })
+        #expect(leftoverScratch(project).isEmpty)
     }
 
     @Test func listingGetsTenMinutesAndATimeoutSaysItWasResolvingPackages() async throws {
@@ -161,60 +150,18 @@ import XcdevTestSupport
         }
         let error = await #expect(throws: XcdError.self) { try await service.plan(from: project.root) }
         #expect(error?.code == .timeout)
-        #expect(error?.next?.hasPrefix("it was resolving the Swift packages of SampleApp.xcodeproj") == true)
+        #expect(error?.next == "it was resolving the Swift packages of SampleApp.xcodeproj; check the network and the package URLs, "
+                + "then run `xcd init --plan` again")
         #expect(leftoverScratch(project).isEmpty)
     }
 
-    @Test func aWorktreeSharesItsMainCheckoutsPackageCache() async throws {
-        let (project, service) = try setup()
-        defer { project.remove() }
-        let worktree = project.base + "/wt"
-        try TempProject.git(["worktree", "add", "-q", "-b", "wt", worktree, "HEAD"], in: project.root)
-        try project.write("", to: "SampleApp.xcodeproj/project.pbxproj", in: worktree)
-        _ = try await service.plan(from: project.root)
-        _ = try await service.plan(from: worktree)
-        let packages = xcodebuildPaths().packages
-        #expect(packages == [PackageCache(globalPaths: GlobalPaths(base: project.home), root: project.root).sourcePackages])
-        #expect(fake.calls.contains { $0.arguments.contains { $0.hasPrefix(Paths.canonical(worktree)) } })   // it did look at the worktree
-    }
-
-    @Test func theCacheRecordsWhichProjectOwnsIt() async throws {
-        let (project, service) = try setup()
-        defer { project.remove() }
-        _ = try await service.plan(from: project.root)
-        let cache = PackageCache(globalPaths: GlobalPaths(base: project.home), root: project.root)
-        #expect(try String(contentsOfFile: cache.rootFile, encoding: .utf8) == project.root)
-        #expect(cache.rootFile == cache.directory + "/root")
-    }
-
-    @Test func aFailedListSaysWhichPackageFolderToDeleteIfACheckoutIsDamaged() async throws {
+    @Test func aFailedListSaysHowToSeeWhy() async throws {
         let (project, service) = try setup()
         defer { project.remove() }
         fake.stub(["xcrun", "xcodebuild", "-list"], exitCode: 74, stderr: "xcodebuild: error: Could not resolve package dependencies.\n")
         let error = await #expect(throws: XcdError.self) { try await service.plan(from: project.root) }
-        let packages = PackageCache(globalPaths: GlobalPaths(base: project.home), root: project.root).sourcePackages
         #expect(error?.code == .subprocessFailed)
-        #expect(error?.next?.contains("if a package checkout is damaged, delete \(Shell.quote(packages)) and run `xcd init --plan` again") == true)
-    }
-
-    @Test func waitingForTheLockNamesIt() async throws {
-        let lines = Mutex<[String]>([])
-        let (project, service) = try setup(progress: .plain { line in lines.withLock { $0.append(line) } })
-        defer { project.remove() }
-        let cache = PackageCache(globalPaths: GlobalPaths(base: project.home), root: project.root)
-        let release = Counter()
-        let held = Task {
-            try await FileLock.withLock(at: cache.lockPath) {
-                while release.value == 0 { try await Task.sleep(for: .milliseconds(10)) }
-            }
-        }
-        while !FileLock.isHeld(at: cache.lockPath) { try await Task.sleep(for: .milliseconds(5)) }
-        let plan = Task { try await service.plan(from: project.root) }
-        while !lines.withLock({ $0.contains { $0.hasPrefix("waiting") } }) { try await Task.sleep(for: .milliseconds(5)) }
-        release.increment()
-        _ = try await plan.value
-        try await held.value
-        #expect(lines.withLock { $0.first } == "waiting for another `xcd init` of this project to finish with its package cache (\(cache.lockPath))…")
+        #expect(error?.next == "run `xcodebuild -list` in the project folder to see why")
     }
 
     @Test func initReportsEachLongStep() async throws {
@@ -223,7 +170,7 @@ import XcdevTestSupport
         defer { project.remove() }
         _ = try await service.plan(from: project.root)
         #expect(lines.withLock { $0 } == [
-            "listing the schemes of SampleApp.xcodeproj and resolving any Swift packages (the first run can take a minute)…",
+            "listing the schemes of SampleApp.xcodeproj: no resolved Swift packages found for this project; resolving them (can take a minute)…",
             "reading the build settings of 2 schemes…"])
     }
 

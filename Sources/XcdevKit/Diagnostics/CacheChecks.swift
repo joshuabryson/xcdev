@@ -1,7 +1,7 @@
 import Foundation
 
 /// Scratch folders that interrupted `xcd init` runs left in `<home>/cache` (`InitScratch`), untouched for an hour.
-/// The per-project package caches next to them are never touched.
+/// Package caches of earlier versions next to them are `PackageCacheCheck`'s.
 public struct InitScratchCheck: DoctorCheck {
     public let id = "init-scratch"
     public init() {}
@@ -36,47 +36,57 @@ public struct InitScratchCheck: DoctorCheck {
     }
 }
 
-/// `xcd init`'s Swift package caches (`PackageCache`) whose project is gone: the main checkout recorded in their
-/// `root` file no longer exists. A cache with no record is reported for a person to judge, never deleted; one whose
-/// lock is held is in use by an `init` and left alone.
+/// Swift package caches that earlier versions of `xcd init` kept for each project in `<home>/cache/packages/<key>`
+/// (locked by `<key>.lock` while in use), often a gigabyte each. `init` now reads the project files instead and never
+/// uses them, so each is reclaimable; one whose lock is held belongs to an older xcd still running and is left alone.
 public struct PackageCacheCheck: DoctorCheck {
     public let id = "package-caches"
     public init() {}
 
+    /// Every cache folder under `<home>/cache/packages`, sorted (lock files left out).
+    static func all(in globalPaths: GlobalPaths) -> [String] {
+        let packages = globalPaths.cacheDirectory + "/packages"
+        return ((try? FileManager.default.contentsOfDirectory(atPath: packages)) ?? []).sorted().compactMap { name in
+            var isDirectory: ObjCBool = false
+            let path = packages + "/" + name
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue ? path : nil
+        }
+    }
+
     public func detect(_ env: DoctorEnvironment) async -> [DoctorProblem] {
-        let caches = PackageCache.all(in: env.globalPaths).filter { !Self.isBusy($0) }
-        let orphaned = caches.compactMap { directory in PackageCache.owner(of: directory).map { (directory, $0) } }
-            .filter { CheckoutPresence.of($0.1) == .missing }
-        let sizes = await DiskUsage(runner: env.runner).bytes(of: orphaned.map(\.0))
-        let gone = orphaned.map { directory, root in
+        let caches = Self.all(in: env.globalPaths).filter { !Self.isBusy($0) }
+        let sizes = await DiskUsage(runner: env.runner).bytes(of: caches)
+        return caches.map { directory in
             let size = sizes[directory].map { " (\(ByteText.format($0)))" } ?? ""
-            return DoctorProblem(check: id, message: "the Swift package cache \(directory)\(size) belongs to \(root), which no longer exists",
+            return DoctorProblem(check: id, message: "the Swift package cache \(directory)\(size) is left over from an earlier "
+                                     + "version of xcd; `xcd init` no longer keeps one",
                                  action: .deletePackageCache, fix: "delete it", subject: directory)
         }
-        let unrecorded = caches.filter { PackageCache.owner(of: $0) == nil }.map { directory in
-            DoctorProblem(check: id, message: "the Swift package cache \(directory) doesn't record which project it belongs to",
-                          next: "if no project of yours uses it any more, delete \(Shell.quote(directory))", subject: directory)
-        }
-        return (gone + unrecorded).sorted { ($0.subject ?? "") < ($1.subject ?? "") }
     }
 
     public func inProgress(_ env: DoctorEnvironment) -> [String] {
-        PackageCache.all(in: env.globalPaths).filter(Self.isBusy).map(Self.busyNote)
+        Self.all(in: env.globalPaths).filter(Self.isBusy).map(Self.busyNote)
     }
 
-    /// Deletes the cache while holding its lock, taken without waiting, and only if its project is still gone.
+    /// Deletes the cache and its lock file while holding the lock, taken without waiting, then the `packages`
+    /// folder once it is empty.
     public func fix(_ problem: DoctorProblem, _ env: DoctorEnvironment) async throws {
         guard problem.action == .deletePackageCache, let directory = problem.subject else { return }
-        let ran: Void? = try await FileLock.withLockIfFree(at: directory + ".lock") {
-            guard let root = PackageCache.owner(of: directory), CheckoutPresence.of(root) == .missing else { return }
+        let lock = directory + ".lock"
+        let ran: Void? = try await FileLock.withLockIfFree(at: lock) {
             try FileManager.default.removeItem(atPath: directory)
+            try? FileManager.default.removeItem(atPath: lock)
         }
         guard ran != nil else { throw DoctorLeftAlone(note: Self.busyNote(directory)) }
+        let packages = (directory as NSString).deletingLastPathComponent
+        if (try? FileManager.default.contentsOfDirectory(atPath: packages))?.isEmpty == true {
+            try? FileManager.default.removeItem(atPath: packages)
+        }
     }
 
     static func isBusy(_ directory: String) -> Bool { FileLock.isHeld(at: directory + ".lock") }
 
     static func busyNote(_ directory: String) -> String {
-        "the Swift package cache \(directory) is in use by another `xcd init`; left alone"
+        "the Swift package cache \(directory) is in use by an earlier version's `xcd init`; left alone"
     }
 }

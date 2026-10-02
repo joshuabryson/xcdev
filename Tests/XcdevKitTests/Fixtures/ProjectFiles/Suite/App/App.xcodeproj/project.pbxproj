@@ -1,0 +1,42 @@
+// !$*UTF8*$!
+/* Hand-written for xcd's tests: an app for iPhone, iPad, and Apple Vision (SUPPORTED_PLATFORMS on the target) and
+   its unit tests. */
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+		C10000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			buildConfigurationList = C10000000000000000000500;
+			mainGroup = C10000000000000000000002;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				C10000000000000000000101 /* App */,
+				C10000000000000000000102 /* AppTests */,
+			);
+		};
+		C10000000000000000000002 = {isa = PBXGroup; children = (); sourceTree = "<group>"; };
+		C10000000000000000000101 /* App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C10000000000000000000501;
+			name = App;
+			productType = "com.apple.product-type.application";
+		};
+		C10000000000000000000102 /* AppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C10000000000000000000502;
+			name = AppTests;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		C10000000000000000000500 = {isa = XCConfigurationList; buildConfigurations = (C10000000000000000000600); defaultConfigurationName = Debug; };
+		C10000000000000000000501 = {isa = XCConfigurationList; buildConfigurations = (C10000000000000000000610); defaultConfigurationName = Debug; };
+		C10000000000000000000502 = {isa = XCConfigurationList; buildConfigurations = (C10000000000000000000620); defaultConfigurationName = Debug; };
+		C10000000000000000000600 = {isa = XCBuildConfiguration; buildSettings = {SDKROOT = iphoneos; }; name = Debug; };
+		C10000000000000000000610 = {isa = XCBuildConfiguration; buildSettings = {SUPPORTED_PLATFORMS = "iphoneos iphonesimulator xros xrsimulator"; TARGETED_DEVICE_FAMILY = "1,2,7"; }; name = Debug; };
+		C10000000000000000000620 = {isa = XCBuildConfiguration; buildSettings = {}; name = Debug; };
+	};
+	rootObject = C10000000000000000000001 /* Project object */;
+}

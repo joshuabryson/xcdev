@@ -797,54 +797,55 @@ import XcdevTestSupport
         #expect(stale.filter { fm.fileExists(atPath: $0) } == [stuck])
     }
 
-    @Test func packageCachesOfProjectsThatAreGoneAreDeletedOnlyByFix() async throws {
+    /// Earlier versions of xcd kept each project's Swift packages for `init` in `<home>/cache/packages/<key>`, locked
+    /// by `<key>.lock`. Nothing uses them now, so all of them are reclaimable, except one whose lock an older xcd holds.
+    @Test func packageCachesFromEarlierVersionsAreDeletedOnlyByFix() async throws {
         let (project, _, _, _) = try await setup()
         defer { project.remove() }
-        let paths = GlobalPaths(base: project.home)
+        let packages = GlobalPaths(base: project.home).cacheDirectory + "/packages"
         let fm = FileManager.default
-        func cache(for root: String, recorded: Bool = true) throws -> PackageCache {
-            let cache = PackageCache(globalPaths: paths, root: root)
-            try fm.createDirectory(atPath: cache.sourcePackages + "/checkouts", withIntermediateDirectories: true)
-            if recorded { try cache.recordOwner(root) }
-            return cache
+        func cache(_ key: String, root: String? = nil) throws -> String {
+            let directory = packages + "/" + key
+            try fm.createDirectory(atPath: directory + "/SourcePackages/checkouts", withIntermediateDirectories: true)
+            if let root { try root.write(toFile: directory + "/root", atomically: true, encoding: .utf8) }
+            fm.createFile(atPath: directory + ".lock", contents: Data())
+            return directory
         }
-        let gone = try cache(for: project.base + "/Deleted App")
-        let live = try cache(for: project.root)
-        let unrecorded = try cache(for: project.base + "/Who Knows", recorded: false)
-        let busy = try cache(for: project.base + "/Busy Gone")
+        let gone = try cache("Deleted-App-1f2e3d4c5b6a7980", root: project.base + "/Deleted App")
+        let live = try cache("Sample-App-0123456789abcdef", root: project.root)
+        let unrecorded = try cache("Who-Knows-fedcba9876543210")
+        let busy = try cache("Busy-0011223344556677")
         fake.stub(["du", "-sk"]) { inv in
             ProcessOutput(stdout: inv.arguments.dropFirst().map { "1258291\t\($0)\n" }.joined())       // 1.2 GB each
         }
         let release = Counter()
         let holder = Task {
-            try await FileLock.withLock(at: busy.lockPath) {
+            try await FileLock.withLock(at: busy + ".lock") {
                 while release.value == 0 { try await Task.sleep(for: .milliseconds(10)) }
             }
         }
         defer { release.increment() }
-        while !FileLock.isHeld(at: busy.lockPath) { try await Task.sleep(for: .milliseconds(5)) }
+        while !FileLock.isHeld(at: busy + ".lock") { try await Task.sleep(for: .milliseconds(5)) }
 
         let report = await doctor(project).run(fix: false, checks: [PackageCacheCheck()], from: nil, includeDisk: false)
         let check = try #require(report.checks.first)
-        #expect(check.problems.map(\.subject) == [gone.directory, unrecorded.directory].sorted())
-        let goneProblem = try #require(check.problems.first { $0.subject == gone.directory })
-        #expect(goneProblem.action == .deletePackageCache)
-        #expect(goneProblem.message == "the Swift package cache \(gone.directory) (1.2GB) belongs to \(project.base)/Deleted App, which no longer exists")
-        let unknown = try #require(check.problems.first { $0.subject == unrecorded.directory })
-        #expect(unknown.action == nil && unknown.next == "if no project of yours uses it any more, delete \(Shell.quote(unrecorded.directory))")
-        #expect(check.inProgress == ["the Swift package cache \(busy.directory) is in use by another `xcd init`; left alone"])
-        #expect([gone, live, unrecorded, busy].allSatisfy { fm.fileExists(atPath: $0.sourcePackages) })   // doctor alone deletes nothing
+        #expect(check.problems.map(\.subject) == [gone, live, unrecorded].sorted())
+        let problem = try #require(check.problems.first { $0.subject == live })
+        #expect(problem.action == .deletePackageCache && problem.fix == "delete it")
+        #expect(problem.message == "the Swift package cache \(live) (1.2GB) is left over from an earlier version of xcd; "
+                + "`xcd init` no longer keeps one")
+        #expect(check.inProgress == ["the Swift package cache \(busy) is in use by an earlier version's `xcd init`; left alone"])
+        #expect([gone, live, unrecorded, busy].allSatisfy { fm.fileExists(atPath: $0 + "/SourcePackages") })   // doctor alone deletes nothing
 
-        // The busy cache's project is gone too, but a fix that finds its lock held leaves it alone.
         let fixed = await doctor(project).run(fix: true, checks: [PackageCacheCheck()], from: nil, includeDisk: false)
-        #expect(fixed.problems.first { $0.subject == gone.directory }?.fixed == true)
-        #expect(!fm.fileExists(atPath: gone.directory))
-        #expect([live, unrecorded, busy].allSatisfy { fm.fileExists(atPath: $0.sourcePackages) })
+        #expect(fixed.problems.count == 3 && fixed.problems.allSatisfy(\.fixed))
+        #expect([gone, live, unrecorded].allSatisfy { !fm.fileExists(atPath: $0) && !fm.fileExists(atPath: $0 + ".lock") })
+        #expect(fm.fileExists(atPath: busy + "/SourcePackages"))
         // Locked after doctor looked: the fix takes the lock without waiting, and leaves the cache alone.
-        let late = DoctorProblem(check: "package-caches", message: "", action: .deletePackageCache, subject: busy.directory)
+        let late = DoctorProblem(check: "package-caches", message: "", action: .deletePackageCache, subject: busy)
         let env = await doctor(project).environment(from: nil)
         await #expect(throws: DoctorLeftAlone.self) { try await PackageCacheCheck().fix(late, env) }
-        #expect(fm.fileExists(atPath: busy.sourcePackages))
+        #expect(fm.fileExists(atPath: busy + "/SourcePackages"))
         release.increment()
         try await holder.value
     }

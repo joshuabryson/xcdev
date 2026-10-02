@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-written for xcd's tests: two projects in folders (the second inside a workspace group) and a package folder. -->
+<Workspace
+   version = "1.0">
+   <FileRef
+      location = "group:App/App.xcodeproj">
+   </FileRef>
+   <Group
+      location = "group:Tools"
+      name = "Tools">
+      <FileRef
+         location = "group:Tools.xcodeproj">
+      </FileRef>
+   </Group>
+   <FileRef
+      location = "group:Packages/Feature">
+   </FileRef>
+</Workspace>

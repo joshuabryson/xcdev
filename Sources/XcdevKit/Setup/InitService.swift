@@ -5,19 +5,23 @@ public struct InitService: Sendable {
     public let runner: any ProcessRunning
     public let globalPaths: GlobalPaths
     public let discovery: XcodeDiscovery
-    /// Shows the slow steps (resolving packages, reading build settings) on stderr.
+    /// Shows the slow steps (reading packages' manifests, resolving packages, reading build settings) on stderr.
     public let progress: Activity
     /// Removes the run's scratch folder if Ctrl-C ends xcd during detection.
     public let interrupts: Interrupts
+    /// Searched for Swift packages Xcode already resolved, when the project files don't say enough.
+    public let xcodeDerivedData: String
     let now: @Sendable () -> Date
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, discovery: XcodeDiscovery? = nil,
-                progress: Activity = .silent, interrupts: Interrupts = .shared, now: @escaping @Sendable () -> Date = { Date() }) {
+                progress: Activity = .silent, interrupts: Interrupts = .shared,
+                xcodeDerivedData: String = ProjectDetector.defaultXcodeDerivedData, now: @escaping @Sendable () -> Date = { Date() }) {
         self.runner = runner
         self.globalPaths = globalPaths
         self.discovery = discovery ?? XcodeDiscovery(runner: runner)
         self.progress = progress
         self.interrupts = interrupts
+        self.xcodeDerivedData = xcodeDerivedData
         self.now = now
     }
 
@@ -57,11 +61,10 @@ public struct InitService: Sendable {
         FileManager.default.fileExists(atPath: root + "/" + ConfigLoader.fileName)
     }
 
-    /// Detects `container` (or the best one found) in the worktree and plans the config. xcodebuild and SwiftPM work
-    /// in a scratch folder under the cache directory, deleted afterwards (also on Ctrl-C, once the children are stopped); package
-    /// checkouts go to the main checkout's `PackageCache`, kept for the next run and locked while in use. Another
-    /// `init` of the same project holds the lock at most as long as its xcodebuild deadlines (10 minutes to list, 2
-    /// to read build settings), so the wait is bounded by those.
+    /// Detects `container` (or the best one found) in the worktree and plans the config. Detection reads the project
+    /// files first and runs xcodebuild only when they don't say enough (see `ProjectDetector`). xcodebuild and SwiftPM
+    /// work in a scratch folder under the cache directory, package checkouts included, deleted afterwards (also on
+    /// Ctrl-C, once the children are stopped).
     func makePlan(_ location: ProjectLocation, container: String?) async throws -> InitPlan {
         let root = location.worktreeRoot
         let containers = ProjectDetector.containers(in: root)
@@ -81,25 +84,9 @@ public struct InitService: Sendable {
             interrupts.removeCleanup(cleanup)
             try? FileManager.default.removeItem(atPath: scratch)
         }
-        let packages = PackageCache(globalPaths: globalPaths, root: location.projectRoot)
         let detector = ProjectDetector(runner: runner, developerDir: selected?.developerDir, scratch: scratch,
-                                       sourcePackages: packages.sourcePackages, progress: progress)
-        let detect = {
-            try packages.recordOwner(location.projectRoot)
-            return try await detector.detect(root: root, container: container ?? best)
-        }
-        let detected: DetectedProject
-        while true {
-            if let free = try await FileLock.withLockIfFree(at: packages.lockPath, detect) {
-                detected = free
-                break
-            }
-            // Waits without holding the lock, so detection's own steps aren't shown under this one.
-            try await progress.step("waiting for another `xcd init` of this project to finish with its package cache (\(packages.lockPath))…",
-                                    done: "the package cache is free") {
-                try await FileLock.withLock(at: packages.lockPath) {}
-            }
-        }
+                                       xcodeDerivedData: xcodeDerivedData, progress: progress)
+        let detected = try await detector.detect(root: root, container: container ?? best)
         let catalog = try await SimctlClient(runner: runner, developerDir: selected?.developerDir).catalog()
         return InitPlanner.plan(detected: detected, containers: containers, folder: URL(fileURLWithPath: root).lastPathComponent,
                                 catalog: catalog, xcodes: installs, selected: selected)

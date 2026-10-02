@@ -1,0 +1,42 @@
+// !$*UTF8*$!
+/* Hand-written for xcd's tests: an app whose SDKROOT is set nowhere in the project file, only in the .xcconfig file
+   its configurations are based on (App.xcconfig, next to the project). */
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+		B10000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			buildConfigurationList = B10000000000000000000500;
+			mainGroup = B10000000000000000000002;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B10000000000000000000101 /* Configured */,
+			);
+		};
+		B10000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000011 /* App.xcconfig */,
+			);
+			sourceTree = "<group>";
+		};
+		B10000000000000000000011 /* App.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = App.xcconfig; sourceTree = "<group>"; };
+		B10000000000000000000101 /* Configured */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B10000000000000000000501;
+			name = Configured;
+			productType = "com.apple.product-type.application";
+		};
+		B10000000000000000000500 = {isa = XCConfigurationList; buildConfigurations = (B10000000000000000000600, B10000000000000000000601); defaultConfigurationName = Release; };
+		B10000000000000000000501 = {isa = XCConfigurationList; buildConfigurations = (B10000000000000000000610, B10000000000000000000611); defaultConfigurationName = Release; };
+		B10000000000000000000600 = {isa = XCBuildConfiguration; buildSettings = {SWIFT_VERSION = 6.0; }; name = Debug; };
+		B10000000000000000000601 = {isa = XCBuildConfiguration; buildSettings = {SWIFT_VERSION = 6.0; }; name = Release; };
+		B10000000000000000000610 = {isa = XCBuildConfiguration; baseConfigurationReference = B10000000000000000000011 /* App.xcconfig */; buildSettings = {PRODUCT_BUNDLE_IDENTIFIER = dev.xcdev.Configured; }; name = Debug; };
+		B10000000000000000000611 = {isa = XCBuildConfiguration; baseConfigurationReference = B10000000000000000000011 /* App.xcconfig */; buildSettings = {PRODUCT_BUNDLE_IDENTIFIER = dev.xcdev.Configured; }; name = Release; };
+	};
+	rootObject = B10000000000000000000001 /* Project object */;
+}
