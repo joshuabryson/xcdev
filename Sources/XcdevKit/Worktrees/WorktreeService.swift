@@ -315,7 +315,8 @@ extension WorktreeService {
     /// Runs the worktree's `pre-worktree-remove` hook, then deletes its clones, the git worktree, and its registry
     /// entry. Keeps the branch. Serialized with `create` per project across processes.
     ///
-    /// A dirty worktree is refused before the hook runs, so teardown never runs for a removal that is then refused.
+    /// A dirty worktree is refused before the hook runs, so teardown never runs for a removal that is then refused,
+    /// and again after it if tracked files changed while it ran.
     /// The hook runs before the per-project lock is taken (under the worktree's own lock, as in `create`).
     /// `force` skips the dirty check and turns a failing hook into a warning in the result.
     public func remove(name: String, force: Bool = false, in ctx: WorktreeContext) async throws -> WorktreeRemoval {
@@ -328,6 +329,9 @@ extension WorktreeService {
             if FileManager.default.fileExists(atPath: entry.path) {
                 if !force { try await checkClean(entry) }
                 warnings = try await runPreRemoveHook(entry, force: force, in: ctx)
+                // The hook may have run for minutes: tracked edits made meanwhile would be lost to
+                // `git worktree remove --force`. Files the hook itself left behind are untracked and don't count.
+                if !force { try await checkClean(entry, untracked: false) }
             }
             return try await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) {
                 try await removeLocked(name: name, warnings: warnings, in: ctx)
@@ -335,8 +339,10 @@ extension WorktreeService {
         }
     }
 
-    private func checkClean(_ entry: RegistryEntry) async throws {
-        let status = try await runner.runChecked(.git(["status", "--porcelain"], in: entry.path))
+    /// Throws `worktree_dirty` when the worktree has changes; `untracked: false` counts tracked files only.
+    private func checkClean(_ entry: RegistryEntry, untracked: Bool = true) async throws {
+        let args = ["status", "--porcelain"] + (untracked ? [] : ["--untracked-files=no"])
+        let status = try await runner.runChecked(.git(args, in: entry.path))
         let changes = status.stdoutString.split(separator: "\n").map(String.init)
         if !changes.isEmpty {
             throw XcdError(.worktreeDirty, "worktree '\(entry.name)' has uncommitted changes",
@@ -389,7 +395,7 @@ extension WorktreeService {
         let removedDevices = if let state { try await deleteClones(of: state) } else { [String]() }
 
         if exists {
-            // Cleanliness was checked before the hook (or the caller forced), so --force only lets git
+            // Cleanliness was checked around the hook (or the caller forced), so --force only lets git
             // delete ignored build state such as .xcdev/.
             try await runner.runChecked(.git(["worktree", "remove", "--force", entry.path], in: projectRoot),
                                         next: "close anything using the worktree, then re-run `xcd wt remove \(name)`")

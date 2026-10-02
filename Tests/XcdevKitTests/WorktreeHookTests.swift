@@ -104,6 +104,27 @@ import XcdevTestSupport
         #expect(FileManager.default.fileExists(atPath: state.path))
     }
 
+    /// `git worktree remove --force` would discard tracked edits made while the hook ran; its own untracked files are fine.
+    @Test func trackedChangesMadeDuringTheRemoveHookKeepTheWorktree() async throws {
+        let (project, svc, main) = try await setup(hooks: #"  pre-worktree-remove: 'echo teardown > teardown.log; test ! -f "$XCD_PROJECT_ROOT/../edit" || echo edited >> README.md'"#)
+        defer { project.remove() }
+        let (state, _) = try await svc.create(name: "feat", in: main)
+        try "".write(toFile: project.base + "/edit", atomically: true, encoding: .utf8)
+        let error = await #expect(throws: XcdError.self) { try await svc.remove(name: "feat", in: main) }
+        #expect(error?.code == .worktreeDirty)
+        #expect(error?.message == "worktree 'feat' has uncommitted changes")
+        #expect(error?.details == [" M README.md"])
+        #expect(FileManager.default.fileExists(atPath: state.path))
+        #expect(try svc.list(projectRoot: project.root).contains { $0.name == "feat" })
+
+        try TempProject.git(["checkout", "--", "README.md"], in: state.path)
+        try FileManager.default.removeItem(atPath: project.base + "/edit")
+        try FileManager.default.removeItem(atPath: state.path + "/teardown.log")
+        let removal = try await svc.remove(name: "feat", in: main)          // the hook's untracked log doesn't block
+        #expect(removal.warnings.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: state.path))
+    }
+
     @Test func forceRemovesDespiteAFailingRemoveHookAndWarns() async throws {
         let (project, svc, main) = try await setup(hooks: "  pre-worktree-remove: 'echo teardown failed >&2; exit 3'")
         defer { project.remove() }
