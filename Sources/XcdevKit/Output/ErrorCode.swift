@@ -23,6 +23,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
     case simulatorFailed = "simulator_failed"
     case subprocessFailed = "subprocess_failed"
     case timeout
+    case doctorProblems = "doctor_problems"
     case internalError = "internal"
 
     /// 1 = the task failed (fix the code), 2 = fix the invocation or config, 3 = fix the environment (`xcd doctor`).
@@ -34,7 +35,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
              .deviceTypeUnknown, .worktreeNotFound, .worktreeDirty, .appNotBuilt:
             return 2
         case .xcodeMissing, .xcodeRuntimeMismatch, .runtimeMissing, .cloneFailed, .simulatorFailed,
-             .subprocessFailed, .timeout, .internalError:
+             .subprocessFailed, .timeout, .doctorProblems, .internalError:
             return 3
         }
     }
@@ -62,6 +63,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .simulatorFailed: return "A simctl command failed (boot, install, launch, …)."
         case .subprocessFailed: return "An external tool failed in a way xcd doesn't recognize; details carry its command, exit code, and stderr."
         case .timeout: return "An external command ran past its deadline and was stopped."
+        case .doctorProblems: return "`xcd doctor` or `xcd prune` found problems that remain; each one says how to fix it."
         case .internalError: return "A bug in xcd, or a corrupt state file."
         }
     }

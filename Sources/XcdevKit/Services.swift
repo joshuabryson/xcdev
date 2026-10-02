@@ -41,6 +41,7 @@ public struct Services: Sendable {
         ProjectCommandRunner(builds: builds, output: output, environment: environment)
     }
     public var setup: InitService { InitService(runner: runner, globalPaths: globalPaths) }
+    public var doctor: DoctorService { DoctorService(runner: runner, globalPaths: globalPaths) }
     public var externalCommands: ExternalCommands { ExternalCommands(services: self) }
     public var help: HelpService { HelpService(services: self) }
     public var logs: LogService { LogService(runner: runner, provisioner: provisioner) }
