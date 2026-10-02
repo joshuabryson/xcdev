@@ -10,6 +10,7 @@ public struct DoctorProblem: Codable, Sendable, Equatable {
         case deleteSimulator = "delete_simulator"
         case shutDownSimulator = "shut_down_simulator"
         case unpinXcode = "unpin_xcode"
+        case deleteScratch = "delete_scratch"
     }
 
     /// The check's id, e.g. "orphaned-clones".
@@ -20,7 +21,7 @@ public struct DoctorProblem: Codable, Sendable, Equatable {
     public let fix: String?
     /// What to do by hand when there is no fix.
     public let next: String?
-    /// What the fix acts on: a simulator's udid, a registry id, or a worktree path.
+    /// What the fix acts on: a simulator's udid, a registry id, a worktree path, or the cache directory.
     public let subject: String?
     public var fixed = false
     public var fixError: String?

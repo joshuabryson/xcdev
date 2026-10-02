@@ -37,7 +37,7 @@ import XcdevTestSupport
         let report = await doctor(project).run(fix: false, from: nil)
         #expect(report.problems.isEmpty && report.failure == nil)
         #expect(report.checks.map(\.id) == ["coresimulator", "missing-worktrees", "incomplete-worktrees", "orphaned-clones",
-                                            "stuck-clones", "templates"])        // no project check outside a project
+                                            "stuck-clones", "templates", "init-scratch"])   // no project check outside a project
         #expect(report.text.hasPrefix("doctor: 0 problems\nok       coresimulator\n"))
     }
 
@@ -734,6 +734,41 @@ import XcdevTestSupport
         try env.forget(udid: "U-WATCH")                                 // from the same, now stale, snapshot
         let saved = try #require(try WorktreeStateStore.load(main.paths))
         #expect(saved.devices.mapValues(\.udid) == ["ipad": "U-IPAD"])
+    }
+
+    @Test func staleInitScratchIsReportedWithItsSizeAndDeletedOnlyByFix() async throws {
+        let (project, _, _, _) = try await setup()
+        defer { project.remove() }
+        let now = Date()
+        let cache = GlobalPaths(base: project.home).cacheDirectory
+        let fm = FileManager.default
+        func folder(_ name: String, age: TimeInterval) throws -> String {
+            let path = cache + "/" + name
+            try fm.createDirectory(atPath: path + "/.xcdev", withIntermediateDirectories: true)
+            try fm.setAttributes([.modificationDate: now.addingTimeInterval(-age)], ofItemAtPath: path)
+            return path
+        }
+        let stale = [try folder("init-" + UUID().uuidString, age: 2 * 3600), try folder("init-" + UUID().uuidString, age: 26 * 3600)]
+        let recent = try folder("init-" + UUID().uuidString, age: 10 * 60)
+        let others = [try folder("init-notes", age: 9 * 3600), try folder("packages", age: 9 * 3600)]
+        fake.stub(["du", "-sk"]) { inv in
+            ProcessOutput(stdout: inv.arguments.dropFirst().map { "614400\t\($0)\n" }.joined())         // 600 MB each
+        }
+        let service = DoctorService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home),
+                                    discovery: XcodeDiscovery(runner: fake, applicationsDirectories: []), now: { now })
+
+        let report = await service.run(fix: false, checks: [InitScratchCheck()], from: nil, includeDisk: false)
+        let problem = try #require(report.problems.first)
+        #expect(report.problems.count == 1 && problem.action == .deleteScratch && !problem.fixed)
+        #expect(problem.message == "2 scratch folders of interrupted `xcd init` runs, older than an hour, use 1.2GB in \(cache)")
+        #expect((stale + [recent] + others).allSatisfy { fm.fileExists(atPath: $0) })   // doctor alone changes nothing
+        #expect(fake.calls.filter { $0.argv.first == "du" }.map { Set($0.arguments.dropFirst()) } == [Set(stale)])
+
+        let fixed = await service.run(fix: true, checks: [InitScratchCheck()], from: nil, includeDisk: false)
+        #expect(fixed.problems.count == 1 && fixed.problems[0].fixed)
+        #expect(stale.allSatisfy { !fm.fileExists(atPath: $0) })
+        #expect(([recent] + others).allSatisfy { fm.fileExists(atPath: $0) })
+        #expect(await service.run(fix: false, checks: [InitScratchCheck()], from: nil, includeDisk: false).problems.isEmpty)
     }
 
     @Test func pruneOnlyLooksForOrphans() async throws {

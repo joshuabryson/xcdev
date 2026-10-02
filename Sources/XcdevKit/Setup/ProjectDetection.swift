@@ -100,20 +100,32 @@ public struct DetectedProject: Codable, Sendable, Equatable {
 }
 
 /// Finds the project container, its schemes, and its platforms. Nothing is written inside the project:
-/// xcodebuild and SwiftPM keep their state in `scratch`.
+/// xcodebuild and SwiftPM keep their state in `scratch`, and package checkouts go to `sourcePackages`.
 public struct ProjectDetector: Sendable {
     public let runner: any ProcessRunning
     public let developerDir: String?
-    /// For xcodebuild's DerivedData and package checkouts, and SwiftPM's build folder. The caller deletes it.
+    /// For xcodebuild's DerivedData and SwiftPM's build folder (and package checkouts, without `sourcePackages`).
+    /// The caller deletes it.
     public let scratch: String
+    /// Where xcodebuild clones the project's Swift packages. `xcd init` passes its per-project package cache, so a
+    /// second run reuses the checkouts instead of fetching them again.
+    public let sourcePackages: String?
+    /// Reports the steps that can take a while: resolving packages, reading build settings, dump-package.
+    public let progress: Activity
     /// Schemes whose build settings are read; the rest are ignored (workspaces with Pods have dozens).
     public static let maxSchemes = 12
+    /// How long `xcodebuild -list` may take. It resolves the Swift packages first, which on a cold cache means
+    /// cloning them all (about 45s for Firebase on a fast network), so it gets far more than the usual 2 minutes.
+    public static let listTimeout: Duration = .seconds(600)
     static let skippedFolders: Set<String> = ["build", "DerivedData", "Pods", "Carthage", "node_modules"]
 
-    public init(runner: any ProcessRunning, developerDir: String?, scratch: String) {
+    public init(runner: any ProcessRunning, developerDir: String?, scratch: String, sourcePackages: String? = nil,
+                progress: Activity = .silent) {
         self.runner = runner
         self.developerDir = developerDir
         self.scratch = scratch
+        self.sourcePackages = sourcePackages
+        self.progress = progress
     }
 
     /// The best containers in `root` or its direct subfolders, relative to `root`: the shallowest ones, preferring
@@ -151,8 +163,8 @@ public struct ProjectDetector: Sendable {
     public func detect(root: String, container: String) async throws -> DetectedProject {
         let resolved = try ProjectContainer.resolve(config: XcdevConfig(version: 1, project: container), worktreeRoot: root)
         let scratchPaths = WorktreePaths(root: scratch)
-        let list = try await runner.runChecked(Schemes.listInvocation(resolved, paths: scratchPaths, developerDir: developerDir),
-                                               next: "run `xcodebuild -list` in the project folder to see why")
+        let packages = sourcePackages ?? scratchPaths.sourcePackages
+        let list = try await listSchemes(resolved, container: container, packages: packages, paths: scratchPaths)
         let schemes = Schemes.parseList(list.stdout)
         if case .package(let directory) = resolved {
             return try await detectPackage(container: container, directory: directory, schemes: schemes)
@@ -163,16 +175,20 @@ public struct ProjectDetector: Sendable {
         let readOrder = Self.readOrder(schemes, names: names)
         let ordered = Array(readOrder.prefix(Self.maxSchemes))
         var notes: [String] = []
-        let results = await withTaskGroup(of: (String, SchemeSettings).self) { group in
-            for scheme in ordered {
-                group.addTask {
-                    let request = XcodebuildRequest(actions: [], container: resolved, scheme: scheme, paths: scratchPaths)
-                    return (scheme, await readTargets(request.buildSettingsInvocation(developerDir: developerDir)))
+        let count = "\(ordered.count) scheme\(ordered.count == 1 ? "" : "s")"
+        let results = try await progress.step("reading the build settings of \(count)…", done: "read the build settings of \(count)") {
+            await withTaskGroup(of: (String, SchemeSettings).self) { group in
+                for scheme in ordered {
+                    group.addTask {
+                        let request = XcodebuildRequest(actions: [], container: resolved, scheme: scheme, paths: scratchPaths,
+                                                        sourcePackages: packages)
+                        return (scheme, await readTargets(request.buildSettingsInvocation(developerDir: developerDir)))
+                    }
                 }
+                var result: [String: SchemeSettings] = [:]
+                for await (scheme, targets) in group { result[scheme] = targets }
+                return result
             }
-            var result: [String: SchemeSettings] = [:]
-            for await (scheme, targets) in group { result[scheme] = targets }
-            return result
         }
         var targetsByScheme: [String: [AppTarget]] = [:]
         for scheme in ordered {
@@ -206,6 +222,23 @@ public struct ProjectDetector: Sendable {
         return DetectedProject(container: container, kind: kind, schemes: schemes, appSchemes: appSchemes,
                                testSchemes: Self.testSchemes(schemes, app: appSchemes.first),
                                platforms: platforms, deviceFamilies: families, notes: notes)
+    }
+
+    /// `xcodebuild -list`, which first resolves the Swift packages into `packages`. A timeout says so, since that
+    /// is what takes the time.
+    func listSchemes(_ resolved: ProjectContainer, container: String, packages: String, paths: WorktreePaths) async throws -> ProcessOutput {
+        let invocation = Schemes.listInvocation(resolved, paths: paths, developerDir: developerDir, sourcePackages: packages,
+                                                timeout: Self.listTimeout)
+        do {
+            return try await progress.step("listing the schemes of \(container) and resolving any Swift packages (the first run can take a minute)…",
+                                           done: "listed the schemes of \(container)") {
+                try await runner.runChecked(invocation, next: "run `xcodebuild -list` in the project folder to see why")
+            }
+        } catch var error as XcdError where error.code == .timeout {
+            error.next = "it was resolving the Swift packages of \(container) into \(packages); check the network and the "
+                + "package URLs, then run `xcd init --plan` again (packages already fetched are kept)"
+            throw error
+        }
     }
 
     /// The order in which schemes' build settings are read, so the app's scheme is inside the cap: schemes named like
@@ -247,7 +280,9 @@ public struct ProjectDetector: Sendable {
         var dump = Invocation.xcrun(["swift", "package", "--scratch-path", scratch + "/swiftpm", "dump-package"],
                                     developerDir: developerDir, timeout: .seconds(120))
         dump.workingDirectory = directory
-        let out = try await runner.runChecked(dump, next: "run `swift package dump-package` in the package folder to check Package.swift")
+        let out = try await progress.step("reading Package.swift with `swift package dump-package`…", done: "read Package.swift") {
+            try await runner.runChecked(dump, next: "run `swift package dump-package` in the package folder to check Package.swift")
+        }
         let manifest = try PackageManifest.parse(out.stdout)
         // A package with several products also gets a "<name>-Package" scheme that builds and tests everything.
         let all = manifest.name + "-Package"

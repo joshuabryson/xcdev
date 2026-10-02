@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 import XcdevTestSupport
 @testable import XcdevKit
@@ -85,6 +86,22 @@ import XcdevTestSupport
         #expect(list.contains(scratch + "/.xcdev/SourcePackages"))
     }
 
+    @Test func packagesGoWhereTheCallerSaysWhileDerivedDataStaysInScratch() async throws {
+        defer { cleanUp() }
+        try make(["SampleApp.xcodeproj"])
+        fake.stub(["xcrun", "xcodebuild", "-list"], stdout: Fixture.string("xcodebuild-list-watch.json"))
+        fake.stub(["xcrun", "xcodebuild", "-showBuildSettings"], stdout: Fixture.string("build-settings-scheme-app.json"))
+        let packages = root + "/../packages/SourcePackages"
+        _ = try await ProjectDetector(runner: fake, developerDir: nil, scratch: scratch, sourcePackages: packages)
+            .detect(root: root, container: "SampleApp.xcodeproj")
+        for call in fake.calls {
+            let args = call.arguments
+            #expect(args[args.firstIndex(of: "-clonedSourcePackagesDirPath")! + 1] == packages)
+            if let derived = args.firstIndex(of: "-derivedDataPath") { #expect(args[derived + 1] == scratch + "/.xcdev/DerivedData") }
+        }
+        #expect(fake.calls.count == 3)
+    }
+
     @Test func detectsAPackagesDeclaredPlatformsAndItsAllInOneScheme() async throws {
         defer { cleanUp() }
         try make(["Package.swift"])
@@ -97,6 +114,20 @@ import XcdevTestSupport
         let dump = try #require(fake.calls.first { $0.arguments.starts(with: ["swift", "package"]) })
         #expect(dump.arguments == ["swift", "package", "--scratch-path", scratch + "/swiftpm", "dump-package"])
         #expect(dump.workingDirectory == URL(fileURLWithPath: root).standardizedFileURL.path)
+    }
+
+    @Test func aPackagesStepsAreReported() async throws {
+        defer { cleanUp() }
+        try make(["Package.swift"])
+        fake.stub(["xcrun", "xcodebuild", "-list"], stdout: Fixture.string("xcodebuild-list-multipackage.json"))
+        fake.stub(["xcrun", "swift", "package"], stdout: Fixture.string("swift-package-dump-ios-watch.json"))
+        let lines = Mutex<[String]>([])
+        _ = try await ProjectDetector(runner: fake, developerDir: nil, scratch: scratch,
+                                      progress: .plain { line in lines.withLock { $0.append(line) } })
+            .detect(root: root, container: "Package.swift")
+        #expect(lines.withLock { $0 } == [
+            "listing the schemes of Package.swift and resolving any Swift packages (the first run can take a minute)…",
+            "reading Package.swift with `swift package dump-package`…"])
     }
 
     @Test func testSchemesPreferTheAppsTestsScheme() {

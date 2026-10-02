@@ -26,13 +26,14 @@ public enum Schemes {
         return list.project?.schemes ?? list.workspace?.schemes ?? []
     }
 
-    public static func listInvocation(_ container: ProjectContainer, paths: WorktreePaths,
-                                      developerDir: String?) -> Invocation {
+    /// `sourcePackages` replaces the worktree's package folder (`xcd init` passes its per-project package cache).
+    public static func listInvocation(_ container: ProjectContainer, paths: WorktreePaths, developerDir: String?,
+                                      sourcePackages: String? = nil, timeout: Duration = .seconds(120)) -> Invocation {
         // Package resolution during -list must also stay inside this worktree's state. -derivedDataPath is left
         // out: xcodebuild rejects it without -scheme ("The flag -scheme … is required"), and -list builds nothing.
         var invocation = Invocation.xcrun(["xcodebuild", "-list", "-json"] + container.arguments
-                                              + ["-clonedSourcePackagesDirPath", paths.sourcePackages],
-                                          developerDir: developerDir, timeout: .seconds(120))
+                                              + ["-clonedSourcePackagesDirPath", sourcePackages ?? paths.sourcePackages],
+                                          developerDir: developerDir, timeout: timeout)
         invocation.workingDirectory = container.workingDirectory
         return invocation
     }

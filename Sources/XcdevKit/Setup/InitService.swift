@@ -5,15 +5,22 @@ public struct InitService: Sendable {
     public let runner: any ProcessRunning
     public let globalPaths: GlobalPaths
     public let discovery: XcodeDiscovery
+    /// Shows the slow steps (resolving packages, reading build settings) on stderr.
+    public let progress: Activity
+    let now: @Sendable () -> Date
 
-    public init(runner: any ProcessRunning, globalPaths: GlobalPaths, discovery: XcodeDiscovery? = nil) {
+    public init(runner: any ProcessRunning, globalPaths: GlobalPaths, discovery: XcodeDiscovery? = nil,
+                progress: Activity = .silent, now: @escaping @Sendable () -> Date = { Date() }) {
         self.runner = runner
         self.globalPaths = globalPaths
         self.discovery = discovery ?? XcodeDiscovery(runner: runner)
+        self.progress = progress
+        self.now = now
     }
 
-    /// `xcd init --plan`: writes nothing.
+    /// `xcd init --plan`: writes nothing in the project.
     public func plan(from directory: String) async throws -> InitPlanReport {
+        InitScratch.removeStale(in: globalPaths.cacheDirectory, now: now())
         let root = try await projectRoot(from: directory)
         let plan = try await makePlan(root: root, container: nil)
         return InitPlanReport(plan: plan, root: root, configExists: configExists(root))
@@ -22,6 +29,7 @@ public struct InitService: Sendable {
     /// `xcd init`, `--defaults`, and `--set`: writes .xcdev.yml from the recommendations and `answers`, and adds
     /// .xcdev/ and .xcdev.local.yml to .gitignore. An existing .xcdev.yml is kept unless `force`.
     public func write(answers: [String: String], force: Bool, from directory: String) async throws -> InitReport {
+        InitScratch.removeStale(in: globalPaths.cacheDirectory, now: now())
         let root = try await projectRoot(from: directory)
         let path = root + "/" + ConfigLoader.fileName
         if configExists(root), !force {
@@ -49,7 +57,10 @@ public struct InitService: Sendable {
     }
 
     /// Detects `container` (or the best one found) and plans the config. xcodebuild and SwiftPM work in a
-    /// scratch folder under the cache directory, deleted afterwards.
+    /// scratch folder under the cache directory, deleted afterwards; package checkouts go to the project's
+    /// `PackageCache`, kept for the next run and locked while in use. Another `init` of the same project holds the
+    /// lock at most as long as its xcodebuild deadlines (10 minutes to list, 2 to read build settings), so the
+    /// wait is bounded by those.
     func makePlan(root: String, container: String?) async throws -> InitPlan {
         let containers = ProjectDetector.containers(in: root)
         guard let best = containers.first else {
@@ -62,10 +73,24 @@ public struct InitService: Sendable {
         }
         let installs = await discovery.installs()
         let selected = try? await discovery.resolve(spec: nil)
-        let scratch = globalPaths.cacheDirectory + "/init-" + UUID().uuidString
+        let scratch = InitScratch.make(in: globalPaths.cacheDirectory)
         defer { try? FileManager.default.removeItem(atPath: scratch) }
-        let detected = try await ProjectDetector(runner: runner, developerDir: selected?.developerDir, scratch: scratch)
-            .detect(root: root, container: container ?? best)
+        let packages = PackageCache(globalPaths: globalPaths, root: root)
+        let detector = ProjectDetector(runner: runner, developerDir: selected?.developerDir, scratch: scratch,
+                                       sourcePackages: packages.sourcePackages, progress: progress)
+        let detect = { try await detector.detect(root: root, container: container ?? best) }
+        let detected: DetectedProject
+        while true {
+            if let free = try await FileLock.withLockIfFree(at: packages.lockPath, detect) {
+                detected = free
+                break
+            }
+            // Waits without holding the lock, so detection's own steps aren't shown under this one.
+            try await progress.step("waiting for another `xcd init` of this project to finish with its package cache…",
+                                    done: "the package cache is free") {
+                try await FileLock.withLock(at: packages.lockPath) {}
+            }
+        }
         let catalog = try await SimctlClient(runner: runner, developerDir: selected?.developerDir).catalog()
         return InitPlanner.plan(detected: detected, containers: containers, folder: URL(fileURLWithPath: root).lastPathComponent,
                                 catalog: catalog, xcodes: installs, selected: selected)
