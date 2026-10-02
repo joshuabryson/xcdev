@@ -37,6 +37,9 @@ public struct Services: Sendable {
     public var apps: RunService {
         RunService(builds: builds, watcher: CrashWatcher(probe: SystemProcessProbe(), locator: CrashReportLocator()))
     }
+    public var projectCommands: ProjectCommandRunner {
+        ProjectCommandRunner(builds: builds, output: output, environment: environment)
+    }
     public var logs: LogService { LogService(runner: runner, provisioner: provisioner) }
 
     /// Opens the worktree; `xcode` is a one-off `--xcode` override that is never pinned.

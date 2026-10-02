@@ -1,0 +1,99 @@
+import Foundation
+import Testing
+import XcdevTestSupport
+@testable import XcdevKit
+
+@Suite struct ProjectCommandTests {
+    let worktree = FakeWorktree(prefix: "xcd command")
+    var fake: FakeProcessRunner { worktree.runner }
+
+    func context(_ commands: String) throws -> WorktreeContext {
+        try worktree.context(BuildServiceTests.config + "\ncommands:\n" + commands, container: "App.xcodeproj")
+    }
+
+    func runner(environment: [String: String] = [:]) -> ProjectCommandRunner {
+        ProjectCommandRunner(builds: BuildService(runner: fake, provisioner: worktree.provisioner), output: .json,
+                             environment: environment)
+    }
+
+    /// The command's own process is `sh`; record it and exit with `code`.
+    func stubShell(exit code: Int32 = 0) {
+        fake.stub(["sh"]) { _ in ProcessOutput(exitCode: code) }
+    }
+
+    var shellCall: Invocation? { fake.calls.first { $0.argv.first == "sh" } }
+
+    @Test func passesArgumentsContextAndExitCodeThrough() async throws {
+        defer { worktree.remove() }
+        stubShell(exit: 3)
+        var ctx = try context("  seed-db: { run: ./scripts/seed.sh, timeout: 10m }")
+        let code = try await runner().run("seed-db", arguments: ["a b", "--flag"], in: &ctx)
+        #expect(code == 3)
+        let call = try #require(shellCall)
+        #expect(call.arguments == ["-c", "./scripts/seed.sh \"$@\"", "xcd-seed-db", "a b", "--flag"])
+        #expect(call.passthrough && call.workingDirectory == worktree.root && call.timeout == .seconds(600))
+        #expect(call.environment["XCD_WORKTREE_NAME"] == "feat")
+        #expect(call.environment["XCD_DEVICE"] == "iphone")          // defaultDevice, not cloned
+        #expect(call.environment["XCD_UDID"] == nil)
+        #expect(call.environment["XCD_OUTPUT"] == "json")
+        #expect(!fake.calls.contains { $0.arguments.starts(with: ["simctl", "clone"]) })
+    }
+
+    @Test func needsDeviceClonesAndBootsItFirst() async throws {
+        defer { worktree.remove() }
+        let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        stubShell()
+        var ctx = try context("  seed-db: { run: ./scripts/seed.sh, needs: [device] }")
+        _ = try await runner().run("seed-db", arguments: [], in: &ctx)
+        let udid = try #require(ctx.state.devices["iphone"]?.udid)
+        #expect(sims.devices.first { $0.udid == udid }?.state == "Booted")
+        #expect(shellCall?.environment["XCD_UDID"] == udid)
+    }
+
+    @Test func xcdDeviceChoosesTheDevice() async throws {
+        defer { worktree.remove() }
+        stubShell()
+        var ctx = try context("  open-mac: { run: open ., needs: [device] }")
+        _ = try await runner(environment: ["XCD_DEVICE": "mac"]).run("open-mac", arguments: [], in: &ctx)
+        #expect(shellCall?.environment["XCD_DEVICE"] == "mac")
+        #expect(!fake.calls.contains { $0.arguments.starts(with: ["simctl"]) })     // a Mac has nothing to boot
+    }
+
+    @Test func needsBuildBuildsOnlyWhenThereIsNoBuild() async throws {
+        defer { worktree.remove() }
+        _ = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        let xcodebuild = FakeXcodebuild(runner: fake)
+        xcodebuild.onRun(.init(buildResults: Fixture.string("build-results-succeeded.json")))
+        xcodebuild.onBuildSettings(Fixture.string("build-settings.json"))
+        stubShell()
+        var ctx = try context("  screenshot: { run: ./shot.sh, needs: [build] }")
+        _ = try await runner().run("screenshot", arguments: [], in: &ctx)
+        #expect(xcodebuild.runs.count == 1)
+        #expect(shellCall?.environment["XCD_APP_PATH"]?.hasSuffix("SampleApp.app") == true)
+        _ = try await runner().run("screenshot", arguments: [], in: &ctx)
+        #expect(xcodebuild.runs.count == 1)                       // the recorded build is reused
+    }
+
+    @Test func aFailedBuildStopsTheCommand() async throws {
+        defer { worktree.remove() }
+        let xcodebuild = FakeXcodebuild(runner: fake)
+        xcodebuild.onRun(.init(exitCode: 65, buildResults: Fixture.string("build-results-failed.json")))
+        stubShell()
+        var ctx = try context("  screenshot: { run: ./shot.sh, needs: [build] }")
+        let error = await #expect(throws: XcdError.self) {
+            try await runner(environment: ["XCD_DEVICE": "mac"]).run("screenshot", arguments: [], in: &ctx)
+        }
+        #expect(error?.code == .buildFailed)
+        #expect(error?.message == "`xcd screenshot` needs a build, and the build failed with 2 errors")
+        #expect(error?.details.last?.hasPrefix("log: ") == true)
+        #expect(shellCall == nil)
+    }
+
+    @Test func needsDeviceWithoutDevicesSaysWhatToAdd() async throws {
+        defer { worktree.remove() }
+        var ctx = try worktree.context("version: 1\nproject: Package.swift\ncommands:\n  seed: { run: x, needs: [device] }",
+                                       container: "Package.swift")
+        let error = await #expect(throws: XcdError.self) { try await runner().run("seed", arguments: [], in: &ctx) }
+        #expect(error?.message == "`xcd seed` needs a device, but .xcdev.yml has no devices")
+    }
+}
