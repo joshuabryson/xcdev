@@ -32,8 +32,8 @@ xcd help                  # every command, project command, and plugin
 - `skills/xcdev/SKILL.md` is an agent skill, and `docs/agents/AGENTS-snippet.md` is a snippet for a project's
   `AGENTS.md`, that teach agents to use `xcd`.
 - Every failure ends with a `next:` line, and `--json` prints one JSON object per command.
-- Ctrl-C (or SIGTERM) stops what xcd started, xcodebuild and its compilers included, and exits 130 (143 for
-  SIGTERM) with one `xcd: interrupted` line on stderr.
+- Ctrl-C (or SIGTERM, or SIGHUP when the terminal closes) stops what xcd started, xcodebuild and its compilers
+  included, and exits 130 (143 for SIGTERM, 129 for SIGHUP) with one `xcd: interrupted` line on stderr.
 - `xcd doctor` checks simulators, worktrees, xcd's scratch folders and package caches, and the project's setup;
   `xcd doctor --fix` repairs what it can. It may restart CoreSimulator, which shuts down every agent's simulators, so
   read the problems first.
