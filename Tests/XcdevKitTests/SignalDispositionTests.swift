@@ -17,6 +17,28 @@ import Testing
 
     static let ignored = unsafeBitCast(SIG_IGN, to: Int.self)
 
+    /// Runs `body` with SIGINT, SIGTERM, and SIGHUP ignored if in `ignored` and at their defaults otherwise (the test
+    /// runner may start with some ignored), then restores them.
+    static func with(ignored: Set<Int32> = [], _ body: () -> Void) {
+        var saved: [(Int32, sigaction)] = []
+        for signal in [SIGINT, SIGTERM, SIGHUP] {
+            var action = sigaction()
+            var old = sigaction()
+            if ignored.contains(signal) {
+                action.__sigaction_u.__sa_handler = SIG_IGN
+            } else {
+                action.__sigaction_u.__sa_handler = SIG_DFL
+            }
+            sigaction(signal, &action, &old)
+            saved.append((signal, old))
+        }
+        body()
+        for (signal, old) in saved {
+            var restore = old
+            sigaction(signal, &restore, nil)
+        }
+    }
+
     @Test func passthroughSharesStdioAndReturnsTheExitCode() async throws {
         let out = try await runner.run(Invocation("/bin/sh", ["-c", "exit 7"], passthrough: true))
         #expect(out.exitCode == 7)
@@ -58,25 +80,28 @@ import Testing
     /// The handler takes SIGINT, SIGTERM, and SIGHUP (the terminal closed) from the process, and gives them back.
     @Test func installingTakesSIGINTSIGTERMAndSIGHUPAndUninstallingRestoresThem() {
         let signals = [SIGINT, SIGTERM, SIGHUP]
-        let before = signals.map(Self.current)
-        let interrupts = Interrupts(report: { _ in })
-        interrupts.install(exit: { _ in })
-        #expect(signals.map(Self.current) == [Self.ignored, Self.ignored, Self.ignored])   // the sources get them
-        interrupts.uninstall()
-        #expect(signals.map(Self.current) == before)
+        Self.with {
+            let interrupts = Interrupts(report: { _ in })
+            interrupts.install(exit: { _ in })
+            #expect(signals.allSatisfy(interrupts.handles))
+            #expect(signals.map(Self.current) == [Self.ignored, Self.ignored, Self.ignored])   // the sources get them
+            interrupts.uninstall()
+            #expect(signals.map(Self.current) == [0, 0, 0])
+        }
     }
 
-    /// Under `nohup`, SIGHUP is ignored on purpose: closing the terminal must not stop xcd or its children.
-    @Test func aSIGHUPIgnoredAtStartIsLeftAlone() {
-        var ignore = sigaction()
-        var previous = sigaction()
-        ignore.__sigaction_u.__sa_handler = SIG_IGN
-        sigaction(SIGHUP, &ignore, &previous)
-        defer { sigaction(SIGHUP, &previous, nil) }
-        let interrupts = Interrupts(report: { _ in })
-        interrupts.install(exit: { _ in })
-        defer { interrupts.uninstall() }
-        #expect(!interrupts.handles(SIGHUP))
-        #expect(interrupts.handles(SIGINT) && interrupts.handles(SIGTERM))
+    /// A signal xcd starts with ignored stays ignored, as other tools leave it: SIGHUP under `nohup`, SIGINT in a
+    /// shell script's background job (`xcd build &`), SIGTERM by whoever started xcd.
+    @Test func signalsIgnoredAtStartAreLeftAlone() {
+        for ignored in [SIGINT, SIGTERM, SIGHUP] {
+            Self.with(ignored: [ignored]) {
+                let interrupts = Interrupts(report: { _ in })
+                interrupts.install(exit: { _ in })
+                defer { interrupts.uninstall() }
+                for signal in [SIGINT, SIGTERM, SIGHUP] {
+                    #expect(interrupts.handles(signal) == (signal != ignored), "\(signal) with \(ignored) ignored")
+                }
+            }
+        }
     }
 }

@@ -56,7 +56,7 @@ public struct Activity: Sendable {
             line(message)
             return try await body()
         }
-        let clear = interrupts.addCleanup { terminal("\r\u{1B}[K") }
+        let clear = interrupts.addCleanup(writes: true) { terminal("\r\u{1B}[K") }
         defer { interrupts.removeCleanup(clear) }
         let start = now()
         let spinner = Task { [now, columns, tick] in

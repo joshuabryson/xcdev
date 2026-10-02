@@ -182,6 +182,31 @@ import XcdevTestSupport
         #expect(report.all == ["interrupted"])                               // nothing was running
     }
 
+    /// Cleanups that don't write (init's scratch folder) run before those that do (a spinner's line), and each runs
+    /// on its own: one that is stuck (stderr blocked, or a terminal stopped with Ctrl-S) can't keep the others or the
+    /// exit from happening.
+    @Test func aStuckCleanupOrReportDoesntSkipTheOthers() {
+        let ran = Lines()
+        let release = DispatchSemaphore(value: 0)
+        let interrupts = Interrupts(report: { _ in release.wait() }, send: FakeGroups().send, sleep: { _ in })
+        _ = interrupts.addCleanup { ran.add("older scratch") }
+        _ = interrupts.addCleanup(writes: true) { ran.add("line"); release.wait() }
+        _ = interrupts.addCleanup { ran.add("newer scratch") }
+        let code = Mutex<Int32?>(nil)
+        let done = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            let result = interrupts.handle(SIGINT)
+            code.withLock { $0 = result }
+            done.signal()
+        }
+        let finished = done.wait(timeout: .now() + 30) == .success
+        release.signal()
+        release.signal()
+        if !finished { done.wait() }
+        #expect(finished && code.withLock { $0 } == 130)
+        #expect(ran.all == ["newer scratch", "older scratch", "line"])
+    }
+
     /// Each instance has its own cleanups, so a test's interrupt can't remove another test's folders.
     @Test func instancesDontShareCleanups() {
         let ran = Counter()

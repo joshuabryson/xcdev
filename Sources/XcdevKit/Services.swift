@@ -32,7 +32,7 @@ public struct Services: Sendable {
     public static func live() -> Services {
         let environment = ProcessInfo.processInfo.environment
         let interrupts = Interrupts.shared
-        let stderr: @Sendable (String) -> Void = { FileHandle.standardError.write(Data($0.utf8)) }
+        let stderr: @Sendable (String) -> Void = { StandardError.write($0) }
         let interactive = Activity.animates(stderrIsTerminal: isatty(STDERR_FILENO) == 1, environment: environment, output: .text)
         return Services(runner: SystemProcessRunner(interrupts: interrupts), globalPaths: .live(environment: environment),
                         currentDirectory: FileManager.default.currentDirectoryPath, environment: environment,

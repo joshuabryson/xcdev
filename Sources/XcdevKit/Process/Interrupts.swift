@@ -6,7 +6,8 @@ import Synchronization
 /// Every child but a passthrough one leads a process group of its own, which the terminal's Ctrl-C doesn't reach,
 /// so the handler stops them: SIGINT to each child's group (xcodebuild treats it as a clean cancel), SIGTERM to what
 /// is still running after `grace`, and SIGKILL a second after that. Then it runs the cleanups registered with
-/// `addCleanup`, newest first (a spinner's line, `init`'s scratch folder), prints one line on stderr, and exits with
+/// `addCleanup` (newest first; those that only touch files, like `init`'s scratch folder, before those that write
+/// to stderr, like a spinner's line), prints one line on stderr (dropped if stderr is gone), and exits with
 /// 128 + the signal: 130 for SIGINT, 143 for SIGTERM, 129 for SIGHUP. From the moment it fires no new write starts
 /// (`perform`, `output`) and no new child starts. A write already under way gets a second to finish; one that is
 /// stuck (stdout is a pipe nobody reads) doesn't hold the handler up, and xcd then exits without flushing.
@@ -25,7 +26,7 @@ public final class Interrupts: Sendable {
     private struct State {
         var children: [(child: ChildProcess, name: String)] = []
         var foreground: [ChildProcess] = []
-        var cleanups: [(id: Int, run: @Sendable () -> Void)] = []
+        var cleanups: [(id: Int, writes: Bool, run: @Sendable () -> Void)] = []
         var nextID = 0
         var fired = false
         /// Writes `perform` is running now. They run outside the lock, so a stuck one can't block the handler.
@@ -43,7 +44,7 @@ public final class Interrupts: Sendable {
 
     /// `report` prints the handler's line (stderr, as `xcd: <line>`); `send` and `sleep` are `kill` and a real sleep.
     public init(grace: Duration = .seconds(3),
-                report: @escaping @Sendable (String) -> Void = { FileHandle.standardError.write(Data("xcd: \($0)\n".utf8)) },
+                report: @escaping @Sendable (String) -> Void = { StandardError.write("xcd: \($0)\n") },
                 send: @escaping @Sendable (pid_t, Int32) -> Int32 = { kill($0, $1) },
                 sleep: @escaping @Sendable (Duration) -> Void = { usleep(UInt32($0 / .microseconds(1))) }) {
         self.grace = grace
@@ -65,7 +66,8 @@ public final class Interrupts: Sendable {
 
     /// Makes SIGINT, SIGTERM, and SIGHUP run `handle`, then `exit` with its code (by default `exitPromptly`). The
     /// signals are ignored by the process and delivered to dispatch sources instead, so the handler runs as ordinary
-    /// code on a queue. A SIGHUP already ignored (under `nohup`) is left alone.
+    /// code on a queue. A signal xcd started with ignored is left alone, as other tools leave it: SIGHUP under
+    /// `nohup`, SIGINT in a shell script's background job (`xcd build &`).
     public func install(exit: @escaping @Sendable (Int32) -> Void = Interrupts.exitPromptly) {
         var sources: [any DispatchSourceSignal] = []
         var previous: [(signal: Int32, action: sigaction)] = []
@@ -73,9 +75,7 @@ public final class Interrupts: Sendable {
             var ignore = sigaction()
             var old = sigaction()
             sigaction(signal, nil, &old)
-            if signal == SIGHUP, unsafeBitCast(old.__sigaction_u.__sa_handler, to: Int.self) == unsafeBitCast(SIG_IGN, to: Int.self) {
-                continue
-            }
+            if unsafeBitCast(old.__sigaction_u.__sa_handler, to: Int.self) == unsafeBitCast(SIG_IGN, to: Int.self) { continue }
             ignore.__sigaction_u.__sa_handler = SIG_IGN
             sigaction(signal, &ignore, nil)
             previous.append((signal, old))
@@ -112,7 +112,7 @@ public final class Interrupts: Sendable {
         enum Action {
             case ignore
             case forward([ChildProcess])
-            case stop([(child: ChildProcess, name: String)], cleanups: [@Sendable () -> Void])
+            case stop([(child: ChildProcess, name: String)], cleanups: [(writes: Bool, run: @Sendable () -> Void)])
         }
         let action: Action = state.withLock { state in
             if !state.foreground.isEmpty {
@@ -120,7 +120,7 @@ public final class Interrupts: Sendable {
             }
             guard !state.fired else { return .ignore }
             state.fired = true
-            return .stop(state.children, cleanups: state.cleanups.reversed().map(\.run))
+            return .stop(state.children, cleanups: state.cleanups.reversed().map { ($0.writes, $0.run) })
         }
         switch action {
         case .ignore:
@@ -131,10 +131,13 @@ public final class Interrupts: Sendable {
         case .stop(let children, let cleanups):
             waitForWrites()
             let stopped = stop(children)
+            // Each on its own and bounded, so a stuck one can't skip the rest: first those that only touch files
+            // (init's scratch folder), then those that write to stderr (a spinner's line), which may be stuck too,
+            // like the report.
+            for cleanup in cleanups where !cleanup.writes { _ = Self.bounded(.seconds(5), cleanup.run) }
+            for cleanup in cleanups where cleanup.writes { _ = Self.bounded(.seconds(1), cleanup.run) }
             let report = report
-            // Bounded: the line clear and the report write to stderr, which may be as stuck as stdout.
-            _ = Self.bounded(.seconds(5)) {
-                cleanups.forEach { $0() }
+            _ = Self.bounded(.seconds(1)) {
                 report("interrupted" + (stopped.isEmpty ? "" : "; stopped " + stopped.joined(separator: ", ")))
             }
             return 128 + signal
@@ -243,11 +246,12 @@ public final class Interrupts: Sendable {
 
     // MARK: Cleanups and output
 
-    /// Runs `cleanup` if the handler fires before `removeCleanup`.
-    public func addCleanup(_ cleanup: @escaping @Sendable () -> Void) -> Cleanup {
+    /// Runs `cleanup` if the handler fires before `removeCleanup`. `writes`: it writes to stderr, so it runs after
+    /// the cleanups that don't, and gets less time (a closed terminal or a full pipe can stall it).
+    public func addCleanup(writes: Bool = false, _ cleanup: @escaping @Sendable () -> Void) -> Cleanup {
         state.withLock { state in
             state.nextID += 1
-            state.cleanups.append((state.nextID, cleanup))
+            state.cleanups.append((state.nextID, writes, cleanup))
             return Cleanup(id: state.nextID)
         }
     }

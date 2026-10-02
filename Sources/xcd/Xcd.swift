@@ -28,6 +28,7 @@ struct Xcd: AsyncParsableCommand {
     /// Ctrl-C and SIGTERM are handled for every command from the start (see `Interrupts`).
     static func main() async {
         assert(builtinNames.isSubset(of: BuiltinCommands.reservedNames), "add new built-in names to BuiltinCommands.reservedNames")
+        signal(SIGPIPE, SIG_IGN)    // a reader that went away is EPIPE, not death; children get SIGPIPE back
         Interrupts.shared.install()
         let arguments = Array(CommandLine.arguments.dropFirst())
         switch CommandRoute.route(arguments, builtins: builtinNames) {
