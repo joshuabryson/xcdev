@@ -48,8 +48,12 @@ public struct SystemProcessRunner: ProcessRunning {
         } catch let error as XcdError {
             throw error
         } catch {
-            throw XcdError(.subprocessFailed,
-                           "could not launch \(invocation.executable): \(error.localizedDescription)",
+            var isDirectory: ObjCBool = false
+            let reason = invocation.workingDirectory.flatMap { directory in
+                FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory) && isDirectory.boolValue
+                    ? nil : "its working directory \(directory) does not exist"
+            } ?? error.localizedDescription
+            throw XcdError(.subprocessFailed, "could not launch \(invocation.executable): \(reason)",
                            details: ["command: \(invocation.commandLine)"])
         }
         // Only the child writes to the pipes now, so reading them ends when it (and whatever it started) is done.

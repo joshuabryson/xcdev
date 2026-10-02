@@ -4,8 +4,8 @@ import Testing
 import XcdevTestSupport
 @testable import XcdevKit
 
-/// Serialized: some tests change process-wide signal dispositions, which parallel tests would restore out of order.
-@Suite(.serialized) struct InterruptsTests {
+/// None of these change the process's real signal dispositions; those that do are in `SignalDispositionTests`.
+@Suite struct InterruptsTests {
     /// Process groups that exist only in this test: `send` signals them, never a real process. Pids are above macOS's
     /// largest (99998), so nothing real could match one.
     final class FakeGroups: Sendable {
@@ -128,6 +128,47 @@ import XcdevTestSupport
         #expect(slept.value == 0)                                            // it was gone at the first check
     }
 
+    /// SIGHUP (the terminal closed) stops the children the same way and exits 129.
+    @Test func sighupStopsTheChildrenAndExits129() throws {
+        let groups = FakeGroups()
+        groups.add(100_022, obeys: [SIGINT])
+        let report = Lines()
+        let interrupts = interrupts(groups, report: report)
+        _ = try track(interrupts, 100_022, ["xcrun", "xcodebuild", "build"])
+        #expect(interrupts.handle(SIGHUP) == 129)
+        #expect(groups.sent == ["-100022 2"])
+        #expect(report.all == ["interrupted; stopped xcodebuild"])
+    }
+
+    /// A write that never finishes (stdout is a pipe nobody reads) must not keep the handler from stopping the
+    /// children and exiting: writes happen outside the lock, and the handler waits for them only briefly.
+    @Test func aBlockedWriteDoesntStopTheHandler() throws {
+        let groups = FakeGroups()
+        groups.add(100_023, obeys: [SIGINT])
+        let report = Lines()
+        let interrupts = interrupts(groups, report: report)
+        _ = try track(interrupts, 100_023, ["xcrun", "xcodebuild", "build"])
+        let writing = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        Thread.detachNewThread { interrupts.perform { writing.signal(); release.wait() } }
+        writing.wait()
+        let code = Mutex<Int32?>(nil)
+        let done = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            let result = interrupts.handle(SIGTERM)
+            code.withLock { $0 = result }
+            done.signal()
+        }
+        let finished = done.wait(timeout: .now() + 20) == .success     // generous: the machine may be busy
+        release.signal()
+        if !finished { done.wait() }
+        #expect(finished)
+        #expect(code.withLock { $0 } == 143)
+        #expect(groups.sent == ["-100023 2"])
+        #expect(report.all == ["interrupted; stopped xcodebuild"])
+        #expect(!interrupts.perform { })                                     // and no new write starts
+    }
+
     @Test func cleanupsRunNewestFirstAndOnlyWhileRegistered() {
         let order = Lines()
         let report = Lines()
@@ -181,71 +222,5 @@ import XcdevTestSupport
         interrupts.finished(child)
         #expect(interrupts.handle(SIGINT) == 130)
         #expect(ran.value == 1)
-    }
-
-    @Test func aPassthroughChildRunsWithSIGINTAndSIGQUITIgnoredInXcdThenRestored() throws {
-        func current(_ signal: Int32) -> Int {
-            var action = sigaction()
-            sigaction(signal, nil, &action)
-            return unsafeBitCast(action.__sigaction_u.__sa_handler, to: Int.self)
-        }
-        let before = (current(SIGINT), current(SIGQUIT))
-        let interrupts = interrupts(FakeGroups())
-        let child = try track(interrupts, 100_051, ["xcd-asker"], foreground: true)
-        #expect(current(SIGINT) == unsafeBitCast(SIG_IGN, to: Int.self))
-        #expect(current(SIGQUIT) == unsafeBitCast(SIG_IGN, to: Int.self))
-        interrupts.finished(child)
-        #expect((current(SIGINT), current(SIGQUIT)) == before)
-    }
-
-    /// Children start with default signal handling, so ignoring SIGINT in xcd doesn't make them ignore it.
-    @Test func childrenStartedWhileXcdIgnoresSIGINTDontIgnoreIt() async throws {
-        var ignore = sigaction()
-        var previous = sigaction()
-        ignore.__sigaction_u.__sa_handler = SIG_IGN
-        sigaction(SIGINT, &ignore, &previous)
-        defer { sigaction(SIGINT, &previous, nil) }
-        let output = try await SystemProcessRunner(interrupts: Interrupts()).run(Invocation("/bin/sh", ["-c", "kill -INT $$; echo survived"]))
-        #expect(output.stdoutString.isEmpty && output.exitCode == 130)
-    }
-
-    // MARK: End to end
-
-    /// A real SIGINT to this process, with the handler installed (exiting is replaced by recording the code): the
-    /// child's whole group goes, including a background grandchild that ignores SIGINT, as non-interactive shells
-    /// make background jobs do. Only this test's processes are signalled: the handler reaches registered groups only.
-    @Test func aRealSIGINTStopsAChildAndItsGrandchildren() async throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xcd-int-\(UUID().uuidString)").path
-        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(atPath: dir) }
-        let report = Lines()
-        let interrupts = Interrupts(report: report.add)
-        let exitCode = Mutex<Int32?>(nil)
-        interrupts.install(exit: { code in exitCode.withLock { $0 = code } })   // keeping nothing, as the CLI does
-        defer { interrupts.uninstall() }
-        let runner = SystemProcessRunner(interrupts: interrupts)
-        let run = Task {
-            try await runner.run(Invocation("/bin/sh", ["-c", "echo $$ > sh.pid; sleep 31 & echo $! > sleep.pid; wait"],
-                                            workingDirectory: dir))
-        }
-        func pid(_ name: String) -> pid_t? {
-            (try? String(contentsOfFile: dir + "/" + name, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-        }
-        let deadline = ContinuousClock.now + .seconds(30)
-        while pid("sleep.pid") == nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
-        let shell = try #require(pid("sh.pid"))
-        let sleeper = try #require(pid("sleep.pid"))
-        defer { if kill(-shell, 0) == 0 { kill(-shell, SIGKILL) } }          // if the test fails: this test's group only
-        #expect(kill(-shell, 0) == 0)                                        // the group is running
-
-        raise(SIGINT)
-        while exitCode.withLock({ $0 }) == nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
-        #expect(exitCode.withLock { $0 } == 130)
-        #expect(report.all == ["interrupted; stopped sh"])
-        #expect(kill(-shell, 0) != 0)                                        // nothing alive in the child's group
-        while kill(sleeper, 0) == 0, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
-        #expect(kill(sleeper, 0) != 0)                                       // the grandchild is gone (and reaped)
-        _ = try? await run.value
-        waitpid(shell, nil, 0)                                               // kept as a zombie while interrupted
     }
 }

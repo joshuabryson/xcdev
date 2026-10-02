@@ -1,8 +1,10 @@
 import Foundation
 import Testing
+import XcdevTestSupport
 
 /// Runs the built `xcd` on a pseudo-terminal, as a shell would on a real one, to check what the terminal reaches:
-/// a plugin reading its input, and Ctrl-C. Only processes these tests start are signalled.
+/// a plugin reading its input, and Ctrl-C. Only processes these tests start are signalled. Running the real binary
+/// keeps every signal out of the test process.
 @Suite struct TerminalTests {
     /// `xcd` from this build, in the products folder that holds the test bundle.
     static func xcd() throws -> String {
@@ -57,6 +59,50 @@ import Testing
         #expect(session.waitForExit() == .exited(130))
         #expect(kill(pid, 0) != 0)                                             // the plugin's sleep is gone too
     }
+
+    /// Ctrl-C while xcd runs a child in a group of its own (here `xcd wt create`'s post-worktree-create hook, which
+    /// has a 30-minute deadline and clones no simulator): the handler stops the child's whole group, including a
+    /// background job that ignores SIGINT, as non-interactive shells make background jobs do, and xcd exits 130.
+    @Test func ctrlCStopsAChildInItsOwnGroupAndItsGrandchild() async throws {
+        let nap = "29.\(Int.random(in: 10000...99999))"
+        let project = try TempProject.make(config: """
+            version: 1
+            project: App.xcodeproj
+            hooks:
+              post-worktree-create: 'echo $$ > "$XCD_PROJECT_ROOT/../sh.pid"; sleep \(nap) & echo $! > "$XCD_PROJECT_ROOT/../sleep.pid"; wait'
+            """)
+        defer { project.remove() }
+        let session = try PseudoTerminal.spawn(Self.xcd(), ["wt", "create", "feat"], directory: project.root, environment: [
+            "PATH": "/usr/bin:/bin", "XCDEV_HOME": project.home, "TERM": "xterm"])
+        defer { session.stop() }
+        func pid(_ name: String) -> pid_t? {
+            (try? String(contentsOfFile: project.base + "/" + name, encoding: .utf8))
+                .flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        }
+        let deadline = ContinuousClock.now + .seconds(60)
+        while pid("sleep.pid") == nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        let shell = try #require(pid("sh.pid"))
+        let sleeper = try #require(pid("sleep.pid"))
+        session.track(shell, marker: project.base)
+        session.track(sleeper, marker: nap)
+        session.write("\u{03}")
+        #expect(session.waitForExit() == .exited(130))
+        #expect(session.read(until: "xcd: interrupted; stopped sh"))
+        while kill(sleeper, 0) == 0, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(kill(sleeper, 0) != 0)                                       // the grandchild is gone
+        #expect(kill(shell, 0) != 0)
+    }
+
+    /// A plugin still runs when xcd's parent closed its stdin: the plugin gets /dev/null there instead.
+    @Test func aPluginRunsWhenXcdsStdinIsClosed() async throws {
+        let base = try Self.plugins(["hi": "echo hi-ran"])
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        let session = try PseudoTerminal.spawn(Self.xcd(), ["hi"], directory: base, environment: [
+            "PATH": base + "/bin:/usr/bin:/bin", "XCDEV_HOME": base + "/home", "TERM": "xterm"], closingStdin: true)
+        defer { session.stop() }
+        #expect(session.read(until: "hi-ran"))
+        #expect(session.waitForExit() == .exited(0))
+    }
 }
 
 /// A process on its own pseudo-terminal: a new session whose controlling terminal is the pty, so it is in the
@@ -76,8 +122,9 @@ final class PseudoTerminal: @unchecked Sendable {
         self.master = master
     }
 
+    /// `closingStdin` starts the process with its stdin closed, as `<&-` in a shell does.
     static func spawn(_ executable: String, _ arguments: [String], directory: String,
-                      environment: [String: String]) throws -> PseudoTerminal {
+                      environment: [String: String], closingStdin: Bool = false) throws -> PseudoTerminal {
         var master: Int32 = 0, slave: Int32 = 0
         guard openpty(&master, &slave, nil, nil, nil) == 0 else { throw POSIXError(.ENXIO) }
         let name = String(cString: ptsname(master))
@@ -101,7 +148,8 @@ final class PseudoTerminal: @unchecked Sendable {
         posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT
                                                      | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
         // Through sh, which takes the pty as its controlling terminal (posix_spawn's open alone doesn't), then execs.
-        let argv = (["/bin/sh", "-c", #"exec "$0" "$@""#, executable] + arguments).map { strdup($0) } + [nil]
+        let script = closingStdin ? #"exec "$0" "$@" <&-"# : #"exec "$0" "$@""#
+        let argv = (["/bin/sh", "-c", script, executable] + arguments).map { strdup($0) } + [nil]
         let envp = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer { (argv + envp).forEach { free($0) } }
         var pid: pid_t = 0
@@ -133,6 +181,11 @@ final class PseudoTerminal: @unchecked Sendable {
         guard let pid = output.split(separator: "pid:").last.flatMap({ pid_t($0.prefix { $0.isNumber }) }) else { return nil }
         others.append((pid, marker))
         return pid
+    }
+
+    /// Has `stop` kill `pid` if it is still running with `marker` in its command line.
+    func track(_ pid: pid_t, marker: String) {
+        others.append((pid, marker))
     }
 
     static func commandLine(of pid: pid_t) -> String {

@@ -73,14 +73,15 @@ import XcdevTestSupport
         let (project, service) = try setup(interrupts: interrupts)
         defer { project.remove() }
         let cache = GlobalPaths(base: project.home).cacheDirectory
-        let seen = Mutex<(scratch: String?, removed: Bool)>((nil, false))
+        let seen = Mutex<(claimed: Bool, scratch: String?, removed: Bool)>((false, nil, false))
         fake.stub(["xcrun", "xcodebuild", "-showBuildSettings"]) { inv in
             let derivedData = inv.arguments[inv.arguments.firstIndex(of: "-derivedDataPath")! + 1]
             let scratch = cache + "/" + derivedData.dropFirst(cache.count + 1).prefix { $0 != "/" }
-            if seen.withLock({ $0.scratch == nil }) {                         // the first scheme's call
+            // Only the first call (schemes are read concurrently) writes and interrupts; the others touch nothing.
+            if seen.withLock({ seen in defer { seen.claimed = true }; return !seen.claimed }) {
                 try FileManager.default.createDirectory(atPath: derivedData, withIntermediateDirectories: true)   // as xcodebuild would
                 _ = interrupts.handle(SIGINT)                                // what Ctrl-C runs, minus the exit
-                seen.withLock { $0 = (scratch, !FileManager.default.fileExists(atPath: scratch)) }
+                seen.withLock { $0 = (true, scratch, !FileManager.default.fileExists(atPath: scratch)) }
             }
             return ProcessOutput(stdout: Fixture.string("build-settings-scheme-app.json"))
         }

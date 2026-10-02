@@ -17,6 +17,25 @@ final class ChildProcess: Sendable {
 
     enum Life { case running, exited, reaped }
 
+    /// How the child's stdin, stdout, and stderr are set up, in order.
+    enum FileAction: Equatable {
+        case inherit(Int32)
+        case duplicate(Int32, to: Int32)
+        case openNull(Int32, flags: Int32)
+    }
+
+    /// Shared: xcd's own 0, 1, and 2, except that one xcd's parent closed (`xcd hi <&-`) is /dev/null, since
+    /// posix_spawn fails on inheriting a closed descriptor. Redirected: stdout and stderr are duplicated before
+    /// /dev/null is opened as stdin, so a pipe or log numbered 0 (possible when xcd's stdin was closed) is copied first.
+    static func fileActions(for stdio: Stdio, isOpen: (Int32) -> Bool = { fcntl($0, F_GETFD) != -1 }) -> [FileAction] {
+        switch stdio {
+        case .shared:
+            return (0...2).map { isOpen($0) ? .inherit($0) : .openNull($0, flags: $0 == 0 ? O_RDONLY : O_WRONLY) }
+        case .redirected(let output, let error):
+            return [.duplicate(output, to: 1), .duplicate(error, to: 2), .openNull(0, flags: O_RDONLY)]
+        }
+    }
+
     let pid: pid_t
     /// Whether the child leads a process group of its own (every child but a passthrough one), so `signal` reaches
     /// what it started too: the compilers under xcodebuild, a shell's background jobs. A passthrough child is in
@@ -37,13 +56,12 @@ final class ChildProcess: Sendable {
         var actions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&actions)
         defer { posix_spawn_file_actions_destroy(&actions) }
-        switch stdio {
-        case .shared:
-            for fd: Int32 in 0...2 { posix_spawn_file_actions_addinherit_np(&actions, fd) }
-        case .redirected(let output, let error):
-            posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
-            posix_spawn_file_actions_adddup2(&actions, output, 1)
-            posix_spawn_file_actions_adddup2(&actions, error, 2)
+        for action in fileActions(for: stdio) {
+            switch action {
+            case .inherit(let fd): posix_spawn_file_actions_addinherit_np(&actions, fd)
+            case .duplicate(let fd, let target): posix_spawn_file_actions_adddup2(&actions, fd, target)
+            case .openNull(let fd, let flags): posix_spawn_file_actions_addopen(&actions, fd, "/dev/null", flags, 0)
+            }
         }
         if let workingDirectory { posix_spawn_file_actions_addchdir_np(&actions, workingDirectory) }
 

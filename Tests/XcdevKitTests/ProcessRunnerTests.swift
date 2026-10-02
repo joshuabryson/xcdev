@@ -131,12 +131,6 @@ import XcdevTestSupport
         #expect(out.stoppedAtDeadline && out.exitCode == 15 && out.stdout.isEmpty)
     }
 
-    @Test func passthroughSharesStdioAndReturnsTheExitCode() async throws {
-        let out = try await runner.run(Invocation("/bin/sh", ["-c", "exit 7"], passthrough: true))
-        #expect(out.exitCode == 7)
-        #expect(out.stdout.isEmpty && out.stderr.isEmpty)
-    }
-
     /// A timeout ends the child's whole process group, so a background job can't keep the output pipe open.
     @Test func aTimeoutStopsWhatTheChildStarted() async throws {
         let start = ContinuousClock.now
@@ -150,9 +144,18 @@ import XcdevTestSupport
         #expect(kill(sleeper, 0) != 0)
     }
 
-    @Test func aPassthroughChildEndedByASignalReports128PlusTheSignal() async throws {
-        let out = try await runner.run(Invocation("/bin/sh", ["-c", "kill -INT $$"], passthrough: true))
-        #expect(out.exitCode == 130)
+    /// stdin, stdout, and stderr go to the child's 0, 1, and 2 before /dev/null is opened as its stdin, so a
+    /// descriptor numbered 0 (when xcd's own stdin was closed) isn't replaced first.
+    @Test func redirectedOutputIsDuplicatedBeforeStdinIsOpened() {
+        #expect(ChildProcess.fileActions(for: .redirected(output: 0, error: 5), isOpen: { _ in true })
+                == [.duplicate(0, to: 1), .duplicate(5, to: 2), .openNull(0, flags: O_RDONLY)])
+    }
+
+    /// A passthrough child shares what xcd has open of 0, 1, and 2; one xcd's parent closed becomes /dev/null.
+    @Test func aPassthroughChildGetsDevNullForAClosedDescriptor() {
+        #expect(ChildProcess.fileActions(for: .shared, isOpen: { $0 != 0 && $0 != 2 })
+                == [.openNull(0, flags: O_RDONLY), .inherit(1), .openNull(2, flags: O_WRONLY)])
+        #expect(ChildProcess.fileActions(for: .shared, isOpen: { _ in true }) == [.inherit(0), .inherit(1), .inherit(2)])
     }
 
     @Test func aMissingWorkingDirectoryIsALaunchFailure() async throws {
@@ -160,13 +163,7 @@ import XcdevTestSupport
             try await runner.run(Invocation("/bin/echo", [], workingDirectory: "/no/such/folder"))
         }
         #expect(error?.code == .subprocessFailed)
-    }
-
-    @Test func passthroughWinsOverAnOutputFile() async throws {
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("xcd-pass-\(UUID().uuidString).log").path
-        defer { try? FileManager.default.removeItem(atPath: file) }
-        _ = try await runner.run(Invocation("/usr/bin/true", [], outputFile: file, passthrough: true))
-        #expect(!FileManager.default.fileExists(atPath: file))
+        #expect(error?.message == "could not launch /bin/echo: its working directory /no/such/folder does not exist")
     }
 
     /// A nested xcd (inside a project command, plugin, or hook) inherits its parent's context; a variable that

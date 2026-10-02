@@ -1,14 +1,15 @@
 import Foundation
 import Synchronization
 
-/// What SIGINT and SIGTERM do to xcd: one handler for the whole process, installed when the CLI starts.
+/// What SIGINT, SIGTERM, and SIGHUP do to xcd: one handler for the whole process, installed when the CLI starts.
 ///
 /// Every child but a passthrough one leads a process group of its own, which the terminal's Ctrl-C doesn't reach,
 /// so the handler stops them: SIGINT to each child's group (xcodebuild treats it as a clean cancel), SIGTERM to what
 /// is still running after `grace`, and SIGKILL a second after that. Then it runs the cleanups registered with
 /// `addCleanup`, newest first (a spinner's line, `init`'s scratch folder), prints one line on stderr, and exits with
-/// 128 + the signal: 130 for SIGINT, 143 for SIGTERM. From the moment it fires nothing more is written (`perform`,
-/// `output`) and no new child starts.
+/// 128 + the signal: 130 for SIGINT, 143 for SIGTERM, 129 for SIGHUP. From the moment it fires no new write starts
+/// (`perform`, `output`) and no new child starts. A write already under way gets a second to finish; one that is
+/// stuck (stdout is a pipe nobody reads) doesn't hold the handler up, and xcd then exits without flushing.
 ///
 /// A passthrough child (a project command or plugin) is in xcd's own process group instead, so it reads the terminal
 /// and gets the terminal's Ctrl-C itself, as under a shell. While one runs, xcd ignores SIGINT and SIGQUIT, passes
@@ -27,6 +28,8 @@ public final class Interrupts: Sendable {
         var cleanups: [(id: Int, run: @Sendable () -> Void)] = []
         var nextID = 0
         var fired = false
+        /// Writes `perform` is running now. They run outside the lock, so a stuck one can't block the handler.
+        var writing = 0
     }
 
     private let state = Mutex(State())
@@ -60,16 +63,21 @@ public final class Interrupts: Sendable {
         let previous: [(signal: Int32, action: sigaction)]
     }
 
-    /// Makes SIGINT and SIGTERM run `handle`, then `exit` with its code. The signals are ignored by the process and
-    /// delivered to dispatch sources instead, so the handler runs as ordinary code on a queue.
-    public func install(exit: @escaping @Sendable (Int32) -> Void = { Foundation.exit($0) }) {
+    /// Makes SIGINT, SIGTERM, and SIGHUP run `handle`, then `exit` with its code (by default `exitPromptly`). The
+    /// signals are ignored by the process and delivered to dispatch sources instead, so the handler runs as ordinary
+    /// code on a queue. A SIGHUP already ignored (under `nohup`) is left alone.
+    public func install(exit: @escaping @Sendable (Int32) -> Void = Interrupts.exitPromptly) {
         var sources: [any DispatchSourceSignal] = []
         var previous: [(signal: Int32, action: sigaction)] = []
-        for signal in [SIGINT, SIGTERM] {
+        for signal in [SIGINT, SIGTERM, SIGHUP] {
             var ignore = sigaction()
             var old = sigaction()
+            sigaction(signal, nil, &old)
+            if signal == SIGHUP, unsafeBitCast(old.__sigaction_u.__sa_handler, to: Int.self) == unsafeBitCast(SIG_IGN, to: Int.self) {
+                continue
+            }
             ignore.__sigaction_u.__sa_handler = SIG_IGN
-            sigaction(signal, &ignore, &old)
+            sigaction(signal, &ignore, nil)
             previous.append((signal, old))
             let source = DispatchSource.makeSignalSource(signal: signal, queue: queue)
             source.setEventHandler { [self] in
@@ -79,6 +87,11 @@ public final class Interrupts: Sendable {
             sources.append(source)
         }
         installations.withLock { $0.append(Installation(sources: sources, previous: previous)) }
+    }
+
+    /// Whether `install` set up a source for `signal`.
+    func handles(_ signal: Int32) -> Bool {
+        installations.withLock { $0.contains { $0.previous.contains { $0.signal == signal } } }
     }
 
     /// Undoes `install` (for tests: the CLI keeps the handler until it exits). Cancelling the sources releases their
@@ -116,11 +129,43 @@ public final class Interrupts: Sendable {
             for child in children { child.signal(signal, using: send) }
             return nil
         case .stop(let children, let cleanups):
+            waitForWrites()
             let stopped = stop(children)
-            cleanups.forEach { $0() }
-            report("interrupted" + (stopped.isEmpty ? "" : "; stopped " + stopped.joined(separator: ", ")))
+            let report = report
+            // Bounded: the line clear and the report write to stderr, which may be as stuck as stdout.
+            _ = Self.bounded(.seconds(5)) {
+                cleanups.forEach { $0() }
+                report("interrupted" + (stopped.isEmpty ? "" : "; stopped " + stopped.joined(separator: ", ")))
+            }
             return 128 + signal
         }
+    }
+
+    /// Gives writes already under way up to a second to finish, so a result being printed isn't cut short.
+    private func waitForWrites() {
+        let step = Duration.milliseconds(50)
+        var waited = Duration.zero
+        while state.withLock({ $0.writing }) > 0, waited < .seconds(1) {
+            sleep(step)
+            waited += step
+        }
+    }
+
+    /// Runs `work` on a thread of its own and waits for it up to `limit`. Returns whether it finished.
+    static func bounded(_ limit: DispatchTimeInterval, _ work: @escaping @Sendable () -> Void) -> Bool {
+        let done = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            work()
+            done.signal()
+        }
+        return done.wait(timeout: .now() + limit) == .success
+    }
+
+    /// Flushes stdout and stderr if that finishes within a second, then ends the process at once. Not `exit`: its
+    /// flush would wait forever on a pipe nobody reads, and xcd has nothing else to run at exit.
+    public static func exitPromptly(_ code: Int32) {
+        _ = bounded(.seconds(1)) { fflush(nil) }
+        _exit(code)
     }
 
     /// SIGINT to each child's group, SIGTERM to those still running after `grace`, SIGKILL to those still running a
@@ -211,15 +256,20 @@ public final class Interrupts: Sendable {
         state.withLock { $0.cleanups.removeAll { $0.id == cleanup.id } }
     }
 
-    /// Runs `write` unless the handler has fired, and returns whether it ran. The handler can't fire while `write`
-    /// runs (it takes the same lock), so a write is either whole and before the interrupt, or never.
+    /// Runs `write` unless the handler has fired, and returns whether it ran. The write runs outside the lock (it may
+    /// block on a full pipe); the handler waits for it up to a second, so in practice a write is whole and before
+    /// the interrupt, or never.
     @discardableResult
     public func perform(_ write: () -> Void) -> Bool {
-        state.withLock { state in
+        let started = state.withLock { state in
             guard !state.fired else { return false }
-            write()
+            state.writing += 1
             return true
         }
+        guard started else { return false }
+        defer { state.withLock { $0.writing -= 1 } }
+        write()
+        return true
     }
 
     /// Like `perform`, but once the handler has fired it doesn't return (until cancelled): the handler is stopping
