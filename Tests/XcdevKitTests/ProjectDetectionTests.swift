@@ -173,4 +173,16 @@ import XcdevTestSupport
             .detect(root: root, container: "Shop.xcworkspace")
         #expect(shop.appSchemes == ["Sample App"])
     }
+
+    @Test func aSchemeNamedLikeTheFolderIsTheRecommendedApp() async throws {
+        defer { cleanUp() }
+        try make(["Shop.xcworkspace"])
+        fake.stub(["xcrun", "xcodebuild", "-list"],
+                  stdout: #"{"workspace":{"name":"Shop","schemes":["Admin","Sample App"]}}"#)
+        fake.stub(["xcrun", "xcodebuild", "-showBuildSettings"], stdout: Fixture.string("build-settings-scheme-app.json"))
+        let detected = try await ProjectDetector(runner: fake, developerDir: nil, scratch: scratch)
+            .detect(root: root, container: "Shop.xcworkspace")
+        #expect(detected.appSchemes == ["Sample App", "Admin"])
+        #expect(detected.testSchemes == ["Sample App"])
+    }
 }

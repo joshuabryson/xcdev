@@ -1,0 +1,75 @@
+{
+  "devicetypes": [
+    {"name": "iPhone 18 Pro", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro", "productFamily": "iPhone"},
+    {"name": "iPhone 18 Pro Max", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro-Max", "productFamily": "iPhone"},
+    {"name": "iPhone 17 Pro", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro", "productFamily": "iPhone"},
+    {"name": "iPhone 17e", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17e", "productFamily": "iPhone"},
+    {"name": "iPhone Air", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-Air", "productFamily": "iPhone"},
+    {"name": "iPhone 17", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17", "productFamily": "iPhone"},
+    {"name": "iPhone 16", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16", "productFamily": "iPhone"},
+    {"name": "iPhone SE (3rd generation)", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation", "productFamily": "iPhone"},
+    {"name": "iPad Pro 13-inch (M5) (16GB)", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-16GB", "productFamily": "iPad"},
+    {"name": "iPad Pro 13-inch (M5)", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB", "productFamily": "iPad"},
+    {"name": "iPad Pro 11-inch (M5)", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-11-inch-M5-12GB", "productFamily": "iPad"},
+    {"name": "iPad Air 11-inch (M4)", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M4", "productFamily": "iPad"},
+    {"name": "iPad (A16)", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-A16", "productFamily": "iPad"},
+    {"name": "iPad mini (A17 Pro)", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-mini-A17-Pro", "productFamily": "iPad"},
+    {"name": "Apple TV 4K (3rd generation)", "identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-TV-4K-3rd-generation-4K", "productFamily": "Apple TV"},
+    {"name": "Apple TV 4K (3rd generation) (at 1080p)", "identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-TV-4K-3rd-generation-1080p", "productFamily": "Apple TV"},
+    {"name": "Apple Watch Series 12 (46mm)", "identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Series-12-46mm", "productFamily": "Apple Watch"},
+    {"name": "Apple Watch Series 12 (42mm)", "identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Series-12-42mm", "productFamily": "Apple Watch"},
+    {"name": "Apple Watch Ultra 4 (49mm)", "identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Ultra-4-49mm", "productFamily": "Apple Watch"},
+    {"name": "Apple Watch Series 11 (46mm)", "identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Series-11-46mm", "productFamily": "Apple Watch"},
+    {"name": "Apple Watch SE 3 (44mm)", "identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-SE-3-44mm", "productFamily": "Apple Watch"},
+    {"name": "Apple Vision Pro", "identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Vision-Pro-4K", "productFamily": "Apple Vision"},
+    {"name": "Apple Vision Pro (at 2732x2048)", "identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Vision-Pro", "productFamily": "Apple Vision"}
+  ],
+  "runtimes": [
+    {"name": "iOS 26.5", "identifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-5", "version": "26.5", "platform": "iOS", "isAvailable": true, "supportedDeviceTypes": [
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17e"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-Air"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-16GB"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-11-inch-M5-12GB"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M4"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-A16"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-mini-A17-Pro"}
+    ]},
+    {"name": "iOS 27.0", "identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-0", "version": "27.0", "platform": "iOS", "isAvailable": true, "supportedDeviceTypes": [
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro-Max"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17e"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-Air"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-16GB"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-11-inch-M5-12GB"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M4"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-A16"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-mini-A17-Pro"}
+    ]},
+    {"name": "watchOS 27.0", "identifier": "com.apple.CoreSimulator.SimRuntime.watchOS-27-0", "version": "27.0", "platform": "watchOS", "isAvailable": true, "supportedDeviceTypes": [
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Series-12-46mm"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Series-12-42mm"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Ultra-4-49mm"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Series-11-46mm"},
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-SE-3-44mm"}
+    ]},
+    {"name": "visionOS 27.0", "identifier": "com.apple.CoreSimulator.SimRuntime.xrOS-27-0", "version": "27.0", "platform": "xrOS", "isAvailable": true, "supportedDeviceTypes": [
+      {"identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Vision-Pro-4K"}
+    ]}
+  ],
+  "devices": {
+    "com.apple.CoreSimulator.SimRuntime.iOS-27-0": [
+      {"dataPath": "/Users/dev/Library/Developer/CoreSimulator/Devices/74A4C63D-F615-4A06-A501-9D93463D7756/data", "dataPathSize": 18337792, "logPath": "/Users/dev/Library/Logs/CoreSimulator/74A4C63D-F615-4A06-A501-9D93463D7756", "udid": "74A4C63D-F615-4A06-A501-9D93463D7756", "isAvailable": true, "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro", "state": "Shutdown", "name": "xcd-template · iPhone 18 Pro · iOS 27.0"},
+      {"dataPath": "/Users/dev/Library/Developer/CoreSimulator/Devices/4A5E2D63-7613-4E1F-992F-EE80559DA9EF/data", "dataPathSize": 18337792, "logPath": "/Users/dev/Library/Logs/CoreSimulator/4A5E2D63-7613-4E1F-992F-EE80559DA9EF", "udid": "4A5E2D63-7613-4E1F-992F-EE80559DA9EF", "isAvailable": true, "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17", "state": "Shutdown", "name": "xcd-template · iPhone 17 · iOS 27.0"}
+    ]
+  }
+}

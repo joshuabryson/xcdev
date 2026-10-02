@@ -159,7 +159,8 @@ public struct ProjectDetector: Sendable {
         }
         let base = URL(fileURLWithPath: container).deletingPathExtension().lastPathComponent
         let folder = URL(fileURLWithPath: root).lastPathComponent
-        let readOrder = Self.readOrder(schemes, names: [base, folder])
+        let names = [base, folder]
+        let readOrder = Self.readOrder(schemes, names: names)
         let ordered = Array(readOrder.prefix(Self.maxSchemes))
         var notes: [String] = []
         let results = await withTaskGroup(of: (String, SchemeSettings).self) { group in
@@ -194,7 +195,9 @@ public struct ProjectDetector: Sendable {
         }
         let withApps = ordered.filter { (targetsByScheme[$0] ?? []).contains(where: \.isApp) }
         let phoneOrMac = withApps.filter { !watchScheme($0) }
-        let appSchemes = (phoneOrMac.isEmpty ? withApps : phoneOrMac).sorted { ($0 == base ? 0 : 1, $0) < ($1 == base ? 0 : 1, $1) }
+        // Named like the container or the folder first, as in `readOrder`, then alphabetically.
+        func rank(_ scheme: String) -> Int { names.contains(scheme) ? 0 : 1 }
+        let appSchemes = (phoneOrMac.isEmpty ? withApps : phoneOrMac).sorted { (rank($0), $0) < (rank($1), $1) }
         let all = targetsByScheme.values.flatMap { $0 }
         let source = all.contains(where: \.isApp) ? all.filter(\.isApp) : all
         let platforms = Set(source.flatMap(\.platforms)).sorted()
