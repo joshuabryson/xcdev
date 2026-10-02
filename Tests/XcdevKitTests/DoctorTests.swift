@@ -345,6 +345,36 @@ import XcdevTestSupport
         #expect(report.problems.map(\.message) == ["xcd · Sample App · main · ipad (\(old)) is orphaned: Sample App/main doesn't record it"])
     }
 
+    /// An unrecorded clone of a worktree that exists is deleted only while it is shut down. A booted
+    /// one is in use (an agent may have booted it by hand), so it is reported with what to do, and left alone.
+    @Test func anUnrecordedCloneOfALiveWorktreeIsDeletedOnlyWhenShutDown() async throws {
+        let (project, sims, _, _) = try await setup()
+        defer { project.remove() }
+        let idle = sims.add(name: "xcd · Sample App · main · ipad",
+                            dataPath: try agedDevice(project.base + "/old-1", seconds: 3600))
+        let inUse = sims.add(name: "xcd · Sample App · main · iphone", state: "Booted",
+                             dataPath: try agedDevice(project.base + "/old-2", seconds: 3600))
+        let report = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: nil, includeDisk: false)
+        #expect(report.problems.first { $0.subject == idle }?.fixed == true)
+        let booted = try #require(report.problems.first { $0.subject == inUse })
+        #expect(booted.message == "xcd · Sample App · main · iphone (\(inUse)) is orphaned: Sample App/main doesn't record it, and it is Booted")
+        #expect(booted.action == nil && !booted.fixed)
+        #expect(booted.next == "if nothing is using it, delete it with `xcrun simctl shutdown \(inUse); xcrun simctl delete \(inUse)`")
+        #expect(!sims.devices.contains { $0.udid == idle })
+        #expect(sims.devices.first { $0.udid == inUse }?.state == "Booted")
+        #expect(!fake.calls.contains { $0.argv == ["xcrun", "simctl", "shutdown", inUse] })
+
+        // Booted between detect and fix: left alone too.
+        let late = sims.add(name: "xcd · Sample App · main · watch",
+                            dataPath: try agedDevice(project.base + "/old-3", seconds: 3600))
+        let env = await doctor(project).environment(from: nil, fixing: true)
+        let problem = try #require(await OrphanedClonesCheck().detect(env).first { $0.subject == late })
+        #expect(problem.action == .deleteSimulator)
+        sims.setState("Booted", udid: late)
+        await #expect(throws: DoctorLeftAlone.self) { try await OrphanedClonesCheck().fix(problem, env) }
+        #expect(sims.devices.first { $0.udid == late }?.state == "Booted")
+    }
+
     /// With the registry unreadable, every clone would look orphaned, so none is touched.
     @Test func aLostRegistryNeverDeletesClones() async throws {
         let (project, sims, _, _) = try await setup()

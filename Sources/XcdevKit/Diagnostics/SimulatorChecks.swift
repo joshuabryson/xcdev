@@ -144,14 +144,32 @@ public struct OrphanedClonesCheck: DoctorCheck {
                 guard let age = env.age(of: device), age >= graceSeconds else { return nil }
                 owner = owner ?? entry
             }
-            let why = owner.map { "\($0.project)/\($0.name) doesn't record it" } ?? "its worktree no longer exists"
+            guard let owner else {
+                return DoctorProblem(check: id, message: "\(label): its worktree no longer exists",
+                                     action: .deleteSimulator, fix: "shut it down and delete it", subject: device.udid)
+            }
+            // Its worktree exists, so a booted clone may be in use (booted by hand, or by an agent's own script).
+            let why = "\(owner.project)/\(owner.name) doesn't record it"
+            guard device.state == "Shutdown" else {
+                return DoctorProblem(check: id, message: "\(label): \(why), and it is \(device.state)",
+                                     next: "if nothing is using it, delete it with `xcrun simctl shutdown \(device.udid); xcrun simctl delete \(device.udid)`",
+                                     subject: device.udid)
+            }
             return DoctorProblem(check: id, message: "\(label): \(why)",
-                                 action: .deleteSimulator, fix: "shut it down and delete it", subject: device.udid)
+                                 action: .deleteSimulator, fix: "delete it", subject: device.udid)
         }
     }
 
+    /// Deletes the clone, unless it was booted since `detect` while a worktree it may belong to exists.
     public func fix(_ problem: DoctorProblem, _ env: DoctorEnvironment) async throws {
         guard let udid = problem.subject else { return }
+        if let device = try await env.simctl.catalog().device(udid: udid), device.state != "Shutdown",
+           env.registry.contains(where: {
+               device.name.hasPrefix(SimNaming.clone(project: $0.project, worktree: $0.name, device: ""))
+                   && FileManager.default.fileExists(atPath: $0.path)
+           }) {
+            throw DoctorLeftAlone(note: "\(device.name) (\(udid)) is now \(device.state); left alone")
+        }
         _ = try? await env.simctl.shutdown(udid: udid)
         try await env.simctl.delete(udid: udid)
     }
