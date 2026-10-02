@@ -1,0 +1,21 @@
+# Homebrew formula for xcdev, rendered by scripts/release.sh. Copy dist/xcdev.rb to Formula/xcdev.rb in your
+# tap repository (<owner>/homebrew-tap) so that `brew install <owner>/tap/xcdev` works.
+class Xcdev < Formula
+  desc "One entry point for AI agents doing Apple-platform development"
+  homepage "https://github.com/@REPOSITORY@"
+  url "https://github.com/@REPOSITORY@/releases/download/v@VERSION@/xcdev-@VERSION@-macos.tar.gz"
+  sha256 "@SHA256@"
+  license "MIT"
+
+  depends_on :macos
+
+  def install
+    bin.install "xcd"
+    bin.install_symlink "xcd" => "xcdev"
+  end
+
+  test do
+    assert_equal "@VERSION@", shell_output("#{bin}/xcd --version").strip
+    assert_match "xcd help <command>", shell_output("#{bin}/xcdev help")
+  end
+end

@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  XCODE_APP: /Applications/Xcode_16.4.app
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: |
+          [ -d "$XCODE_APP" ] || { echo "::error::$XCODE_APP is not installed on this runner image; update XCODE_APP"; ls -d /Applications/Xcode*; exit 1; }
+          sudo xcode-select -s "$XCODE_APP"
+          xcodebuild -version
+      - name: Unit and integration tests
+        run: XCD_INTEGRATION=1 swift test
+      - name: Build the universal binary and the formula
+        run: scripts/release.sh "${GITHUB_REF_NAME#v}"
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/xcdev-*-macos.tar.gz dist/xcdev.rb --generate-notes

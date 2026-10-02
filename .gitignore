@@ -5,3 +5,4 @@
 /.claude/
 xcuserdata/
 Fixtures/**/project.xcworkspace/
+dist/
