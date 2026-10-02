@@ -128,4 +128,58 @@ import XcdevTestSupport
         _ = try await svc.remove(name: "feat", in: main)
         #expect(!FileManager.default.fileExists(atPath: state.path))
     }
+
+    /// A project with both worktree hooks configured, whose `sh` runs on the fake instead, so a test can stand in
+    /// for what the hook does (here: what `xcd build` would record in the new worktree's worktree.json).
+    func setupWithFakeHooks() async throws -> (TempProject, WorktreeService, WorktreeContext, FakeSimulators) {
+        let project = try TempProject.make(config: WorktreeServiceTests.config
+            + "\nhooks:\n  post-worktree-create: ./bootstrap.sh\n  pre-worktree-remove: ./teardown.sh\n")
+        let runner = RoutingRunner(fake: fake, realExecutables: ["git", "cp"])
+        let svc = WorktreeService(runner: runner, globalPaths: GlobalPaths(base: project.home),
+                                  hooks: HookRunner(runner: runner))
+        let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        return (project, svc, try await svc.open(from: project.root), sims)
+    }
+
+    static let xcode = XcodeInstall(path: "/Applications/Xcode.app", version: "27.0", build: "27A266a")
+    static let clone = ProvisionedDevice(udid: "4CEABB59-81A5-4060-9573-99D2BA1BA97B", deviceType: "iPhone 18 Pro",
+                                         deviceTypeIdentifier: "t", runtime: "iOS 27.0", runtimeIdentifier: "r")
+
+    /// Stubs the post-create hook to pin an Xcode and record a clone in the worktree it runs in, then exit `exitCode`.
+    func stubBootstrap(exitCode: Int32) {
+        fake.stub(["sh", "-c", "./bootstrap.sh"]) { invocation in
+            let paths = WorktreePaths(root: invocation.workingDirectory!)
+            var state = try WorktreeStateStore.load(paths)!
+            state.xcode = Self.xcode
+            state.devices["iphone"] = Self.clone
+            try WorktreeStateStore.save(state, paths)
+            return ProcessOutput(exitCode: exitCode, stdout: "", stderr: "")
+        }
+    }
+
+    @Test func markingReadyKeepsWhatTheCreateHookRecorded() async throws {
+        let (project, svc, main, _) = try await setupWithFakeHooks()
+        defer { project.remove() }
+        stubBootstrap(exitCode: 0)
+        let (state, created) = try await svc.create(name: "feat", in: main)
+        #expect(created)
+        for stored in [state, try WorktreeStateStore.load(WorktreePaths(root: state.path))!] {
+            #expect(stored.status == .ready)
+            #expect(stored.xcode == Self.xcode)
+            #expect(stored.devices["iphone"] == Self.clone)
+        }
+        #expect(try svc.list(projectRoot: project.root).first { $0.name == "feat" }?.status == .ready)
+    }
+
+    @Test func aFailedCreateHookDeletesTheClonesItMade() async throws {
+        let (project, svc, main, sims) = try await setupWithFakeHooks()
+        defer { project.remove() }
+        stubBootstrap(exitCode: 5)
+        let error = await #expect(throws: XcdError.self) { try await svc.create(name: "feat", in: main) }
+        #expect(error?.code == .hookFailed)
+        #expect(fake.commandLines.contains { $0.hasSuffix("simctl delete \(Self.clone.udid)") })
+        #expect(sims.devices.allSatisfy { $0.udid != Self.clone.udid })
+        #expect(!FileManager.default.fileExists(atPath: project.base + "/Sample App.worktrees/feat"))
+        #expect(try svc.list(projectRoot: project.root).map(\.name) == ["main"])
+    }
 }

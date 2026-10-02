@@ -115,15 +115,18 @@ public struct WorktreeService: Sendable {
                 try await addCheckout(name: name, from: ref, in: ctx)
             }
             guard checkout.created else { return (checkout.state, false) }
-            var state = checkout.state
+            let state = checkout.state
             do {
                 try await runPostCreateHook(state, in: ctx)
-                state.status = .ready
-                try await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) {
-                    try WorktreeStateStore.save(state, WorktreePaths(root: state.path))
-                    try await registry.upsert(RegistryEntry(state))
-                }
-                return (state, true)
+                return (try await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) {
+                    // Reload: the hook may have run xcd in the new worktree, pinning an Xcode or cloning a simulator.
+                    let paths = WorktreePaths(root: state.path)
+                    var ready = try WorktreeStateStore.load(paths) ?? state
+                    ready.status = .ready
+                    try WorktreeStateStore.save(ready, paths)
+                    try await registry.upsert(RegistryEntry(ready))
+                    return ready
+                }, true)
             } catch {
                 _ = try? await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) {
                     await rollBack(state, worktreeAdded: true, branchCreated: checkout.branchCreated)
@@ -232,10 +235,14 @@ public struct WorktreeService: Sendable {
     }
 
     /// Undoes a creation attempt: only what it created, never a checkout or branch that was already there.
+    /// Simulators cloned into the new checkout (by xcd run from its hook) are deleted with it.
     /// The caller holds the project lock.
     private func rollBack(_ state: WorktreeState, worktreeAdded: Bool, branchCreated: Bool) async {
         let projectRoot = state.projectRoot
         if worktreeAdded {
+            if let stored = try? WorktreeStateStore.load(WorktreePaths(root: state.path)) {
+                _ = try? await deleteClones(of: stored)
+            }
             _ = try? await runner.run(.git(["worktree", "remove", "--force", state.path], in: projectRoot))
         }
         if branchCreated {
@@ -359,6 +366,19 @@ extension WorktreeService {
         }
     }
 
+    /// Shuts down and deletes the simulators cloned for `state`. Returns their device names, sorted.
+    func deleteClones(of state: WorktreeState) async throws -> [String] {
+        guard !state.devices.isEmpty else { return [] }
+        let simctl = SimctlClient(runner: runner, developerDir: state.xcode?.developerDir)
+        var removed: [String] = []
+        for (deviceName, device) in state.devices.sorted(by: { $0.key < $1.key }) {
+            _ = try? await simctl.shutdown(udid: device.udid)
+            try await simctl.delete(udid: device.udid)
+            removed.append(deviceName)
+        }
+        return removed
+    }
+
     private func removeLocked(name: String, warnings: [String], in ctx: WorktreeContext) async throws -> WorktreeRemoval {
         let projectRoot = ctx.location.projectRoot
         let entry = try entry(named: name, projectRoot: projectRoot)
@@ -366,15 +386,7 @@ extension WorktreeService {
         let exists = fm.fileExists(atPath: entry.path)
 
         let state = exists ? try WorktreeStateStore.load(WorktreePaths(root: entry.path)) : nil
-        var removedDevices: [String] = []
-        if let state, !state.devices.isEmpty {
-            let simctl = SimctlClient(runner: runner, developerDir: state.xcode?.developerDir)
-            for (deviceName, device) in state.devices.sorted(by: { $0.key < $1.key }) {
-                _ = try? await simctl.shutdown(udid: device.udid)
-                try await simctl.delete(udid: device.udid)
-                removedDevices.append(deviceName)
-            }
-        }
+        let removedDevices = if let state { try await deleteClones(of: state) } else { [String]() }
 
         if exists {
             // Cleanliness was checked before the hook (or the caller forced), so --force only lets git
