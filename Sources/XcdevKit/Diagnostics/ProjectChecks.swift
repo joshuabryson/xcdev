@@ -48,9 +48,13 @@ public struct ProjectCheck: DoctorCheck {
         return problems
     }
 
+    /// Unpins only the Xcode `detect` saw, and only while it is still missing: the worktree may have been re-pinned since.
     public func fix(_ problem: DoctorProblem, _ env: DoctorEnvironment) async throws {
         guard problem.action == .unpinXcode, let root = problem.subject,
-              var state = try WorktreeStateStore.load(WorktreePaths(root: root)) else { return }
+              var state = try WorktreeStateStore.load(WorktreePaths(root: root)), let pinned = state.xcode else { return }
+        guard pinned.path == env.project?.state?.xcode?.path, !FileManager.default.fileExists(atPath: pinned.path) else {
+            throw DoctorLeftAlone(note: "worktree '\(state.name)' is now pinned to \(pinned.summary); left alone")
+        }
         state.xcode = nil
         try WorktreeStateStore.save(state, WorktreePaths(root: root))
     }

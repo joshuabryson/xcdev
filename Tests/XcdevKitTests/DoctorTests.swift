@@ -750,6 +750,23 @@ import XcdevTestSupport
         #expect(try WorktreeStateStore.load(main.paths)?.xcode == nil)
     }
 
+    /// Re-pinned to an installed Xcode between detect and fix, the worktree keeps its pin.
+    @Test func aWorktreeRepinnedMeanwhileIsNotUnpinned() async throws {
+        var (project, _, _, main) = try await setup()
+        defer { project.remove() }
+        let installed = project.base + "/Xcode.app"
+        try FileManager.default.createDirectory(atPath: installed, withIntermediateDirectories: true)
+        main.state.xcode = XcodeInstall(path: project.base + "/Xcode-26.4.app", version: "26.4", build: "x")
+        try WorktreeStateStore.save(main.state, main.paths)
+        let env = await doctor(project).environment(from: project.root, fixing: true)
+        let problem = try #require(await ProjectCheck().detect(env).first { $0.action == .unpinXcode })
+
+        main.state.xcode = XcodeInstall(path: installed, version: "27.0", build: "27A266a")
+        try WorktreeStateStore.save(main.state, main.paths)
+        await #expect(throws: DoctorLeftAlone.self) { try await ProjectCheck().fix(problem, env) }
+        #expect(try WorktreeStateStore.load(main.paths)?.xcode?.path == installed)
+    }
+
     @Test func anInvalidConfigIsAProblemNotAnError() async throws {
         let (project, _, _, _) = try await setup()
         defer { project.remove() }
