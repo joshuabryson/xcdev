@@ -407,6 +407,44 @@ import XcdevTestSupport
         #expect(await doctor(project).run(fix: false, from: nil).problems.isEmpty)
     }
 
+    /// A checkout is gone only when lstat says so and nothing stands in the way of looking.
+    @Test func aCheckoutIsMissingOnlyWhenItIsReallyGone() throws {
+        let project = try TempProject.make(config: WorktreeServiceTests.config)
+        defer { project.remove() }
+        #expect(CheckoutPresence.of(project.root) == .present)
+        #expect(CheckoutPresence.of(project.base + "/gone/feat") == .missing)                  // ENOENT, readable ancestor
+        #expect(CheckoutPresence.of("/Volumes/xcd-unmounted-\(UUID().uuidString)/App.worktrees/feat") == .unreachable)
+        // A folder that can be searched but not read, and one that can't be searched at all.
+        let locked = project.base + "/locked"
+        try FileManager.default.createDirectory(atPath: locked + "/inner", withIntermediateDirectories: true)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked) }
+        try FileManager.default.setAttributes([.posixPermissions: 0o100], ofItemAtPath: locked)
+        #expect(CheckoutPresence.of(locked + "/feat") == .unreachable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked)
+        #expect(CheckoutPresence.of(locked + "/inner") == .unreachable)
+    }
+
+    /// A worktree on a volume that isn't mounted is reported, never dropped, and its clones are spared.
+    @Test func aWorktreeOnAnUnmountedVolumeIsOnlyReported() async throws {
+        let (project, sims, worktrees, _) = try await setup()
+        defer { project.remove() }
+        let path = "/Volumes/xcd-unmounted-\(UUID().uuidString)/Sample App.worktrees/feat"
+        let state = WorktreeState(id: "feat-id", name: "feat", project: "Sample App", projectRoot: project.root, path: path,
+                                  branch: "feat", xcode: nil, devices: [:], status: .ready, createdAt: Date())
+        try await Registry(paths: GlobalPaths(base: project.home)).upsert(RegistryEntry(state))
+        let clone = sims.add(name: "xcd · Sample App · feat · iphone",
+                             dataPath: try agedDevice(project.base + "/old-device", seconds: 3600))
+
+        let report = await doctor(project).run(fix: true, checks: DoctorService.pruneChecks, from: nil, includeDisk: false)
+        let problem = try #require(report.problems.first)
+        #expect(report.problems.count == 1 && problem.check == "missing-worktrees")
+        #expect(problem.message == "Sample App/feat: \(path) can't be reached")
+        #expect(problem.next == "it may be on a volume that isn't mounted, or in a folder xcd may not look into; mount it or fix the permissions, then run `xcd doctor` again")
+        #expect(problem.action == nil && !problem.fixed)
+        #expect(try worktrees.list(projectRoot: project.root).map(\.name) == ["feat", "main"])
+        #expect(sims.devices.contains { $0.udid == clone })
+    }
+
     /// Dropping a missing worktree re-checks it under its locks and prunes git's record of it.
     @Test func droppingAMissingWorktreeRechecksItUnderItsLocks() async throws {
         let (project, _, worktrees, main) = try await setup()

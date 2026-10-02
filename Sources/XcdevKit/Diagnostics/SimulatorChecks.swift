@@ -139,7 +139,11 @@ public struct OrphanedClonesCheck: DoctorCheck {
             var owner: RegistryEntry?
             for entry in entries {
                 if env.isBusy(entry) { return nil }
-                guard FileManager.default.fileExists(atPath: entry.path) else { continue }
+                switch CheckoutPresence.of(entry.path) {
+                case .missing: continue
+                case .unreachable: return nil                                  // it may be fine where we can't see
+                case .present: break
+                }
                 guard env.states[entry.id] != nil else { return nil }          // its worktree.json is unreadable, or it was dropped
                 guard let age = env.age(of: device), age >= graceSeconds else { return nil }
                 owner = owner ?? entry
@@ -166,7 +170,7 @@ public struct OrphanedClonesCheck: DoctorCheck {
         if let device = try await env.simctl.catalog().device(udid: udid), device.state != "Shutdown",
            env.registry.contains(where: {
                device.name.hasPrefix(SimNaming.clone(project: $0.project, worktree: $0.name, device: ""))
-                   && FileManager.default.fileExists(atPath: $0.path)
+                   && CheckoutPresence.of($0.path) != .missing
            }) {
             throw DoctorLeftAlone(note: "\(device.name) (\(udid)) is now \(device.state); left alone")
         }
