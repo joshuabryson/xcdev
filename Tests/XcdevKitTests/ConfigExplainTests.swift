@@ -53,4 +53,12 @@ import Yams
         #expect(error?.code == .usage)
         #expect(error?.next == "did you mean `defaultDevice`? `xcd config explain` lists every key")
     }
+
+    @Test func uiKeysAreExplained() throws {
+        let dir = try ConfigExplainer.explain("ui.media.dir")
+        #expect(dir.type == "string" && dir.defaultValue == ".xcdev-media/{worktree}/{branch}")
+        #expect(dir.summary.contains("{branch}") && dir.summary.contains("main checkout"))
+        #expect(try ConfigExplainer.explain("ui.record.maxDuration").defaultValue == "10m")
+        #expect(!ConfigSchema.reservedTopLevelKeys.contains("ui"))
+    }
 }

@@ -75,6 +75,19 @@ public enum ConfigLoader {
             issues.append(ConfigIssue(path: "logs.maxFollow",
                                       message: "'\(maxFollow)' is not a duration like \"30s\", \"5m\", or \"1h\""))
         }
+        if let dir = config.ui?.media?.dir {
+            if dir.trimmingCharacters(in: .whitespaces).isEmpty {
+                issues.append(ConfigIssue(path: "ui.media.dir", message: "must not be empty"))
+            }
+            for name in placeholders(in: dir) where !XcdevConfig.mediaPlaceholders.contains(name) {
+                issues.append(ConfigIssue(path: "ui.media.dir",
+                                          message: "unknown placeholder {\(name)}; use {project}, {worktree}, {branch}, or {device}"))
+            }
+        }
+        if let max = config.ui?.record?.maxDuration, DurationText.parse(max) == nil {
+            issues.append(ConfigIssue(path: "ui.record.maxDuration",
+                                      message: "'\(max)' is not a duration like \"30s\", \"10m\", or \"1h\""))
+        }
         issues += commandIssues(config.commands ?? [:])
         return issues
     }
@@ -116,5 +129,16 @@ public enum ConfigLoader {
         let nextMsg = "fix \(file), then run `xcd config show`"
         return XcdError(.configInvalid, "\(file) is invalid (\(issues.count) problem\(issues.count == 1 ? "" : "s"))",
                  next: nextMsg, details: issues.map(\.line))
+    }
+
+    /// The names inside `{…}` in `template`, in order.
+    static func placeholders(in template: String) -> [String] {
+        var names: [String] = []
+        var rest = Substring(template)
+        while let open = rest.firstIndex(of: "{"), let close = rest[open...].firstIndex(of: "}") {
+            names.append(String(rest[rest.index(after: open)..<close]))
+            rest = rest[rest.index(after: close)...]
+        }
+        return names
     }
 }

@@ -97,8 +97,19 @@ public enum ConfigSchema {
             SchemaField("pre-worktree-remove", .string("Runs in the worktree at the start of `xcd wt remove`, before anything is deleted."),
                         example: "hooks:\n  pre-worktree-remove: ./scripts/teardown.sh"),
         ]), example: "hooks:\n  pre-build: swiftgen\n  post-launch: ./scripts/grant-permissions.sh"),
+        SchemaField("ui", .object("Screenshots, screen recordings, and the media folder they go to.", [
+            SchemaField("media", .object("Where captures go.", [
+                SchemaField("dir", .string("Folder for screenshots, recordings, and other captures. A relative path starts at the main checkout, so every worktree's captures land in one tree that `xcd wt remove` keeps. Placeholders: {project}, {worktree}, {branch} (a/b becomes nested folders; a detached HEAD is detached-<commit>), and {device}. `--out` overrides it for one command."),
+                            default: XcdevConfig.defaultMediaDir,
+                            example: "ui:\n  media:\n    dir: \".xcdev-media/{worktree}/{branch}\""),
+            ]), example: "ui:\n  media:\n    dir: \".xcdev-media/{worktree}/{branch}\""),
+            SchemaField("record", .object("Screen recording settings.", [
+                SchemaField("maxDuration", .string("Longest a recording may run, e.g. \"10m\". The next `xcd sim`, `xcd ui`, `xcd run`, `xcd launch`, or `xcd test` in the worktree stops a longer one cleanly and keeps the video."),
+                            default: "10m", example: "ui:\n  record:\n    maxDuration: 5m"),
+            ]), example: "ui:\n  record:\n    maxDuration: 5m"),
+        ]), example: "ui:\n  media:\n    dir: \".xcdev-media/{worktree}/{branch}\"\n  record:\n    maxDuration: 10m"),
     ])
 
     /// Top-level keys defined later. Present keys get a clear "not supported yet" error.
-    public static let reservedTopLevelKeys = ["deeplinks", "lint", "ui", "debug"]
+    public static let reservedTopLevelKeys = ["deeplinks", "lint", "debug"]
 }

@@ -29,6 +29,7 @@ Commit `.xcdev.yml`. `xcd init` adds `.xcdev/` (per-worktree build state) and `.
 | `presets` | Named launch arguments and environment for `xcd run --preset`. | The app has launch modes agents reuse. |
 | `worktrees` | Where `xcd wt create` puts new worktrees. | The default `../<project>.worktrees` doesn't suit the repo. |
 | `logs` | `maxFollow`, the longest `xcd logs --follow` may stream. | Agents need longer log streams. |
+| `ui` | Where screenshots and recordings go (`media.dir`) and how long they can record (`record.maxDuration`). | The app needs a custom capture folder or different recording limits. |
 | `commands` | Project commands, run as `xcd <name>`. | The project has scripts agents should run with the worktree's context. |
 | `hooks` | Scripts run at `post-worktree-create`, `pre-build`, `post-launch`, and `pre-worktree-remove`. | Worktrees need bootstrapping, code generation, or permissions after launch. |
 

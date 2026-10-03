@@ -201,4 +201,47 @@ import Testing
         #expect(error?.code == .configInvalid)
         #expect(error?.details.contains { $0.contains("logs.maxFollow") && $0.contains("forever") } == true)
     }
+
+    @Test func uiSectionParsesWithDefaults() throws {
+        let bare = try ConfigLoader.parse(main: "version: 1\nproject: A.xcodeproj\n")
+        #expect(bare.ui == nil)
+        #expect(bare.mediaDirTemplate == ".xcdev-media/{worktree}/{branch}")
+        #expect(bare.maxRecording == .seconds(600))
+
+        let set = try ConfigLoader.parse(main: """
+        version: 1
+        project: A.xcodeproj
+        ui:
+          media:
+            dir: "~/Captures/{project}/{device}"
+          record:
+            maxDuration: 2m
+        """)
+        #expect(set.mediaDirTemplate == "~/Captures/{project}/{device}")
+        #expect(set.maxRecording == .seconds(120))
+    }
+
+    @Test func uiSectionProblemsAreConfigInvalid() {
+        let error = #expect(throws: XcdError.self) {
+            try ConfigLoader.parse(main: """
+            version: 1
+            project: A.xcodeproj
+            ui:
+              media: { dir: ".media/{wroktree}" }
+              record: { maxDuration: soon }
+            """)
+        }
+        #expect(error?.code == .configInvalid)
+        #expect(error?.details.sorted() == [
+            "ui.media.dir: unknown placeholder {wroktree}; use {project}, {worktree}, {branch}, or {device}",
+            "ui.record.maxDuration: 'soon' is not a duration like \"30s\", \"10m\", or \"1h\"",
+        ])
+    }
+
+    @Test func anEmptyMediaDirIsInvalid() {
+        let error = #expect(throws: XcdError.self) {
+            try ConfigLoader.parse(main: "version: 1\nproject: A.xcodeproj\nui: { media: { dir: \" \" } }\n")
+        }
+        #expect(error?.details == ["ui.media.dir: must not be empty"])
+    }
 }

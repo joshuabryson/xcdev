@@ -10,6 +10,7 @@ public struct XcdevConfig: Codable, Sendable, Equatable {
     public var logs: LogSettings?
     public var commands: [String: ProjectCommandSpec]?
     public var hooks: HookCommands?
+    public var ui: UISettings?
 
     public struct Schemes: Codable, Sendable, Equatable {
         public var app: String?
@@ -24,11 +25,35 @@ public struct XcdevConfig: Codable, Sendable, Equatable {
         public var maxFollow: String?
     }
 
+    /// `ui:`: screenshots, recordings, and (later) UI driving.
+    public struct UISettings: Codable, Sendable, Equatable {
+        public var media: Media?
+        public var record: Record?
+
+        public struct Media: Codable, Sendable, Equatable {
+            public var dir: String?
+        }
+
+        public struct Record: Codable, Sendable, Equatable {
+            public var maxDuration: String?
+        }
+    }
+
+    /// Where captures go when `ui.media.dir` is absent (see `MediaFolder`).
+    public static let defaultMediaDir = ".xcdev-media/{worktree}/{branch}"
+    /// The placeholders `ui.media.dir` may use.
+    public static let mediaPlaceholders = ["project", "worktree", "branch", "device"]
+
     public var allDevices: [String: DeviceSpec] { devices ?? [:] }
     public var worktreesRoot: String { worktrees?.root ?? "../{project}.worktrees" }
 
     /// Longest `xcd logs --follow --for` allowed, so an agent can never block for long. Default 5 minutes.
     public var maxLogFollow: Duration { logs?.maxFollow.flatMap(DurationText.parse) ?? .seconds(300) }
+
+    public var mediaDirTemplate: String { ui?.media?.dir ?? Self.defaultMediaDir }
+
+    /// Longest a recording may run before the next `sim`, `ui`, `run`, `launch`, or `test` command stops it. Default 10m.
+    public var maxRecording: Duration { ui?.record?.maxDuration.flatMap(DurationText.parse) ?? .seconds(600) }
 }
 
 public struct DeviceSpec: Codable, Sendable, Equatable {
