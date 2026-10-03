@@ -215,7 +215,7 @@ import XcdevTestSupport
         let (project, service) = try setup()
         defer { project.remove() }
         try project.write("build/\n.xcdev\n", to: ".gitignore")
-        let report = try await service.write(answers: ["devices.watch": "none"], force: false, from: project.root)
+        let report = try await service.write(answers: ["devices.ipad": "none", "devices.watch": "none"], force: false, from: project.root)
         #expect(report.status == .written && report.path == project.root + "/.xcdev.yml")
         #expect(report.gitignoreAdded == [".xcdev.local.yml"])
         #expect(try String(contentsOfFile: project.root + "/.gitignore", encoding: .utf8)

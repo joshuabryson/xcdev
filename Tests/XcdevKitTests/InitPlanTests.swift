@@ -39,7 +39,9 @@ import Testing
         let watch = plan.decisions[2]
         #expect(watch.recommended == "Apple Watch Series 12 (46mm)" && watch.options.last == "none")
         #expect(watch.ask == "Your app has a watchOS app. Should each worktree also get a paired Apple Watch, and which one?")
-        #expect(plan.decisions[1].recommended == "none")
+        let ipad = plan.decisions[1]
+        #expect(ipad.recommended == "iPad Pro 13-inch (M5)" && ipad.options.last == "none")
+        #expect(ipad.reason == "your app runs on iPad, and xcd clones it only for commands that use `--device ipad`")
         #expect(!plan.decisions.contains { $0.key == "devices.tv" || $0.key == "project" || $0.key == "schemes.app" })
     }
 
@@ -55,7 +57,7 @@ import Testing
 
         decision devices.ipad
           ask: "Your app also runs on iPad. Should each worktree also get an iPad simulator, and which one?"
-          options: none (recommended: each extra device is another simulator in every worktree; add it when you work on iOS), iPad Pro 13-inch (M5), iPad Pro 11-inch (M5), iPad Air 11-inch (M4), iPad (A16), iPad mini (A17 Pro)
+          options: iPad Pro 13-inch (M5) (recommended: your app runs on iPad, and xcd clones it only for commands that use `--device ipad`), iPad Pro 11-inch (M5), iPad Air 11-inch (M4), iPad (A16), iPad mini (A17 Pro), none
 
         decision devices.watch
           ask: "Your app has a watchOS app. Should each worktree also get a paired Apple Watch, and which one?"
@@ -81,12 +83,14 @@ import Testing
         defaultDevice: iphone
         devices:
           iphone: { type: "iPhone 18 Pro", runtime: latest }
+          ipad: { type: "iPad Pro 13-inch (M5)", runtime: latest }
           watch: { type: "Apple Watch Series 12 (46mm)", runtime: latest, pairWith: iphone }
 
         """)
         #expect(generated.summary == [
             "project: SampleApp.xcodeproj", "schemes: app=SampleApp test=SampleApp",
-            "devices: iphone=iPhone 18 Pro (default), watch=Apple Watch Series 12 (46mm) (paired with iphone)",
+            "devices: iphone=iPhone 18 Pro (default), ipad=iPad Pro 13-inch (M5), "
+                + "watch=Apple Watch Series 12 (46mm) (paired with iphone)",
             "xcode: system (the Xcode xcode-select points to)",
         ])
     }
@@ -132,7 +136,8 @@ import Testing
         let plan = plan(package)
         #expect(plan.primary == .iphone)
         let watch = plan.decisions.first { $0.key == "devices.watch" }
-        #expect(watch?.recommended == "none")
+        #expect(watch?.recommended == "none" && watch?.options.first == "none")
+        #expect(watch?.reason == "add it when you test the package on Apple Watch")
         #expect(watch?.ask == "The package also supports watchOS. Should each worktree also get an Apple Watch simulator, and which one?")
         #expect(plan.decisions.first { $0.key == "schemes.test" }?.reason == "it tests every target of the package")
     }
@@ -163,6 +168,15 @@ import Testing
         #expect(tv?.options == ["none", "Apple TV 4K (3rd generation)", "Apple TV 4K (3rd generation) (at 1080p)"])
         let report = InitPlanReport(plan: plan, root: "/w", configExists: false)
         #expect(report.text.contains("\n\nnote: no tvOS simulator runtime is installed; run `xcodebuild -downloadPlatform tvOS` before using that device\nnext: "))
+    }
+
+    @Test func anAppsExtraDeviceWithARuntimeIsRecommended() {
+        let visionApp = DetectedProject(container: "SampleApp.xcodeproj", kind: .project, schemes: ["SampleApp"],
+                                        appSchemes: ["SampleApp"], testSchemes: ["SampleApp"],
+                                        platforms: [.iOS, .visionOS], deviceFamilies: [1, 7])
+        let vision = plan(visionApp).decisions.first { $0.key == "devices.vision" }
+        #expect(vision?.recommended == "Apple Vision Pro" && vision?.options == ["Apple Vision Pro", "none"])
+        #expect(vision?.reason == "your app runs on Apple Vision Pro, and xcd clones it only for commands that use `--device vision`")
     }
 
     @Test func detectionNotesReachThePlanAndExplainMissingPlatforms() {
