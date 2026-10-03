@@ -57,7 +57,7 @@ struct WorktreeCommand: AsyncParsableCommand {
     struct Remove: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Delete a worktree, its simulators, and its build state. The branch is kept.")
-        @Argument(help: "Worktree name.") var name: String
+        @Argument(help: "Worktree name.", completion: .project { await $0.worktrees() }) var name: String
         @Flag(help: "Remove even if the worktree has uncommitted changes (they are lost).") var force = false
         @OptionGroup var options: GlobalOptions
 

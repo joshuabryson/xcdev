@@ -7,7 +7,10 @@ import XcdevKit
 enum HelpCommand {
     static func run(topic: [String], json: Bool, describePlugins: Bool = true) async {
         do {
-            let options = try GlobalOptions.parse(json ? ["--json"] : [])
+            // Set, not parsed: ArgumentParser refuses to parse --worktree's async completion synchronously.
+            var options = GlobalOptions()
+            options.json = json
+            options.worktree = nil
             if topic.isEmpty {
                 try await Emit.run("help", options) { services in
                     await services.help.overview(builtins: Xcd.builtins, describePlugins: describePlugins)

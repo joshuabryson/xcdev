@@ -14,6 +14,14 @@ Or download `xcdev-<version>-macos.tar.gz` from the GitHub releases (a universal
 or build from source with `swift build -c release`. Requires macOS 15 or later and Xcode. CI builds and tests with Xcode 26.2 on a
 `macos-26` runner (pinned in `.github/workflows`).
 
+Homebrew installs shell completion for zsh, bash, and fish. Tab completes commands and flags, and the values of
+`--device`, `--scheme`, `--preset`, and `--worktree` come from the current project. Without Homebrew, install the script
+yourself, e.g. for zsh into a directory on your `fpath`:
+
+```sh
+xcd --generate-completion-script zsh > ~/.zsh/completions/_xcd
+```
+
 ## Quick start
 
 ```sh

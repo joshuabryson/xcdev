@@ -45,7 +45,7 @@ struct Xcd: AsyncParsableCommand {
     /// Help, version, and the exit codes thrown by `Emit` pass through unchanged.
     static func runBuiltin() async {
         do {
-            var command = try parseAsRoot()
+            var command = try await asyncParseAsRoot()
             if var async = command as? AsyncParsableCommand {
                 try await async.run()
             } else {

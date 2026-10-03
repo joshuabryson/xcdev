@@ -5,9 +5,9 @@ struct LogsCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "logs",
         abstract: "Show the app's unified log on this worktree's device, or with --app its captured stdout/stderr.")
-    @Option(help: "Device name from .xcdev.yml (default: defaultDevice).") var device: String?
+    @Option(help: "Device name from .xcdev.yml (default: defaultDevice).", completion: .devices) var device: String?
     @Option(help: "How far back to look, e.g. 30s, 2m, 1h.") var since = "2m"
-    @Option(help: "default, info, or debug.") var level = "info"
+    @Option(help: "default, info, or debug.", completion: .list(["default", "info", "debug"])) var level = "info"
     @Option(help: "Only messages containing this text (case-insensitive).") var grep: String?
     @Flag(help: "Stream new messages until --for elapses.") var follow = false
     @Option(name: .customLong("for"), help: "How long --follow streams (default 30s, at most logs.maxFollow).")

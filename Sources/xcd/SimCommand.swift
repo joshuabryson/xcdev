@@ -9,7 +9,7 @@ struct SimCommand: AsyncParsableCommand {
     )
 
     struct DeviceOption: ParsableArguments {
-        @Option(help: "Device name from .xcdev.yml (default: defaultDevice).") var device: String?
+        @Option(help: "Device name from .xcdev.yml (default: defaultDevice).", completion: .devices) var device: String?
     }
 
     struct Boot: AsyncParsableCommand {

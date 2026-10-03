@@ -24,7 +24,8 @@ struct ConfigCommand: AsyncParsableCommand {
     struct Explain: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Explain a .xcdev.yml key: what it does, allowed values, default, and an example. No key lists them all.")
-        @Argument(help: "A key path such as devices.iphone.runtime or hooks.pre-build.") var key: String?
+        @Argument(help: "A key path such as devices.iphone.runtime or hooks.pre-build.",
+                  completion: .list(Completions.configKeys)) var key: String?
         @OptionGroup var options: GlobalOptions
 
         func run() async throws {

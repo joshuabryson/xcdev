@@ -5,7 +5,7 @@ struct GuideCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "guide",
         abstract: "Print a Markdown guide written for agents (e.g. `xcd guide setup`). No topic lists them.")
-    @Argument(help: "The guide to print.") var topic: String?
+    @Argument(help: "The guide to print.", completion: .list(Completions.guideTopics)) var topic: String?
     @OptionGroup var options: GlobalOptions
 
     func run() async throws {

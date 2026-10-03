@@ -12,6 +12,7 @@ class Xcdev < Formula
   def install
     bin.install "xcd"
     bin.install_symlink "xcd" => "xcdev"
+    generate_completions_from_executable(bin/"xcd", "--generate-completion-script")
   end
 
   test do
