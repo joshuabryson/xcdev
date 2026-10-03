@@ -96,7 +96,8 @@ public struct InitService: Sendable {
 public enum Gitignore {
     /// Appends each entry `.gitignore` in `root` doesn't already list (with or without leading and trailing
     /// slashes), creating the file if needed. Returns the entries it added.
-    public static func ensure(_ entries: [String], in root: String) throws -> [String] {
+    public static func ensure(_ entries: [String], in root: String,
+                              comment: String = "per-worktree build state and per-machine overrides") throws -> [String] {
         let path = root + "/.gitignore"
         var text = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
         func normalized(_ line: some StringProtocol) -> String {
@@ -106,7 +107,7 @@ public enum Gitignore {
         let missing = entries.filter { !existing.contains(normalized($0)) }
         guard !missing.isEmpty else { return [] }
         if !text.isEmpty, !text.hasSuffix("\n") { text += "\n" }
-        text += "# xcdev: per-worktree build state and per-machine overrides\n" + missing.map { $0 + "\n" }.joined()
+        text += "# xcdev: \(comment)\n" + missing.map { $0 + "\n" }.joined()
         try text.write(toFile: path, atomically: true, encoding: .utf8)
         return missing
     }
