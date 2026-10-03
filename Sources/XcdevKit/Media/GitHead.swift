@@ -28,6 +28,8 @@ public enum GitHead {
             let ref = head.dropFirst("ref:".count).trimmingCharacters(in: .whitespaces)
             return .branch(ref.hasPrefix("refs/heads/") ? String(ref.dropFirst("refs/heads/".count)) : ref)
         }
+        // Detached HEAD: must be exactly 40 or 64 hex digits (SHA-1 or SHA-256)
+        guard (head.count == 40 || head.count == 64) && head.allSatisfy({ $0.isHexDigit }) else { return nil }
         return .detached(commit: head)
     }
 }

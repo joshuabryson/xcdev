@@ -18,7 +18,7 @@ public struct MediaFolder: Sendable, Equatable {
         let branch: [String]
         switch GitHead.read(worktreeRoot: worktreeRoot) {
         case .branch(let name)?: branch = components(name)
-        case .detached(let commit)?: branch = ["detached-" + String(commit.prefix(12))]
+        case .detached(let commit)?: branch = [sanitize("detached-" + String(commit.prefix(12)))].compactMap { $0 }
         case nil: branch = []
         }
         let values: [String: String] = [

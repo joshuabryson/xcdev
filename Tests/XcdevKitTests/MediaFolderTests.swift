@@ -77,6 +77,16 @@ import XcdevTestSupport
         #expect(none.directory == base + "/nogit/.m/nobranch")
     }
 
+    @Test func aHeadFileThatIsNeitherARefNorAValidCommitIsUnreadable() throws {
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        let main = try checkout("main", head: "../../../../etc\n")
+        #expect(GitHead.read(worktreeRoot: main) == nil)
+        let folder = MediaFolder.resolve(template: ".m/{branch}", projectRoot: main, worktreeRoot: main,
+                                         worktreeName: "main", device: nil, home: "/h")
+        #expect(folder.directory == main + "/.m/nobranch")
+        #expect(folder.directory.hasPrefix(main + "/.m/"))
+    }
+
     @Test func newFilesAreTimestampedPerDeviceAndNeverCollide() throws {
         defer { try? FileManager.default.removeItem(atPath: base) }
         let folder = MediaFolder(directory: base + "/m", projectRoot: base)
