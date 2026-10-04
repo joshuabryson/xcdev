@@ -12,12 +12,14 @@ public struct DiskSummary: Codable, Sendable, Equatable {
     public let worktrees: [Worktree]
     public let clonesBytes: Int64
     public let templatesBytes: Int64
+    public var mediaBytes: Int64 = 0
 
     public var text: String {
         let total = worktrees.reduce(0) { $0 + $1.bytes }
         let largest = worktrees.prefix(5).map { "\($0.project)/\($0.name) \(ByteText.format($0.bytes))" }
         return "disk: worktrees \(ByteText.format(total))" + (largest.isEmpty ? "" : " (" + largest.joined(separator: ", ") + ")")
             + ", clones \(ByteText.format(clonesBytes)), templates \(ByteText.format(templatesBytes))"
+            + (mediaBytes > 0 ? ", media \(ByteText.format(mediaBytes))" : "")
             + "  (APFS clones are counted in full)"
     }
 }
@@ -82,15 +84,18 @@ public struct DoctorService: Sendable {
     public let globalPaths: GlobalPaths
     public let discovery: XcodeDiscovery
     public let now: @Sendable () -> Date
+    public let detached: any DetachedProcessLaunching
     let sleep: @Sendable (Duration) async throws -> Void
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, discovery: XcodeDiscovery? = nil,
                 now: @escaping @Sendable () -> Date = { Date() },
+                detached: any DetachedProcessLaunching = SystemDetachedProcesses(),
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.runner = runner
         self.globalPaths = globalPaths
         self.discovery = discovery ?? XcodeDiscovery(runner: runner)
         self.now = now
+        self.detached = detached
         self.sleep = sleep
     }
 
@@ -99,7 +104,7 @@ public struct DoctorService: Sendable {
     /// own setup.
     public static var allChecks: [any DoctorCheck] {
         [CoreSimulatorCheck(), MissingWorktreesCheck(), IncompleteWorktreesCheck(), OrphanedClonesCheck(),
-         StuckClonesCheck(), TemplatesCheck(), InitScratchCheck(), PackageCacheCheck(),
+         StuckClonesCheck(), TemplatesCheck(), RecordingsCheck(), InitScratchCheck(), PackageCacheCheck(),
          ProjectCheck()]
     }
 
@@ -171,10 +176,12 @@ public struct DoctorService: Sendable {
         let busy = Set(registry.filter {
             FileLock.isHeld(at: worktrees.lockPath(projectRoot: $0.projectRoot, worktree: $0.name))
         }.map(\.id))
-        return DoctorEnvironment(runner: runner, globalPaths: globalPaths, catalog: catalog, catalogFailure: catalogFailure,
+        var env = DoctorEnvironment(runner: runner, globalPaths: globalPaths, catalog: catalog, catalogFailure: catalogFailure,
                                  registry: registry, registryError: registryError, states: states,
                                  project: await project(from: directory), discovery: discovery, now: now(), sleep: sleep,
                                  busy: busy, fixing: fixing)
+        env.detached = detached
+        return env
     }
 
     /// The project at `directory`, read-only: a missing or invalid .xcdev.yml is recorded, not thrown.
@@ -203,6 +210,13 @@ public struct DoctorService: Sendable {
         func total(_ prefix: String) -> Int64 {
             devices.filter { $0.name.hasPrefix(prefix) }.reduce(0) { $0 + ($1.dataPathSize ?? 0) }
         }
-        return DiskSummary(worktrees: worktrees, clonesBytes: total(SimNaming.clonePrefix), templatesBytes: total(SimNaming.templatePrefix))
+        let projectRoots = Set(env.registry.map(\.projectRoot)).sorted()
+        let mediaRoots = projectRoots.compactMap { root -> String? in
+            let template = (try? ConfigLoader.load(worktreeRoot: root, projectRoot: root))?.mediaDirTemplate ?? XcdevConfig.defaultMediaDir
+            return MediaFolder.root(template: template, projectRoot: root)
+        }
+        let mediaBytes = await DiskUsage(runner: runner).bytes(of: Array(Set(mediaRoots)).sorted()).values.reduce(0, +)
+        return DiskSummary(worktrees: worktrees, clonesBytes: total(SimNaming.clonePrefix), templatesBytes: total(SimNaming.templatePrefix),
+                           mediaBytes: mediaBytes)
     }
 }

@@ -10,7 +10,7 @@ import XcdevTestSupport
                                 environment: [:], detached: detached)
         #expect(services.media.detached as? FakeDetachedProcesses === detached)
         #expect(services.worktrees.detached as? FakeDetachedProcesses === detached)
-        // Restored later: #expect(services.doctor.detached as? FakeDetachedProcesses === detached)
+        #expect(services.doctor.detached as? FakeDetachedProcesses === detached)
         #expect(services.media.currentDirectory == "/cwd")
     }
 }

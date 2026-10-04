@@ -37,8 +37,52 @@ import XcdevTestSupport
         let report = await doctor(project).run(fix: false, from: nil)
         #expect(report.problems.isEmpty && report.failure == nil)
         #expect(report.checks.map(\.id) == ["coresimulator", "missing-worktrees", "incomplete-worktrees", "orphaned-clones",
-                                            "stuck-clones", "templates", "init-scratch", "package-caches"])   // no project check outside a project
+                                            "stuck-clones", "templates", "recordings", "init-scratch", "package-caches"])   // no project check outside a project
         #expect(report.text.hasPrefix("doctor: 0 problems\nok       coresimulator\n"))
+    }
+
+    func recording(_ device: String, pid: Int32, startedAt: Date, in ctx: WorktreeContext) throws -> ProcessIdentity {
+        let id = ProcessIdentity(pid: pid, startTime: 1, arguments: ["simctl", "io", "recordVideo"])
+        try Recordings.save(RecordingRecord(device: device, udid: "U", path: ctx.paths.root + "/\(device).mp4", log: "/l",
+                                            process: id, startedAt: startedAt), to: ctx.paths.recordingFile(device: device))
+        return id
+    }
+
+    @Test func recordingsLeftBehindOrOverdueAreFixedOthersAreBusy() async throws {
+        let (project, _, _, ctx) = try await setup()
+        defer { project.remove() }
+        let detached = FakeDetachedProcesses()
+        let now = Date()
+        _ = try recording("ended", pid: 1, startedAt: now, in: ctx)                                   // process gone
+        detached.adopt(try recording("overdue", pid: 2, startedAt: now.addingTimeInterval(-3600), in: ctx))
+        detached.adopt(try recording("fresh", pid: 3, startedAt: now, in: ctx))
+        let service = DoctorService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home),
+                                    discovery: XcodeDiscovery(runner: fake, applicationsDirectories: []), detached: detached)
+
+        let report = await service.run(fix: false, from: nil)
+        let check = try #require(report.checks.first { $0.id == "recordings" })
+        #expect(check.problems.map(\.action) == [.forgetRecording, .stopRecording])
+        #expect(check.problems[1].message.contains("has been recording overdue for 1h00m"))
+        #expect(check.inProgress.count == 1 && check.inProgress[0].contains("is recording fresh to "))
+        #expect(detached.stops.isEmpty)
+
+        let fixed = await service.run(fix: true, from: nil)
+        #expect(fixed.checks.first { $0.id == "recordings" }?.problems.allSatisfy(\.fixed) == true)
+        #expect(detached.stops == [.init(pid: 2, signal: SIGINT)])
+        #expect(ctx.paths.recordingFiles == [ctx.paths.recordingFile(device: "fresh")])
+    }
+
+    @Test func diskUsageIncludesTheMediaFolder() async throws {
+        let (project, _, _, _) = try await setup()
+        defer { project.remove() }
+        try FileManager.default.createDirectory(atPath: project.root + "/.xcdev-media/main/main", withIntermediateDirectories: true)
+        try Data(count: 300_000).write(to: URL(fileURLWithPath: project.root + "/.xcdev-media/main/main/a.png"))
+        let service = DoctorService(runner: RoutingRunner(fake: fake, realExecutables: ["git", "cp", "du"]),
+                                    globalPaths: GlobalPaths(base: project.home),
+                                    discovery: XcodeDiscovery(runner: fake, applicationsDirectories: []))
+        let disk = try #require(await service.run(fix: false, from: nil).disk)
+        #expect(disk.mediaBytes >= 300_000)
+        #expect(disk.text.contains(", media "))
     }
 
     @Test func templatesMustBeShutDownAvailableAndUnique() async throws {

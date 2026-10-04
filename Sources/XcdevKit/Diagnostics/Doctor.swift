@@ -12,6 +12,8 @@ public struct DoctorProblem: Codable, Sendable, Equatable {
         case unpinXcode = "unpin_xcode"
         case deleteScratch = "delete_scratch"
         case deletePackageCache = "delete_package_cache"
+        case stopRecording = "stop_recording"
+        case forgetRecording = "forget_recording"
     }
 
     /// The check's id, e.g. "orphaned-clones".
@@ -97,6 +99,8 @@ public struct DoctorEnvironment: Sendable {
     /// Whether this is a `--fix` run. A plain `doctor` reports a clone that is still booting as in progress, since
     /// only the fix waits to see whether it settles.
     public var fixing = false
+    /// How recorded processes are inspected and stopped.
+    public var detached: any DetachedProcessLaunching = SystemDetachedProcesses()
 
     public var simctl: SimctlClient { SimctlClient(runner: runner, developerDir: nil, sleep: sleep) }
 
