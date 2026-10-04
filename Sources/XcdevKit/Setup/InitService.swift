@@ -53,7 +53,7 @@ public struct InitService: Sendable {
         let plan = try await makePlan(location, container: answers["project"])
         let generated = try plan.config(answers: answers)
         try generated.yaml.write(toFile: path, atomically: true, encoding: .utf8)
-        let added = try Gitignore.ensure([".xcdev/", ConfigLoader.localFileName], in: root)
+        let added = try Gitignore.ensure([".xcdev/", ConfigLoader.localFileName, ".xcdev-media/"], in: root)
         return InitReport(status: .written, path: path, summary: generated.summary, gitignoreAdded: added)
     }
 
@@ -129,7 +129,7 @@ public struct InitReport: Reportable {
                 .joined(separator: "\n")
         }
         var lines = ["wrote \(path)"] + summary
-        lines.append(gitignoreAdded.isEmpty ? ".gitignore: already ignores .xcdev/ and .xcdev.local.yml"
+        lines.append(gitignoreAdded.isEmpty ? ".gitignore: already ignores .xcdev/, .xcdev.local.yml, and .xcdev-media/"
                                             : ".gitignore: added " + gitignoreAdded.joined(separator: ", "))
         lines.append("change a choice: `xcd init --force --set <key>=<value>` (`xcd init --plan` lists the keys), or edit .xcdev.yml (`xcd config explain <key>`)")
         lines.append("next: run `xcd config show` to check the result, then `xcd doctor`")

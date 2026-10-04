@@ -96,6 +96,7 @@ extension InitPlan {
                 lines.append("  \(name): { " + fields.joined(separator: ", ") + " }")
             }
         }
+        lines += ["ui:", "  media:", "    dir: " + YAMLText.quote(XcdevConfig.defaultMediaDir)]
         let yaml = lines.joined(separator: "\n") + "\n"
         do {
             _ = try ConfigLoader.parse(main: yaml)

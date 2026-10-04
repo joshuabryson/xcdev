@@ -85,6 +85,9 @@ import Testing
           iphone: { type: "iPhone 18 Pro", runtime: latest }
           ipad: { type: "iPad Pro 13-inch (M5)", runtime: latest }
           watch: { type: "Apple Watch Series 12 (46mm)", runtime: latest, pairWith: iphone }
+        ui:
+          media:
+            dir: ".xcdev-media/{worktree}/{branch}"
 
         """)
         #expect(generated.summary == [
