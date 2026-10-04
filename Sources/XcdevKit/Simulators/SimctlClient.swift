@@ -105,7 +105,7 @@ public struct SimctlClient: Sendable {
         throw XcdError.subprocess(invocation, out, code: .simulatorFailed, next: "run `xcd doctor`")
     }
 
-    private func simctl(_ args: [String], timeout: Duration = .seconds(60)) -> Invocation {
+    func simctl(_ args: [String], timeout: Duration = .seconds(60)) -> Invocation {
         .xcrun(["simctl"] + args, developerDir: developerDir, timeout: timeout)
     }
 

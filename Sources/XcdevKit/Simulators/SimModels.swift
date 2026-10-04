@@ -4,6 +4,18 @@ public struct SimDeviceType: Codable, Sendable, Equatable {
     public let name: String
     public let identifier: String
     public let productFamily: String?
+    public let bundlePath: String?
+
+    public init(name: String, identifier: String, productFamily: String? = nil, bundlePath: String? = nil) {
+        self.name = name
+        self.identifier = identifier
+        self.productFamily = productFamily
+        self.bundlePath = bundlePath
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, identifier, productFamily, bundlePath
+    }
 }
 
 public struct SimRuntime: Codable, Sendable, Equatable {
