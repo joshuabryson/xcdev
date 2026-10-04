@@ -78,7 +78,7 @@ import Testing
     @Test func jsonEnvelopeCarriesWorktree() {
         let json = Renderer.report(SimReport(action: "booted", device: "iphone", udid: "U1", retries: 0, worktree: "feat"),
                                     command: "sim boot", format: .json)
-        #expect(json == #"{"command":"sim boot","data":{"action":"booted","device":"iphone","retries":0,"udid":"U1","worktree":"feat"},"ok":true,"worktree":"feat"}"#)
+        #expect(json == #"{"command":"sim boot","data":{"action":"booted","device":"iphone","notes":[],"retries":0,"udid":"U1","worktree":"feat"},"ok":true,"worktree":"feat"}"#)
     }
 
     @Test func configShowIsYAMLWithPins() throws {

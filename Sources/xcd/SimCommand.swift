@@ -33,7 +33,7 @@ struct SimCommand: AsyncParsableCommand {
         func run() async throws {
             try await Emit.run("sim shutdown", options) { services in
                 let ctx = try await services.open(worktree: options.worktree)
-                return try await services.provisioner.shutdownReport(target.device, in: ctx)
+                return try await services.provisioner.shutdownReport(target.device, in: ctx, detached: SystemDetachedProcesses())
             }
         }
     }
@@ -46,7 +46,7 @@ struct SimCommand: AsyncParsableCommand {
         func run() async throws {
             try await Emit.run("sim erase", options) { services in
                 let ctx = try await services.open(worktree: options.worktree)
-                return try await services.provisioner.eraseReport(target.device, in: ctx)
+                return try await services.provisioner.eraseReport(target.device, in: ctx, detached: SystemDetachedProcesses())
             }
         }
     }

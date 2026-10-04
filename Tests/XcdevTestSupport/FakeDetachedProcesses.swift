@@ -13,6 +13,11 @@ public final class FakeDetachedProcesses: DetachedProcessLaunching {
     public struct Stop: Sendable, Equatable {
         public let pid: Int32
         public let signal: Int32
+
+        public init(pid: Int32, signal: Int32) {
+            self.pid = pid
+            self.signal = signal
+        }
     }
 
     private struct State {

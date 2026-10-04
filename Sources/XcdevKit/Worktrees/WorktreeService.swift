@@ -24,11 +24,15 @@ public struct WorktreeService: Sendable {
     public let globalPaths: GlobalPaths
     /// Runs `post-worktree-create` and `pre-worktree-remove`. Nil runs no hooks.
     public let hooks: HookRunner?
+    /// Stops a removed worktree's screen recordings.
+    public let detached: any DetachedProcessLaunching
 
-    public init(runner: any ProcessRunning, globalPaths: GlobalPaths, hooks: HookRunner? = nil) {
+    public init(runner: any ProcessRunning, globalPaths: GlobalPaths, hooks: HookRunner? = nil,
+                detached: any DetachedProcessLaunching = SystemDetachedProcesses()) {
         self.runner = runner
         self.globalPaths = globalPaths
         self.hooks = hooks
+        self.detached = detached
     }
 
     var registry: Registry { Registry(paths: globalPaths) }
@@ -310,6 +314,8 @@ public struct WorktreeRemoval: Codable, Sendable, Equatable {
     public let removedDevices: [String]
     /// True when the checkout or its state was already gone, so clones (if any) could not be found.
     public let stateMissing: Bool
+    /// One line per screen recording stopped before the clones were deleted.
+    public var stoppedRecordings: [String] = []
     /// Problems that `--force` removed the worktree despite, such as a failing `pre-worktree-remove` hook.
     public var warnings: [String] = []
 }
@@ -395,6 +401,7 @@ extension WorktreeService {
         let exists = fm.fileExists(atPath: entry.path)
 
         let state = exists ? try WorktreeStateStore.load(WorktreePaths(root: entry.path)) : nil
+        let stopped = exists ? await Recordings.stopAll(in: WorktreePaths(root: entry.path), detached: detached, now: Date()) : []
         let removedDevices = if let state { try await deleteClones(of: state) } else { [String]() }
 
         if exists {
@@ -407,7 +414,8 @@ extension WorktreeService {
         if fm.fileExists(atPath: entry.path) { try? fm.removeItem(atPath: entry.path) }
         try await registry.remove(id: entry.id)
         return WorktreeRemoval(name: name, project: ctx.location.projectName, path: entry.path, branch: state?.branch ?? name,
-                               removedDevices: removedDevices, stateMissing: state == nil, warnings: warnings)
+                               removedDevices: removedDevices, stateMissing: state == nil,
+                               stoppedRecordings: stopped.map(\.note), warnings: warnings)
     }
 }
 

@@ -95,4 +95,21 @@ import XcdevTestSupport
         """)
         #expect(try ContextInfo.resolve(ctx: noDefault, requestedDevice: nil, provisioner: provisioner).device == nil)
     }
+
+    @Test func shutdownStopsThatDevicesRecordingFirst() async throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        var ctx = try context()
+        let phone = try await provisioner.boot("iphone", in: &ctx)
+        let id = ProcessIdentity(pid: 4242, startTime: 1, arguments: ["simctl", "io", "recordVideo"])
+        let detached = FakeDetachedProcesses(onStop: { _ in
+            #expect(sims.devices.first { $0.udid == phone.device.udid }?.state == "Booted")   // still up while it stops
+        })
+        detached.adopt(id)
+        try Recordings.save(RecordingRecord(device: "iphone", udid: phone.device.udid, path: dir + "/r.mp4", log: dir + "/r.log",
+                                            process: id, startedAt: Date()), to: ctx.paths.recordingFile(device: "iphone"))
+        let report = try await provisioner.shutdownReport(nil, in: ctx, detached: detached)
+        #expect(detached.stops == [.init(pid: 4242, signal: SIGINT)])
+        #expect(report.notes.count == 1 && report.text.contains("\nstopped the iphone recording after"))
+    }
 }

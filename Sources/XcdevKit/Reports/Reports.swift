@@ -77,6 +77,7 @@ extension WorktreeRemoval: Reportable {
         if stateMissing {
             lines.append("note: the worktree's state was already gone, so any simulators it cloned may remain (named \"xcd · \(project) · \(name) · …\")")
         }
+        lines += stoppedRecordings
         lines += warnings.map { "warning: " + $0 }
         return lines.joined(separator: "\n")
     }
@@ -88,8 +89,10 @@ public struct SimReport: Reportable {
     public let udid: String?
     public let retries: Int
     public let worktree: String
+    public var notes: [String] = []
 
-    public init(action: String, device: String, udid: String?, retries: Int, worktree: String) {
+    public init(action: String, device: String, udid: String?, retries: Int, worktree: String, notes: [String] = []) {
+        self.notes = notes
         self.action = action
         self.device = device
         self.udid = udid
@@ -99,7 +102,7 @@ public struct SimReport: Reportable {
 
     public var text: String {
         guard let udid else { return "\(device) has no clone in this worktree; nothing to do" }
-        return "\(action) \(device)  udid=\(udid)" + (retries > 0 ? "  retries=\(retries)" : "")
+        return (["\(action) \(device)  udid=\(udid)" + (retries > 0 ? "  retries=\(retries)" : "")] + notes).joined(separator: "\n")
     }
 
     public var envelopeWorktree: String? { worktree }

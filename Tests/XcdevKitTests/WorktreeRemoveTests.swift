@@ -65,4 +65,19 @@ import XcdevTestSupport
         let unknown = await #expect(throws: XcdError.self) { try await svc.remove(name: "nope", in: main) }
         #expect(unknown?.code == .worktreeNotFound)
     }
+
+    @Test func removeStopsTheWorktreesRecordings() async throws {
+        let (project, _, ctx, state) = try await setup()
+        defer { project.remove() }
+        let id = ProcessIdentity(pid: 4343, startTime: 1, arguments: ["simctl", "recordVideo"])
+        let detached = FakeDetachedProcesses()
+        detached.adopt(id)
+        let paths = WorktreePaths(root: state.path)
+        try Recordings.save(RecordingRecord(device: "iphone", udid: "U", path: state.path + "/r.mp4", log: "/l",
+                                            process: id, startedAt: Date()), to: paths.recordingFile(device: "iphone"))
+        let svc = WorktreeService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home), detached: detached)
+        let removal = try await svc.remove(name: state.name, force: true, in: ctx)
+        #expect(detached.stops == [.init(pid: 4343, signal: SIGINT)])
+        #expect(removal.stoppedRecordings.count == 1 && removal.text.contains("stopped the iphone recording"))
+    }
 }

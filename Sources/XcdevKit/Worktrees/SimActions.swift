@@ -1,3 +1,5 @@
+import Foundation
+
 /// Orchestration behind `xcd sim …`, kept in the library so the CLI only parses and wires.
 extension DeviceProvisioner {
     public func bootReport(_ requested: String?, in ctx: inout WorktreeContext) async throws -> SimReport {
@@ -6,20 +8,30 @@ extension DeviceProvisioner {
         return SimReport(action: "booted", device: name, udid: device.udid, retries: retries, worktree: ctx.state.name)
     }
 
-    public func shutdownReport(_ requested: String?, in ctx: WorktreeContext) async throws -> SimReport {
+    public func shutdownReport(_ requested: String?, in ctx: WorktreeContext,
+                               detached: (any DetachedProcessLaunching)? = nil) async throws -> SimReport {
         let name = try deviceName(requested, config: ctx.config)
         guard let device = ctx.state.devices[name] else { return notCloned(name, ctx) }
+        let notes = await stopRecording(name, ctx, detached)
         let retries = try await simctl(for: ctx).shutdown(udid: device.udid)
-        return SimReport(action: "shut down", device: name, udid: device.udid, retries: retries, worktree: ctx.state.name)
+        return SimReport(action: "shut down", device: name, udid: device.udid, retries: retries, worktree: ctx.state.name, notes: notes)
     }
 
-    public func eraseReport(_ requested: String?, in ctx: WorktreeContext) async throws -> SimReport {
+    public func eraseReport(_ requested: String?, in ctx: WorktreeContext,
+                            detached: (any DetachedProcessLaunching)? = nil) async throws -> SimReport {
         let name = try deviceName(requested, config: ctx.config)
         guard let device = ctx.state.devices[name] else { return notCloned(name, ctx) }
+        let notes = await stopRecording(name, ctx, detached)
         let client = simctl(for: ctx)
         let retries = try await client.shutdown(udid: device.udid)
         try await client.erase(udid: device.udid)
-        return SimReport(action: "erased", device: name, udid: device.udid, retries: retries, worktree: ctx.state.name)
+        return SimReport(action: "erased", device: name, udid: device.udid, retries: retries, worktree: ctx.state.name, notes: notes)
+    }
+
+    /// A recording of a clone that is going away is stopped first, so simctl finishes the video.
+    private func stopRecording(_ name: String, _ ctx: WorktreeContext, _ detached: (any DetachedProcessLaunching)?) async -> [String] {
+        guard let detached else { return [] }
+        return await Recordings.stopAll(in: ctx.paths, device: name, detached: detached, now: Date()).map(\.note)
     }
 
     public func openReport(_ requested: String?, in ctx: inout WorktreeContext) async throws -> SimReport {
