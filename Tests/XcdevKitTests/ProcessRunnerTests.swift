@@ -198,4 +198,12 @@ import XcdevTestSupport
         #expect(out.exitCode == 65 && out.stdout.isEmpty)
         #expect(try String(contentsOfFile: dir + "/b.log", encoding: .utf8) == "compiling\n** BUILD FAILED **\n")
     }
+
+    @Test func inputFileBecomesStdin() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("xcd stdin \(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: file) }
+        try "hello pasteboard".write(toFile: file, atomically: true, encoding: .utf8)
+        let out = try await SystemProcessRunner().run(Invocation("/bin/cat", [], inputFile: file))
+        #expect(out.stdoutString == "hello pasteboard")
+    }
 }

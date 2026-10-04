@@ -28,13 +28,15 @@ public struct SystemProcessRunner: ProcessRunning {
             let handle = try Self.appendHandle(for: file)
             logHandle = handle
             pipes = nil
-            stdio = .redirected(output: handle.fileDescriptor, error: handle.fileDescriptor)
+            stdio = .redirected(output: handle.fileDescriptor, error: handle.fileDescriptor,
+                                input: invocation.inputFile)
         } else {
             let captured = (out: Pipe(), err: Pipe())
             pipes = captured
             logHandle = nil
             stdio = .redirected(output: captured.out.fileHandleForWriting.fileDescriptor,
-                                error: captured.err.fileHandleForWriting.fileDescriptor)
+                                error: captured.err.fileHandleForWriting.fileDescriptor,
+                                input: invocation.inputFile)
         }
         defer { try? logHandle?.close() }
 

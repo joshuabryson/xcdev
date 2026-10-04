@@ -11,8 +11,8 @@ final class ChildProcess: Sendable {
     enum Stdio {
         /// xcd's own stdin, stdout, and stderr: the terminal, for a passthrough child.
         case shared
-        /// stdin from /dev/null, stdout and stderr to these descriptors.
-        case redirected(output: Int32, error: Int32)
+        /// stdin from `input` (or /dev/null), stdout and stderr to these descriptors.
+        case redirected(output: Int32, error: Int32, input: String? = nil)
     }
 
     enum Life { case running, exited, reaped }
@@ -22,6 +22,7 @@ final class ChildProcess: Sendable {
         case inherit(Int32)
         case duplicate(Int32, to: Int32)
         case openNull(Int32, flags: Int32)
+        case openFile(Int32, path: String, flags: Int32)
     }
 
     /// Shared: xcd's own 0, 1, and 2, except that one xcd's parent closed (`xcd hi <&-`) is /dev/null, since
@@ -31,8 +32,9 @@ final class ChildProcess: Sendable {
         switch stdio {
         case .shared:
             return (0...2).map { isOpen($0) ? .inherit($0) : .openNull($0, flags: $0 == 0 ? O_RDONLY : O_WRONLY) }
-        case .redirected(let output, let error):
-            return [.duplicate(output, to: 1), .duplicate(error, to: 2), .openNull(0, flags: O_RDONLY)]
+        case .redirected(let output, let error, let input):
+            return [.duplicate(output, to: 1), .duplicate(error, to: 2),
+                    input.map { .openFile(0, path: $0, flags: O_RDONLY) } ?? .openNull(0, flags: O_RDONLY)]
         }
     }
 
@@ -52,7 +54,7 @@ final class ChildProcess: Sendable {
     /// Starts `executable` with exactly `environment`, default signal handling, no blocked signals, and no descriptors
     /// but stdin, stdout, and stderr. Throws the errno posix_spawn returns (for example ENOENT).
     static func spawn(_ executable: String, arguments: [String], environment: [String: String], workingDirectory: String?,
-                      stdio: Stdio, leadsGroup: Bool) throws -> ChildProcess {
+                      stdio: Stdio, leadsGroup: Bool, newSession: Bool = false) throws -> ChildProcess {
         var actions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&actions)
         defer { posix_spawn_file_actions_destroy(&actions) }
@@ -61,6 +63,7 @@ final class ChildProcess: Sendable {
             case .inherit(let fd): posix_spawn_file_actions_addinherit_np(&actions, fd)
             case .duplicate(let fd, let target): posix_spawn_file_actions_adddup2(&actions, fd, target)
             case .openNull(let fd, let flags): posix_spawn_file_actions_addopen(&actions, fd, "/dev/null", flags, 0)
+            case .openFile(let fd, let path, let flags): posix_spawn_file_actions_addopen(&actions, fd, path, flags, 0)
             }
         }
         if let workingDirectory { posix_spawn_file_actions_addchdir_np(&actions, workingDirectory) }
@@ -76,7 +79,11 @@ final class ChildProcess: Sendable {
         posix_spawnattr_setsigdefault(&attributes, &all)
         posix_spawnattr_setsigmask(&attributes, &none)
         var flags = POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
-        if leadsGroup {
+        if newSession {
+            // A session of its own (and so a group of its own) that no terminal can signal: for processes that must
+            // outlive this xcd (`DetachedProcessLaunching`).
+            flags |= POSIX_SPAWN_SETSID
+        } else if leadsGroup {
             flags |= POSIX_SPAWN_SETPGROUP
             posix_spawnattr_setpgroup(&attributes, 0)
         }

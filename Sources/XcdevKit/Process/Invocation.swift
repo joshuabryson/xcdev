@@ -15,10 +15,13 @@ public struct Invocation: Sendable, Equatable {
     /// When true, the process shares xcd's stdin, stdout, and stderr (project commands and plugins), so the
     /// returned output is empty. Takes precedence over `outputFile`.
     public var passthrough: Bool
+    /// When set, stdin is read from this file instead of /dev/null.
+    public var inputFile: String?
 
     public init(_ executable: String, _ arguments: [String], environment: [String: String] = [:],
                 workingDirectory: String? = nil, timeout: Duration = .seconds(120),
-                outputFile: String? = nil, stopAtTimeout: Bool = false, passthrough: Bool = false) {
+                outputFile: String? = nil, stopAtTimeout: Bool = false, passthrough: Bool = false,
+                inputFile: String? = nil) {
         self.executable = executable
         self.arguments = arguments
         self.environment = environment
@@ -27,6 +30,7 @@ public struct Invocation: Sendable, Equatable {
         self.outputFile = outputFile
         self.stopAtTimeout = stopAtTimeout
         self.passthrough = passthrough
+        self.inputFile = inputFile
     }
 
     /// argv with argv[0] = executable basename. Used for display and stub matching.
