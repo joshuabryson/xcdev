@@ -25,12 +25,16 @@ it gives each git worktree its own simulator clones and DerivedData, so parallel
 | App output or unified log | `xcd logs --app`, `xcd logs [--since 2m] [--grep <text>] [--follow --for 30s]` |
 | Install, launch, stop | `xcd install`, `xcd launch`, `xcd terminate` |
 | Simulator | `xcd sim boot`, `xcd sim open`, `xcd sim erase` |
+| Screenshot or video | `xcd ui screenshot`, `xcd ui record start` … `xcd ui record stop` (each prints the file's path; read it) |
+| Device state | `xcd sim open-url <url>`, `xcd sim push --alert <text>`, `xcd sim privacy grant photos`, `xcd sim status-bar --time 9:41`, `xcd sim appearance dark`, `xcd sim location <lat>,<lon>`, `xcd sim pasteboard set --text <s>`, `xcd sim addmedia <file>` |
 | Context for scripts | `xcd context` (prints XCD_* variables) |
 | Explain a config key | `xcd config explain <key>` |
 | Fix simulators or worktrees | `xcd doctor`, then `xcd doctor --fix` (read the problems first: it may restart CoreSimulator, which shuts down every agent's simulators) |
 
 ## Reading results
 
+- Captures go to the media folder (`ui.media.dir`, default `.xcdev-media/<worktree>/<branch>` in the main checkout;
+  `$XCD_MEDIA_DIR` in scripts). Screenshot sizes are pixels; divide by the reported scale for points.
 - Output is compact text by default; add `--json` (or set `XCD_OUTPUT=json`) for one JSON object per command.
 - Every failure ends with `next:`. Do what it says before trying anything else.
 - Exit codes: 1 = the task failed (fix the code), 2 = fix the command line or config, 3 = fix the environment

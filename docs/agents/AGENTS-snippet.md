@@ -9,6 +9,9 @@ working in parallel never collide.
 - Build and test: `xcd build`, `xcd test` (`--only Target/test()` to narrow). Failures print compiler-style
   `file:line:col: error:` lines.
 - Run: `xcd run` builds, installs, launches, and watches for a crash; `xcd logs` and `xcd logs --app` show output.
+- See the app: `xcd ui screenshot` prints the PNG's path; `xcd ui record start` / `xcd ui record stop` make a video.
+  Set device state with `xcd sim open-url`, `xcd sim push`, `xcd sim privacy`, `xcd sim status-bar`, and friends
+  (`xcd help sim`).
 - Every failure ends with `next:`; do that. `--json` gives one JSON object per command; `xcd help errors` lists codes.
 - If simulators or worktrees misbehave: `xcd doctor`, then `xcd doctor --fix`. Read the problems first: `--fix` may
   restart CoreSimulator, which shuts down every agent's simulators.

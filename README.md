@@ -1,7 +1,7 @@
 # xcdev
 
 `xcd` is a command-line tool that AI agents (and humans) use for Apple-platform development: build, test, run, logs,
-and simulators for iOS, iPadOS, watchOS, tvOS, visionOS, and macOS apps and Swift packages. Every git worktree gets its
+screenshots and recordings, and simulators for iOS, iPadOS, watchOS, tvOS, visionOS, and macOS apps and Swift packages. Every git worktree gets its
 own simulator clones and build folders, so many agents can work at once without colliding.
 
 ## Install
@@ -31,6 +31,7 @@ xcd init --defaults       # write .xcdev.yml with the recommendations (or --set 
 xcd wt create login-flow  # a worktree with its own branch, simulators, and DerivedData
 cd ../MyApp.worktrees/login-flow
 xcd build && xcd test && xcd run
+xcd ui screenshot         # a PNG of the simulator in .xcdev-media/<worktree>/<branch>/
 xcd help                  # every command, project command, and plugin
 ```
 
