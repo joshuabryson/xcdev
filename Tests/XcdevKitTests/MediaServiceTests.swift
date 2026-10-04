@@ -83,7 +83,7 @@ import XcdevTestSupport
         _ = try await service.startRecording(device: nil, out: nil, in: &ctx)
         let stopped = try await service.stopRecording(device: nil, in: ctx)
         #expect(stopped.outcome == .killed)
-        #expect(stopped.text.contains("warning: simctl didn't finish within 15.0s and was killed, so the video may be incomplete"))
+        #expect(stopped.text.contains("warning: simctl didn't finish within 45.0s and was killed, so the video may be incomplete"))
     }
 
     @Test func aRecordingThatNeverStartsIsStoppedAndReported() async throws {

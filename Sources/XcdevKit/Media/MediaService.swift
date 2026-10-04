@@ -12,8 +12,10 @@ public struct MediaService: Sendable {
     /// How long `record start` waits for simctl to print "Recording started".
     let startTimeout: Duration
 
-    /// How long a stop waits for simctl to finish the video before killing it.
-    public static let stopTimeout: Duration = .seconds(15)
+    /// How long a stop waits for simctl to exit after SIGINT before killing it. On a freshly booted simulator simctl
+    /// sometimes takes well over 10 s to exit even though the video is already complete (measured: exits after 1 to
+    /// about 14 s, once past 15 s), and a SIGKILL there risks an incomplete file, so this is generous.
+    public static let stopTimeout: Duration = .seconds(45)
 
     public init(provisioner: DeviceProvisioner, detached: any DetachedProcessLaunching, currentDirectory: String,
                 now: @escaping @Sendable () -> Date = { Date() },
