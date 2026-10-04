@@ -57,6 +57,18 @@ public struct MediaFolder: Sendable, Equatable {
         return absolute(joined, projectRoot: projectRoot, home: home)
     }
 
+    /// The media roots worth measuring: not `/`, the home folder, a project root, or a folder holding one (a template
+    /// like `../{project}-media` or `~` would make that a huge unrelated tree), and only the outer one of two nested roots.
+    public static func measurableRoots(_ roots: [String], projectRoots: [String], home: String = NSHomeDirectory()) -> [String] {
+        func standard(_ path: String) -> String { (path as NSString).standardizingPath }
+        func contains(_ outer: String, _ inner: String) -> Bool { outer == "/" || inner == outer || inner.hasPrefix(outer + "/") }
+        let projects = projectRoots.map(standard)
+        let candidates = Set(roots.map(standard)).filter { root in
+            root != "/" && root != standard(home) && !projects.contains { contains(root, $0) }
+        }
+        return candidates.filter { root in !candidates.contains { $0 != root && contains($0, root) } }.sorted()
+    }
+
     /// A new capture's path: `<directory>/<yyyyMMdd-HHmmss>-<device>-<kind>.<ext>`, suffixed if taken. Creates the folder.
     public func newFile(device: String, kind: String, ext: String, now: Date) -> String {
         WorktreePaths(root: directory).newArtifact(in: directory, kind: "\(Self.sanitize(device) ?? "nodevice")-\(kind)",

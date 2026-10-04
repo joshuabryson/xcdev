@@ -153,4 +153,22 @@ import XcdevTestSupport
         #expect(MediaFolder.root(template: "/abs/shots", projectRoot: "/p", home: "/h") == "/abs/shots")
         #expect(MediaFolder.root(template: "{branch}/shots", projectRoot: "/p", home: "/h") == nil)
     }
+
+    @Test func doctorMeasuresOnlyMediaRootsThatAreNotHugeOrUnrelated() {
+        let projects = ["/Users/dev/App", "/Users/dev/Other"]
+        func measured(_ roots: [String]) -> [String] {
+            MediaFolder.measurableRoots(roots, projectRoots: projects, home: "/Users/dev")
+        }
+        #expect(measured(["/Users/dev/App/.xcdev-media"]) == ["/Users/dev/App/.xcdev-media"])
+        #expect(measured(["/Users/dev"]).isEmpty)                      // the home folder (`~`), also an ancestor
+        #expect(measured(["/Users/dev/"]).isEmpty)
+        #expect(measured(["/"]).isEmpty)
+        #expect(measured(["/Users/dev/App"]).isEmpty)                  // the project itself
+        #expect(measured(["/Users/dev/App/.."]).isEmpty)               // `..`, an ancestor
+        #expect(measured(["/Users"]).isEmpty)
+        #expect(measured(["/Users/dev/Captures", "/Users/dev/Desktop/App"]) == ["/Users/dev/Captures", "/Users/dev/Desktop/App"])
+        // Nested roots are counted once, by the outer one; a sibling with the same name prefix is not nested.
+        #expect(measured(["/m/shots/a", "/m/shots", "/m/shots-old"]) == ["/m/shots", "/m/shots-old"])
+        #expect(measured(["/m/shots", "/m/shots"]) == ["/m/shots"])
+    }
 }

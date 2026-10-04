@@ -215,7 +215,8 @@ public struct DoctorService: Sendable {
             let template = (try? ConfigLoader.load(worktreeRoot: root, projectRoot: root))?.mediaDirTemplate ?? XcdevConfig.defaultMediaDir
             return MediaFolder.root(template: template, projectRoot: root)
         }
-        let mediaBytes = await DiskUsage(runner: runner).bytes(of: Array(Set(mediaRoots)).sorted()).values.reduce(0, +)
+        let measured = MediaFolder.measurableRoots(mediaRoots, projectRoots: projectRoots)
+        let mediaBytes = await DiskUsage(runner: runner).bytes(of: measured).values.reduce(0, +)
         return DiskSummary(worktrees: worktrees, clonesBytes: total(SimNaming.clonePrefix), templatesBytes: total(SimNaming.templatePrefix),
                            mediaBytes: mediaBytes)
     }
