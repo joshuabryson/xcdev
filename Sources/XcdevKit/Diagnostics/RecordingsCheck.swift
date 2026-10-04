@@ -58,6 +58,12 @@ public struct RecordingsCheck: DoctorCheck {
             }
             try FileManager.default.removeItem(atPath: file)
         case .stopRecording?:
+            // The record may have been replaced since detect: stop only a recording that is still running and overdue.
+            guard let item = found(env).first(where: { $0.file == file }),
+                  env.detached.inspector.isRunning(record.process, marker: Recordings.marker),
+                  age(Found(entry: item.entry, file: file, record: record), env) > limit(item.entry) else {
+                throw DoctorLeftAlone(note: "the \(record.device) recording in \(file) changed since doctor looked; left alone")
+            }
             _ = await Recordings.stop(record, file: file, detached: env.detached, now: env.now)
         default:
             return

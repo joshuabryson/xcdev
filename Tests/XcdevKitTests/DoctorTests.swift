@@ -72,6 +72,28 @@ import XcdevTestSupport
         #expect(ctx.paths.recordingFiles == [ctx.paths.recordingFile(device: "fresh")])
     }
 
+    @Test func aRecordingReplacedAfterDetectionIsNotStopped() async throws {
+        let (project, _, _, ctx) = try await setup()
+        defer { project.remove() }
+        let detached = FakeDetachedProcesses()
+        let now = Date()
+        detached.adopt(try recording("ui", pid: 2, startedAt: now.addingTimeInterval(-3600), in: ctx))
+        let service = DoctorService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home),
+                                    discovery: XcodeDiscovery(runner: fake, applicationsDirectories: []), detached: detached)
+        let env = await service.environment(from: nil, fixing: true)
+        let problem = try #require(await RecordingsCheck().detect(env).first)
+        #expect(problem.action == .stopRecording)
+
+        // Another xcd stops it and starts a fresh recording of the same device.
+        detached.adopt(try recording("ui", pid: 7, startedAt: now, in: ctx))
+        do {
+            try await RecordingsCheck().fix(problem, env)
+            Issue.record("expected DoctorLeftAlone")
+        } catch is DoctorLeftAlone {}
+        #expect(detached.stops.isEmpty)
+        #expect(ctx.paths.recordingFiles == [ctx.paths.recordingFile(device: "ui")])
+    }
+
     @Test func diskUsageIncludesTheMediaFolder() async throws {
         let (project, _, _, _) = try await setup()
         defer { project.remove() }
