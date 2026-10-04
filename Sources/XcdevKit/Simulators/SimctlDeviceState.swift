@@ -107,13 +107,26 @@ extension SimctlClient {
 
     public func openURL(udid: String, url: String) async throws {
         let invocation = simctl(["openurl", udid, url])
-        let out = try await runner.run(invocation)
+        var out = try await runner.run(invocation)
         guard !out.succeeded else { return }
+        // Safari can be slow to launch on a freshly booted clone; simctl then gives up with exit 60 ("Operation timed out").
+        if Self.timedOut(out) {
+            out = try await runner.run(invocation)
+            guard !out.succeeded else { return }
+            if Self.timedOut(out) {
+                throw XcdError.subprocess(invocation, out, code: .simulatorFailed, message: "the simulator took too long to open \(url)",
+                                          next: "the simulator may still be starting up; wait a few seconds and retry, or run `xcd doctor`")
+            }
+        }
         let scheme = url.split(separator: ":", maxSplits: 1).first.map(String.init) ?? url
         let next = out.stderrString.contains("LSApplicationWorkspaceErrorDomain")
             ? "no app on this simulator opens \(scheme): URLs; install the app that registers it (`xcd install`), or check the URL"
             : "pass a full URL with a scheme, e.g. https://example.com or myapp://path"
         throw XcdError.subprocess(invocation, out, code: .simulatorFailed, message: "the simulator could not open \(url)", next: next)
+    }
+
+    private static func timedOut(_ out: ProcessOutput) -> Bool {
+        out.exitCode == 60 || out.stderrString.contains("Operation timed out")
     }
 
     public func push(udid: String, bundleId: String, payloadFile: String) async throws {

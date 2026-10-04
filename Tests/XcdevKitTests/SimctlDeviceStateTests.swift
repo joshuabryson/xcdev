@@ -45,6 +45,44 @@ import XcdevTestSupport
                 == "xcrun simctl io U recordVideo --codec=h264 /m/r.mp4")
     }
 
+    /// Seen on a freshly booted clone: Safari was slow to launch, so simctl gave up with exit 60.
+    static let timedOut = """
+    An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=60):
+    Simulator device failed to open https://example.com.
+    Operation timed out
+    Underlying error (domain=NSPOSIXErrorDomain, code=60):
+    \tThe operation couldn’t be completed. Operation timed out
+    \tOperation timed out
+    """
+
+    @Test func openURLRetriesATimeoutOnce() async throws {
+        let attempts = Counter()
+        fake.stub(["xcrun", "simctl", "openurl"]) { _ in
+            attempts.increment() == 1
+                ? ProcessOutput(exitCode: 60, stdout: "", stderr: Self.timedOut)
+                : ProcessOutput(exitCode: 0, stdout: "", stderr: "")
+        }
+        try await client.openURL(udid: "U", url: "https://example.com")
+        #expect(attempts.value == 2)
+    }
+
+    @Test func openURLThatTimesOutTwiceSaysTheSimulatorIsSlow() async throws {
+        fake.stub(["xcrun", "simctl", "openurl"], exitCode: 60, stderr: Self.timedOut)
+        let error = await #expect(throws: XcdError.self) { try await client.openURL(udid: "U", url: "https://example.com") }
+        #expect(error?.code == .simulatorFailed && error?.message == "the simulator took too long to open https://example.com")
+        #expect(error?.next == "the simulator may still be starting up; wait a few seconds and retry, or run `xcd doctor`")
+        #expect(fake.calls.count == 2)
+    }
+
+    @Test func openURLDoesNotRetryOtherFailures() async throws {
+        fake.stub(["xcrun", "simctl", "openurl"], exitCode: 206, stderr: "Simulator device failed to open notaurl.")
+        _ = await #expect(throws: XcdError.self) { try await client.openURL(udid: "U", url: "notaurl") }
+        #expect(fake.calls.count == 1)
+        fake.stub(["xcrun", "simctl", "openurl"], exitCode: 115, stderr: "(domain=LSApplicationWorkspaceErrorDomain, code=115)")
+        _ = await #expect(throws: XcdError.self) { try await client.openURL(udid: "U", url: "xcdsample://x") }
+        #expect(fake.calls.count == 2)
+    }
+
     /// Seen on Xcode 27.
     @Test func failuresSayWhatToDo() async throws {
         fake.stub(["xcrun", "simctl", "openurl", "U", "notaurl"], exitCode: 206, stderr: """
