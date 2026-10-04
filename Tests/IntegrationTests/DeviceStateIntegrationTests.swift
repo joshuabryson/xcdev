@@ -30,16 +30,6 @@ struct DeviceStateIntegrationTests {
         """, name: "Media App \(UUID().uuidString.prefix(6))", fixture: repoRoot + "/Fixtures/SampleApp", parent: testsHome)
     }
 
-    /// `simctl openurl` launches Safari, which on a freshly booted clone sometimes times out (exit 60, "Operation timed
-    /// out"); that is the simulator being slow, so retry it once. Any other failure is real.
-    func openURLRetryingTimeouts(_ svc: Services, _ ctx: inout WorktreeContext) async throws {
-        do {
-            _ = try await svc.deviceState.openURL("https://example.com", device: nil, in: &ctx)
-        } catch let error as XcdError where error.details.contains("exit: 60") {
-            _ = try await svc.deviceState.openURL("https://example.com", device: nil, in: &ctx)
-        }
-    }
-
     @Test(.timeLimit(.minutes(10))) func screenshotsRecordingsAndDeviceState() async throws {
         let expectedScale = try await phoneType().scale
         try await withCleanup(try await project()) { svc in
@@ -51,21 +41,27 @@ struct DeviceStateIntegrationTests {
             #expect(try String(contentsOfFile: ctx.location.projectRoot + "/.gitignore", encoding: .utf8).contains(".xcdev-media/"))
 
             let started = try await svc.media.startRecording(device: nil, out: nil, in: &ctx)
-            try await Task.sleep(for: .seconds(3))
-            let stopped = try await svc.media.stopRecording(device: nil, in: ctx)
-            #expect(stopped.outcome == .stopped && (stopped.bytes ?? 0) > 0, "\(stopped)")
-            let asset = AVURLAsset(url: URL(fileURLWithPath: try #require(started.path)))
-            #expect(try await asset.load(.duration).seconds > 1)
+            do {
+                try await Task.sleep(for: .seconds(3))
+                let stopped = try await svc.media.stopRecording(device: nil, in: ctx)
+                #expect(stopped.outcome == .stopped && (stopped.bytes ?? 0) > 0, "\(stopped)")
+                let asset = AVURLAsset(url: URL(fileURLWithPath: try #require(started.path)))
+                #expect(try await asset.load(.duration).seconds > 1)
 
-            _ = try await svc.deviceState.statusBar(StatusBarOverrides(time: "9:41", batteryLevel: 100), device: nil, in: &ctx)
-            _ = try await svc.deviceState.appearance(.dark, device: nil, in: &ctx)
-            _ = try await svc.deviceState.location(Coordinate(latitude: 37.33, longitude: -122.03), device: nil, in: &ctx)
-            _ = try await svc.deviceState.setPasteboard(text: "hello pasteboard", device: nil, in: &ctx)
-            #expect(try await svc.deviceState.pasteboard(device: nil, in: &ctx).text == "hello pasteboard")
-            try await openURLRetryingTimeouts(svc, &ctx)
-            _ = try await svc.deviceState.privacy(.reset, service: "all", bundle: nil, device: nil, in: &ctx)
-            _ = try await svc.deviceState.addMedia([shot.path], device: nil, in: &ctx)
-            _ = try await svc.deviceState.statusBar(nil, device: nil, in: &ctx)
+                _ = try await svc.deviceState.statusBar(StatusBarOverrides(time: "9:41", batteryLevel: 100), device: nil, in: &ctx)
+                _ = try await svc.deviceState.appearance(.dark, device: nil, in: &ctx)
+                _ = try await svc.deviceState.location(Coordinate(latitude: 37.33, longitude: -122.03), device: nil, in: &ctx)
+                _ = try await svc.deviceState.setPasteboard(text: "hello pasteboard", device: nil, in: &ctx)
+                #expect(try await svc.deviceState.pasteboard(device: nil, in: &ctx).text == "hello pasteboard")
+                _ = try await svc.deviceState.openURL("https://example.com", device: nil, in: &ctx)
+                _ = try await svc.deviceState.privacy(.reset, service: "all", bundle: nil, device: nil, in: &ctx)
+                _ = try await svc.deviceState.addMedia([shot.path], device: nil, in: &ctx)
+                _ = try await svc.deviceState.statusBar(nil, device: nil, in: &ctx)
+            } catch {
+                // A failed step must not leave a recorder running.
+                _ = await Recordings.stopAll(in: ctx.paths, detached: svc.detached, now: Date())
+                throw error
+            }
         }
     }
 
@@ -73,14 +69,20 @@ struct DeviceStateIntegrationTests {
         try await withCleanup(try await project()) { svc in
             var ctx = try await svc.open(worktree: nil)
             let started = try await svc.media.startRecording(device: nil, out: "clip.mov", in: &ctx)
-            let record = try #require(Recordings.load(ctx.paths.recordingFile(device: "iphone")))
-            #expect(getsid(record.process.pid) == record.process.pid)
-            try await Task.sleep(for: .seconds(2))
-            let shutdown = try await svc.provisioner.shutdownReport(nil, in: ctx, detached: svc.detached)
-            #expect(shutdown.notes.count == 1)
-            #expect(!svc.detached.inspector.isRunning(record.process))
-            let size = (try FileManager.default.attributesOfItem(atPath: try #require(started.path))[.size] as? NSNumber)?.int64Value
-            #expect((size ?? 0) > 0)
+            do {
+                let record = try #require(Recordings.load(ctx.paths.recordingFile(device: "iphone")))
+                #expect(getsid(record.process.pid) == record.process.pid)
+                try await Task.sleep(for: .seconds(2))
+                let shutdown = try await svc.provisioner.shutdownReport(nil, in: ctx, detached: svc.detached)
+                #expect(shutdown.notes.count == 1)
+                #expect(!svc.detached.inspector.isRunning(record.process))
+                let size = (try FileManager.default.attributesOfItem(atPath: try #require(started.path))[.size] as? NSNumber)?.int64Value
+                #expect((size ?? 0) > 0)
+            } catch {
+                // A failed step must not leave a recorder running.
+                _ = await Recordings.stopAll(in: ctx.paths, detached: svc.detached, now: Date())
+                throw error
+            }
         }
     }
 }
