@@ -85,7 +85,7 @@ struct SimCommand: AsyncParsableCommand {
     struct Push: AsyncParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Send a push notification to the app.",
                                                         discussion: "The app must be installed and have asked for notification permission.")
-        @Option(help: "Alert text; xcd builds the payload.") var alert: String?
+        @Option(help: "Alert text; xcd builds the payload. A value starting with `-` is written `--alert=-5`.") var alert: String?
         @Option(help: "A JSON payload file with an \"aps\" key.", completion: .file(extensions: ["json"])) var file: String?
         @Option(help: "Bundle id (default: the app of the last build for this device).") var bundle: String?
         @OptionGroup var target: DeviceOption
@@ -123,7 +123,7 @@ struct SimCommand: AsyncParsableCommand {
 
     struct StatusBar: AsyncParsableCommand {
         static let configuration = CommandConfiguration(commandName: "status-bar", abstract: "Override the status bar (time, battery, signal), or --clear it.")
-        @Option(help: "Time text, e.g. 9:41 (an ISO 8601 date also sets the date).") var time: String?
+        @Option(help: "Time text, e.g. 9:41 (an ISO 8601 date also sets the date). A value starting with `-` is written `--time=-1`.") var time: String?
         @Option(help: "Battery level, 0-100.") var battery: Int?
         @Option(name: .customLong("battery-state"), help: "charged, charging, or discharging.",
                 completion: .list(StatusBarOverrides.batteryStates)) var batteryState: String?
@@ -131,7 +131,7 @@ struct SimCommand: AsyncParsableCommand {
         @Option(help: "Cellular bars, 0-4.") var cellular: Int?
         @Option(help: "Data network: hide, wifi, 3g, 4g, lte, lte-a, lte+, 5g, 5g+, 5g-uwb, or 5g-uc.",
                 completion: .list(StatusBarOverrides.networks)) var network: String?
-        @Option(name: .customLong("operator"), help: "Carrier name ('' for none).") var operatorName: String?
+        @Option(name: .customLong("operator"), help: "Carrier name ('' for none). A value starting with `-` is written `--operator=-x`.") var operatorName: String?
         @Flag(help: "Remove every override.") var clear = false
         @OptionGroup var target: DeviceOption
         @OptionGroup var options: GlobalOptions
@@ -170,17 +170,18 @@ struct SimCommand: AsyncParsableCommand {
 
     struct Location: AsyncParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Simulate a location (latitude,longitude), or --clear it.")
-        @Argument(help: "e.g. 37.33,-122.03") var coordinate: String?
+        @Argument(parsing: .allUnrecognized, help: "e.g. 37.33,-122.03 or -33.86,151.2 (a negative latitude needs no `--`).")
+        var coordinate: [String] = []
         @Flag(help: "Stop simulating a location.") var clear = false
         @OptionGroup var target: DeviceOption
         @OptionGroup var options: GlobalOptions
 
         func run() async throws {
             try await Emit.run("sim location", options) { services in
-                guard clear != (coordinate != nil) else {
-                    throw XcdError(.usage, "pass a coordinate or --clear", next: "e.g. `xcd sim location 37.33,-122.03`")
+                guard clear != (coordinate.count == 1) else {
+                    throw XcdError(.usage, "pass one coordinate or --clear", next: "e.g. `xcd sim location 37.33,-122.03` or `xcd sim location -33.86,151.2`")
                 }
-                let parsed = try coordinate.map(Coordinate.parse)
+                let parsed = try coordinate.first.map(Coordinate.parse)
                 var ctx = try await services.open(worktree: options.worktree)
                 await Recording.stopOverdue(services, ctx)
                 return try await services.deviceState.location(parsed, device: target.device, in: &ctx)
@@ -193,7 +194,7 @@ struct SimCommand: AsyncParsableCommand {
 
         struct SetText: AsyncParsableCommand {
             static let configuration = CommandConfiguration(commandName: "set", abstract: "Put text on the device's pasteboard.")
-            @Option(help: "The text.") var text: String
+            @Option(help: "The text. A value starting with `-` is written `--text=-n`.") var text: String
             @OptionGroup var target: DeviceOption
             @OptionGroup var options: GlobalOptions
 
