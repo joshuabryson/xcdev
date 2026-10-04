@@ -170,7 +170,8 @@ extension SimctlClient {
 
     /// Callers check that each file exists first: simctl crashes on a missing one.
     public func addMedia(udid: String, files: [String]) async throws {
-        try await runner.runChecked(simctl(["addmedia", udid] + files), code: .simulatorFailed,
+        // The first import on a fresh clone starts the Photos library, which can take well over a minute.
+        try await runner.runChecked(simctl(["addmedia", udid] + files, timeout: .seconds(180)), code: .simulatorFailed,
                                     next: "add photos (png, jpg, heic) or videos (mov, mp4) that exist")
     }
 
