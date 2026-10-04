@@ -1,0 +1,83 @@
+import Darwin
+import Foundation
+
+/// A recording in progress, kept in `.xcdev/ui-record-<device>.json` so a later xcd can stop it.
+public struct RecordingRecord: Codable, Sendable, Equatable {
+    public let device: String
+    public let udid: String
+    public let path: String
+    public let log: String
+    public let process: ProcessIdentity
+    public let startedAt: Date
+
+    public init(device: String, udid: String, path: String, log: String, process: ProcessIdentity, startedAt: Date) {
+        self.device = device
+        self.udid = udid
+        self.path = path
+        self.log = log
+        self.process = process
+        self.startedAt = startedAt
+    }
+}
+
+extension WorktreePaths {
+    public func recordingFile(device: String) -> String { stateDirectory + "/ui-record-\(device).json" }
+    public func recordingLog(device: String) -> String { logs + "/ui-record-\(device).log" }
+
+    /// Every recording record in this worktree, sorted.
+    public var recordingFiles: [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: stateDirectory)) ?? [])
+            .filter { $0.hasPrefix("ui-record-") && $0.hasSuffix(".json") }.sorted().map { stateDirectory + "/" + $0 }
+    }
+}
+
+/// How a recording ended.
+public struct RecordingStop: Codable, Sendable, Equatable {
+    public let device: String
+    public let path: String
+    public let seconds: Double
+    public let bytes: Int64
+    public let outcome: DetachedStop
+
+    public var note: String {
+        "stopped the \(device) recording after \(DurationText.format(.milliseconds(Int64(seconds * 1000)))): \(path)"
+            + (outcome == .killed ? " (simctl was killed, so the video may be incomplete)" : "")
+    }
+}
+
+public enum Recordings {
+    /// The argument that identifies simctl's recorder, so a reused pid is never taken for it.
+    public static let marker = "recordVideo"
+
+    public static func load(_ file: String) -> RecordingRecord? {
+        guard let data = FileManager.default.contents(atPath: file) else { return nil }
+        return try? JSONCoding.decoder.decode(RecordingRecord.self, from: data)
+    }
+
+    public static func save(_ record: RecordingRecord, to file: String) throws {
+        try FileManager.default.createDirectory(atPath: (file as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try JSONCoding.encoder(pretty: true).encode(record).write(to: URL(fileURLWithPath: file), options: .atomic)
+    }
+
+    /// Stops `record` with SIGINT so simctl finishes the file (SIGKILL after `MediaService.stopTimeout`), then deletes
+    /// the record file.
+    public static func stop(_ record: RecordingRecord, file: String, detached: any DetachedProcessLaunching,
+                            now: Date) async -> RecordingStop {
+        let outcome = await detached.stop(record.process, marker: marker, signal: SIGINT, timeout: MediaService.stopTimeout)
+        try? FileManager.default.removeItem(atPath: file)
+        let bytes = ((try? FileManager.default.attributesOfItem(atPath: record.path))?[.size] as? NSNumber)?.int64Value ?? 0
+        return RecordingStop(device: record.device, path: record.path, seconds: now.timeIntervalSince(record.startedAt).rounded(),
+                             bytes: bytes, outcome: outcome)
+    }
+
+    /// Stops the recordings in `paths`, only `device`'s when given: for `sim shutdown`, `sim erase`, and `wt remove`.
+    public static func stopAll(in paths: WorktreePaths, device: String? = nil, detached: any DetachedProcessLaunching,
+                               now: Date) async -> [RecordingStop] {
+        var stops: [RecordingStop] = []
+        for file in paths.recordingFiles {
+            guard let record = load(file), device == nil || record.device == device else { continue }
+            stops.append(await stop(record, file: file, detached: detached, now: now))
+        }
+        return stops
+    }
+}
