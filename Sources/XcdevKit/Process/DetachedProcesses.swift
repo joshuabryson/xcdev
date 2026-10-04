@@ -47,8 +47,10 @@ public struct SystemDetachedProcesses: DetachedProcessLaunching {
             throw XcdError(.subprocessFailed, "could not launch \(invocation.executable): \(error.localizedDescription)",
                            details: ["command: \(invocation.commandLine)"])
         }
-        child.watch(keepZombie: { false })            // reaped if it exits while this xcd still runs
-        guard let identity = inspector.identity(of: child.pid) else {
+        // Read before `watch`: until it is reaped the child pins its pid, so this can't be another process's identity.
+        let identity = inspector.identity(of: child.pid)
+        child.watch(keepZombie: { false })            // reaped if it exits while this xcd still runs, on either path
+        guard let identity else {
             throw XcdError(.subprocessFailed, "`\(invocation.argv.prefix(3).joined(separator: " "))` exited as soon as it started",
                            next: "read its output in \(log)", details: ["command: \(invocation.commandLine)"])
         }

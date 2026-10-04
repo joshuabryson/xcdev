@@ -47,7 +47,8 @@ public struct SystemProcessInspector: ProcessInspecting {
         return ProcessIdentity(pid: pid, startTime: start, arguments: Self.arguments(of: pid) ?? [])
     }
 
-    public func signalGroup(_ pid: Int32, _ signal: Int32) -> Bool { pid > 0 && kill(-pid, signal) == 0 }
+    /// Never pid 1 or below: `kill(-1, …)` would signal every process this user owns.
+    public func signalGroup(_ pid: Int32, _ signal: Int32) -> Bool { pid > 1 && kill(-pid, signal) == 0 }
 
     /// argv from `KERN_PROCARGS2`: argc, the executable path, padding, then the arguments, NUL-separated.
     static func arguments(of pid: Int32) -> [String]? {

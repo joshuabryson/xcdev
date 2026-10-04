@@ -50,6 +50,14 @@ import XcdevTestSupport
         }
     }
 
+    /// `kill(-1, …)` signals every process the user owns, and group 0 is xcd's own: neither may ever be sent.
+    @Test func signalGroupRefusesPidsThatAreNotAProcessGroupLeader() {
+        let inspector = SystemProcessInspector()
+        #expect(!inspector.signalGroup(1, 0))
+        #expect(!inspector.signalGroup(0, 0))
+        #expect(!inspector.signalGroup(-1, 0))
+    }
+
     @Test func aMissingExecutableIsSubprocessFailed() {
         let error = #expect(throws: XcdError.self) { _ = try launcher.start(Invocation("/no/such/tool", []), log: dir + "/d.log") }
         #expect(error?.code == .subprocessFailed)

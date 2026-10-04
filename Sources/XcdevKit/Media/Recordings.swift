@@ -40,7 +40,8 @@ public struct RecordingStop: Codable, Sendable, Equatable {
     public let outcome: DetachedStop
 
     public var note: String {
-        "stopped the \(device) recording after \(DurationText.format(.milliseconds(Int64(seconds * 1000)))): \(path)"
+        if outcome == .notRunning { return "the \(device) recording had already ended: \(path)" }
+        return "stopped the \(device) recording after \(DurationText.format(.milliseconds(Int64(seconds * 1000)))): \(path)"
             + (outcome == .killed ? " (simctl was killed, so the video may be incomplete)" : "")
     }
 }
@@ -60,11 +61,12 @@ public enum Recordings {
     }
 
     /// Stops `record` with SIGINT so simctl finishes the file (SIGKILL after `MediaService.stopTimeout`), then deletes
-    /// the record file.
+    /// the record file, unless another xcd has saved a different recording's record there meanwhile.
     public static func stop(_ record: RecordingRecord, file: String, detached: any DetachedProcessLaunching,
                             now: Date) async -> RecordingStop {
         let outcome = await detached.stop(record.process, marker: marker, signal: SIGINT, timeout: MediaService.stopTimeout)
-        try? FileManager.default.removeItem(atPath: file)
+        // A record that no longer decodes can't be acted on, so it goes too; one naming another process stays.
+        if load(file).map({ $0.process == record.process }) ?? true { try? FileManager.default.removeItem(atPath: file) }
         let bytes = ((try? FileManager.default.attributesOfItem(atPath: record.path))?[.size] as? NSNumber)?.int64Value ?? 0
         return RecordingStop(device: record.device, path: record.path, seconds: now.timeIntervalSince(record.startedAt).rounded(),
                              bytes: bytes, outcome: outcome)

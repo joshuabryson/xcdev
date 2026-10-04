@@ -32,6 +32,9 @@ import XcdevTestSupport
         return (service, ctx, sims)
     }
 
+    /// This worktree's iphone recording record file.
+    func ctxFile() -> String { WorktreePaths(root: worktree.root).recordingFile(device: "iphone") }
+
     @Test func aScreenshotLandsInTheMediaFolderWithItsSize() async throws {
         defer { worktree.remove() }
         var (service, ctx, _) = try setup()
@@ -99,6 +102,42 @@ import XcdevTestSupport
         let stopped = try await service.stopRecording(device: nil, in: ctx)
         #expect(stopped.outcome == .killed)
         #expect(stopped.text.contains("warning: simctl didn't finish within 45.0s and was killed, so the video may be incomplete"))
+    }
+
+    @Test func stoppingNeverDeletesANewerRecordingsRecord() async throws {
+        defer { worktree.remove() }
+        let newer = RecordingRecord(device: "iphone", udid: "U", path: "/new.mp4", log: "/new.log",
+                                    process: ProcessIdentity(pid: 888, startTime: 200, arguments: ["simctl", "recordVideo"]),
+                                    startedAt: Date(timeIntervalSince1970: 5))
+        let file = ctxFile()
+        // While the old recorder is being stopped, another xcd starts a new recording for the same device.
+        let detached = FakeDetachedProcesses(onStart: { _, log in try "Recording started\n".write(toFile: log, atomically: true, encoding: .utf8) },
+                                             onStop: { _ in try? Recordings.save(newer, to: file) })
+        var (service, ctx, _) = try setup(detached: detached)
+        _ = try await service.startRecording(device: nil, out: nil, in: &ctx)
+        #expect(file == ctx.paths.recordingFile(device: "iphone"))
+        _ = try await service.stopRecording(device: nil, in: ctx)
+        #expect(Recordings.load(file)?.process == newer.process)
+    }
+
+    @Test func aRecordThatNoLongerDecodesIsDeletedAfterAStop() async throws {
+        defer { worktree.remove() }
+        let file = ctxFile()
+        let detached = FakeDetachedProcesses(onStart: { _, log in try "Recording started\n".write(toFile: log, atomically: true, encoding: .utf8) },
+                                             onStop: { _ in try? "not json".write(toFile: file, atomically: true, encoding: .utf8) })
+        var (service, ctx, _) = try setup(detached: detached)
+        _ = try await service.startRecording(device: nil, out: nil, in: &ctx)
+        _ = try await service.stopRecording(device: nil, in: ctx)
+        #expect(!FileManager.default.fileExists(atPath: file))
+    }
+
+    @Test func theStopNoteSaysWhatHappenedForEachOutcome() {
+        func note(_ outcome: DetachedStop) -> String {
+            RecordingStop(device: "iphone", path: "/m/a.mp4", seconds: 61, bytes: 5, outcome: outcome).note
+        }
+        #expect(note(.stopped) == "stopped the iphone recording after 1m01s: /m/a.mp4")
+        #expect(note(.killed) == "stopped the iphone recording after 1m01s: /m/a.mp4 (simctl was killed, so the video may be incomplete)")
+        #expect(note(.notRunning) == "the iphone recording had already ended: /m/a.mp4")
     }
 
     @Test func aRecordingThatNeverStartsIsStoppedAndReported() async throws {
