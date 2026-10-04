@@ -37,6 +37,7 @@ struct TestCommand: AsyncParsableCommand {
     func run() async throws {
         try await Emit.run("test", options) { services in
             var ctx = try await services.open(worktree: options.worktree, xcode: target.xcode)
+            await Recording.stopOverdue(services, ctx)
             let timeout = try DurationText.option(scheme.timeout, flag: "--timeout") ?? .seconds(3600)
             return try await services.tests.test(
                 TestOptions(device: target.device, scheme: scheme.scheme, configuration: scheme.configuration,

@@ -14,10 +14,13 @@ public struct Services: Sendable {
     public var output: OutputFormat
     /// The SIGINT/SIGTERM handler's state: cleanups to run, and whether output must stop.
     public let interrupts: Interrupts
+    /// Launches processes that outlive the command (screen recordings), and stops them again.
+    public let detached: any DetachedProcessLaunching
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, currentDirectory: String,
                 environment: [String: String], progress: @escaping @Sendable (String) -> Void = { _ in },
-                terminal: (@Sendable (String) -> Void)? = nil, output: OutputFormat? = nil, interrupts: Interrupts = .shared) {
+                terminal: (@Sendable (String) -> Void)? = nil, output: OutputFormat? = nil, interrupts: Interrupts = .shared,
+                detached: any DetachedProcessLaunching = SystemDetachedProcesses()) {
         self.runner = runner
         self.globalPaths = globalPaths
         self.currentDirectory = currentDirectory
@@ -26,6 +29,7 @@ public struct Services: Sendable {
         self.terminal = terminal
         self.output = output ?? OutputFormat.resolve(jsonFlag: false, environment: environment)
         self.interrupts = interrupts
+        self.detached = detached
     }
 
     /// Progress stops once Ctrl-C has fired the handler: what follows would only describe the stopped children.
@@ -37,7 +41,8 @@ public struct Services: Sendable {
         return Services(runner: SystemProcessRunner(interrupts: interrupts), globalPaths: .live(environment: environment),
                         currentDirectory: FileManager.default.currentDirectoryPath, environment: environment,
                         progress: { line in interrupts.perform { stderr("xcd: \(line)\n") } },
-                        terminal: interactive ? stderr : nil, interrupts: interrupts)
+                        terminal: interactive ? stderr : nil, interrupts: interrupts,
+                        detached: SystemDetachedProcesses(inheritedEnvironment: environment))
     }
 
     /// Long steps: a spinner on a terminal, unless the output is JSON; otherwise `progress` lines.
@@ -48,8 +53,10 @@ public struct Services: Sendable {
         return .plain(progress)
     }
 
-    public var worktrees: WorktreeService { WorktreeService(runner: runner, globalPaths: globalPaths, hooks: hooks) }
+    public var worktrees: WorktreeService { WorktreeService(runner: runner, globalPaths: globalPaths, hooks: hooks, detached: detached) }
     public var provisioner: DeviceProvisioner { DeviceProvisioner(runner: runner, globalPaths: globalPaths) }
+    public var media: MediaService { MediaService(provisioner: provisioner, detached: detached, currentDirectory: currentDirectory) }
+    public var deviceState: DeviceStateService { DeviceStateService(provisioner: provisioner) }
     public var hooks: HookRunner { HookRunner(runner: runner, output: output, progress: progress) }
     public var builds: BuildService { BuildService(runner: runner, provisioner: provisioner, progress: progress, hooks: hooks) }
     public var tests: TestService { TestService(builds: builds) }

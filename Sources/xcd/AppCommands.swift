@@ -15,6 +15,7 @@ struct RunCommand: AsyncParsableCommand {
     func run() async throws {
         try await Emit.run("run", options) { services in
             var ctx = try await services.open(worktree: options.worktree, xcode: target.xcode)
+            await Recording.stopOverdue(services, ctx)
             let timeout = try DurationText.option(scheme.timeout, flag: "--timeout") ?? .seconds(1800)
             return try await services.apps.run(
                 BuildOptions(device: target.device, scheme: scheme.scheme, configuration: scheme.configuration, timeout: timeout),
@@ -35,6 +36,7 @@ struct LaunchCommand: AsyncParsableCommand {
     func run() async throws {
         try await Emit.run("launch", options) { services in
             var ctx = try await services.open(worktree: options.worktree, xcode: target.xcode)
+            await Recording.stopOverdue(services, ctx)
             return try await services.apps.launch(device: target.device, options: try launch.options(), in: &ctx)
         }
     }
