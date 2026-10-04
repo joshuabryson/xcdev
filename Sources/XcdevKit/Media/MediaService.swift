@@ -56,8 +56,19 @@ public struct MediaService: Sendable {
         let offset = ((try? FileManager.default.attributesOfItem(atPath: log))?[.size] as? NSNumber)?.intValue ?? 0
         let process = try detached.start(provisioner.simctl(for: ctx).recordVideoInvocation(udid: device.udid, path: path), log: log)
         let record = RecordingRecord(device: name, udid: device.udid, path: path, log: log, process: process, startedAt: now())
-        try await waitUntilRecording(record, logOffset: offset)
-        try Recordings.save(record, to: file)
+        // The record is saved first, so a recorder xcd can no longer see is never left running.
+        do {
+            try Recordings.save(record, to: file)
+        } catch {
+            _ = await detached.stop(process, marker: Recordings.marker, signal: SIGINT, timeout: Self.stopTimeout)
+            throw error
+        }
+        do {
+            try await waitUntilRecording(record, logOffset: offset)
+        } catch {
+            _ = await Recordings.stop(record, file: file, detached: detached, now: now())
+            throw error
+        }
         return RecordingReport(action: .started, device: name, udid: device.udid, path: path, seconds: nil, bytes: nil,
                                outcome: nil, limit: DurationText.format(ctx.config.maxRecording), worktree: ctx.state.name)
     }
@@ -115,7 +126,6 @@ public struct MediaService: Sendable {
             }
             try await sleep(.milliseconds(100))
         }
-        _ = await detached.stop(record.process, marker: nil, signal: SIGINT, timeout: Self.stopTimeout)
         throw XcdError(.simulatorFailed, "the recording didn't start within \(DurationText.format(startTimeout))",
                        next: "run `xcd doctor`", details: ["log: \(record.log)"] + Self.tail(record.log, from: logOffset))
     }

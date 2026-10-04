@@ -96,6 +96,30 @@ import XcdevTestSupport
         #expect(Recordings.load(ctx.paths.recordingFile(device: "iphone")) == nil)
     }
 
+    @Test func aStartInterruptedWhileWaitingStopsTheRecorderAndLeavesNoRecord() async throws {
+        defer { worktree.remove() }
+        let detached = FakeDetachedProcesses(onStart: { _, log in try "Note: nothing yet\n".write(toFile: log, atomically: true, encoding: .utf8) })
+        var (_, ctx, _) = try setup(detached: detached)
+        let service = MediaService(provisioner: worktree.provisioner, detached: detached, currentDirectory: worktree.root,
+                                   now: { Date(timeIntervalSince1970: 1_791_085_501) }, sleep: { _ in throw CancellationError() })
+        await #expect(throws: CancellationError.self) { _ = try await service.startRecording(device: nil, out: nil, in: &ctx) }
+        let start = try #require(detached.starts.first)
+        #expect(detached.stops.map(\.pid) == [start.identity.pid] && detached.stops.map(\.signal) == [SIGINT])
+        #expect(Recordings.load(ctx.paths.recordingFile(device: "iphone")) == nil)
+    }
+
+    @Test func aRecorderThatExitsBeforeStartingIsReported() async throws {
+        defer { worktree.remove() }
+        let detached = FakeDetachedProcesses(onStart: { _, log in try "Note: nothing yet\n".write(toFile: log, atomically: true, encoding: .utf8) })
+        var (_, ctx, _) = try setup(detached: detached)
+        let service = MediaService(provisioner: worktree.provisioner, detached: detached, currentDirectory: worktree.root,
+                                   now: { Date(timeIntervalSince1970: 1_791_085_501) },
+                                   sleep: { _ in if let pid = detached.starts.first?.identity.pid { detached.exit(pid: pid) } })
+        let error = await #expect(throws: XcdError.self) { _ = try await service.startRecording(device: nil, out: nil, in: &ctx) }
+        #expect(error?.code == .simulatorFailed && error?.message == "simctl stopped before the recording started")
+        #expect(Recordings.load(ctx.paths.recordingFile(device: "iphone")) == nil)
+    }
+
     @Test func aRecordWhosePidWasReusedIsNeverSignalled() async throws {
         defer { worktree.remove() }
         let detached = FakeDetachedProcesses(onStart: { _, log in try "Recording started\n".write(toFile: log, atomically: true, encoding: .utf8) })
