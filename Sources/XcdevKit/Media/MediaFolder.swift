@@ -6,10 +6,15 @@ public struct MediaFolder: Sendable, Equatable {
     public let directory: String
     /// The main checkout, which a relative template starts at.
     public let projectRoot: String
+    /// What `.gitignore` in the main checkout should list for this folder, relative to it with a trailing `/`: the
+    /// template's fixed prefix, or its first expanded folder when it starts with a placeholder. Nil when the folder is
+    /// outside the checkout (or is the checkout).
+    public let ignoreEntry: String?
 
-    public init(directory: String, projectRoot: String) {
+    public init(directory: String, projectRoot: String, ignoreEntry: String? = nil) {
         self.directory = directory
         self.projectRoot = projectRoot
+        self.ignoreEntry = ignoreEntry
     }
 
     /// `device` nil (a context with no device) expands {device} to "nodevice".
@@ -29,7 +34,18 @@ public struct MediaFolder: Sendable, Equatable {
         ]
         var expanded = template
         for (name, value) in values { expanded = expanded.replacingOccurrences(of: "{\(name)}", with: value) }
-        return MediaFolder(directory: absolute(expanded, projectRoot: projectRoot, home: home), projectRoot: projectRoot)
+        let directory = absolute(expanded, projectRoot: projectRoot, home: home)
+        // The template's fixed prefix; with none (or only the checkout itself), the first expanded folder.
+        let inside = projectRoot + "/"
+        var entry: String?
+        if directory.hasPrefix(inside) {
+            if let fixed = root(template: template, projectRoot: projectRoot, home: home), fixed != projectRoot {
+                if fixed.hasPrefix(inside) { entry = String(fixed.dropFirst(inside.count)) + "/" }
+            } else if let first = directory.dropFirst(inside.count).split(separator: "/").first {
+                entry = String(first) + "/"
+            }
+        }
+        return MediaFolder(directory: directory, projectRoot: projectRoot, ignoreEntry: entry)
     }
 
     /// The fixed part of `template`, before its first placeholder, as an absolute path: the folder that holds every
@@ -47,13 +63,12 @@ public struct MediaFolder: Sendable, Equatable {
                                                    ext: ext, now: now)
     }
 
-    /// When the folder is inside the main checkout, makes sure `.gitignore` there lists its first folder.
-    /// Returns the entry it added.
+    /// Makes sure `.gitignore` in the main checkout lists `ignoreEntry`. Returns the entry it added, nil when there is
+    /// none or it was already listed.
     @discardableResult
     public func ensureIgnored() throws -> String? {
-        guard directory.hasPrefix(projectRoot + "/"),
-              let first = directory.dropFirst(projectRoot.count + 1).split(separator: "/").first else { return nil }
-        return try Gitignore.ensure([String(first) + "/"], in: projectRoot, comment: "screenshots and recordings").first
+        guard let ignoreEntry, directory.hasPrefix(projectRoot + "/") else { return nil }
+        return try Gitignore.ensure([ignoreEntry], in: projectRoot, comment: "screenshots and recordings").first
     }
 
     /// A name made safe as one folder: anything but letters, digits, `.`, `_`, and `-` becomes `-`. Nil for an empty

@@ -40,6 +40,19 @@ import XcdevTestSupport
         #expect(report.width == 1206 && report.height == 2622)
         #expect(report.text.hasPrefix("screenshot iphone  path=\(report.path)  1206x2622px"))
         #expect(try String(contentsOfFile: worktree.root + "/.gitignore", encoding: .utf8).contains("shots/\n"))
+        #expect(report.gitignoreAdded == "shots/")
+        #expect(report.text.contains("\nnote: added shots/ to .gitignore in \(worktree.root)"))
+        let second = try await service.screenshot(device: nil, out: nil, in: &ctx)
+        #expect(second.gitignoreAdded == nil && !second.text.contains("gitignore"))
+    }
+
+    @Test func aGitignoreThatCantBeWrittenIsAWarningNotAFailure() async throws {
+        defer { worktree.remove() }
+        var (service, ctx, _) = try setup()
+        try FileManager.default.createDirectory(atPath: worktree.root + "/.gitignore", withIntermediateDirectories: true)
+        let report = try await service.screenshot(device: nil, out: nil, in: &ctx)
+        #expect(report.gitignoreAdded == nil && report.gitignoreWarning?.hasPrefix("could not add shots/ to .gitignore: ") == true)
+        #expect(report.text.contains("\nwarning: could not add shots/ to .gitignore: "))
     }
 
     @Test func outIsRelativeToTheCurrentDirectoryAndNeverOverwrites() async throws {
@@ -64,6 +77,8 @@ import XcdevTestSupport
         #expect(started.action == .started && started.path?.hasSuffix("-iphone-recording.mp4") == true)
         #expect(Recordings.load(ctx.paths.recordingFile(device: "iphone"))?.process == start.identity)
         #expect(started.text.contains("next: stop it with `xcd ui record stop`"))
+        #expect(started.gitignoreAdded == "shots/")
+        #expect(started.text.contains("\nnote: added shots/ to .gitignore in \(worktree.root)\nnext: stop it"))
 
         let twice = await #expect(throws: XcdError.self) { _ = try await service.startRecording(device: nil, out: nil, in: &ctx) }
         #expect(twice?.code == .usage && twice?.message.contains("already recording") == true)

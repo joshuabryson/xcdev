@@ -98,15 +98,53 @@ import XcdevTestSupport
         #expect(second == first.replacingOccurrences(of: ".png", with: "-2.png"))
     }
 
-    @Test func theFolderIsIgnoredOnlyInsideTheMainCheckout() throws {
+    /// The entry `ensureIgnored` adds for `template`, in a fresh main checkout.
+    func ignored(_ template: String, home: String = "/Users/dev") throws -> (entry: String?, gitignore: String?) {
+        let main = try checkout("main", head: "ref: refs/heads/main\n")
+        let folder = MediaFolder.resolve(template: template, projectRoot: main, worktreeRoot: main, worktreeName: "main",
+                                         device: "iphone", home: home)
+        let entry = try folder.ensureIgnored()
+        return (entry, try? String(contentsOfFile: main + "/.gitignore", encoding: .utf8))
+    }
+
+    @Test func theDefaultFolderIsIgnoredOnceInsideTheMainCheckout() throws {
         defer { try? FileManager.default.removeItem(atPath: base) }
         let main = try checkout("main", head: "ref: refs/heads/main\n")
-        let inside = MediaFolder(directory: main + "/.xcdev-media/main/main", projectRoot: main)
-        #expect(try inside.ensureIgnored() == ".xcdev-media/")
-        #expect(try inside.ensureIgnored() == nil)
+        let folder = MediaFolder.resolve(template: XcdevConfig.defaultMediaDir, projectRoot: main, worktreeRoot: main,
+                                         worktreeName: "main", device: nil, home: "/h")
+        #expect(try folder.ensureIgnored() == ".xcdev-media/")
+        #expect(try folder.ensureIgnored() == nil)
         #expect(try String(contentsOfFile: main + "/.gitignore", encoding: .utf8)
                 == "# xcdev: screenshots and recordings\n.xcdev-media/\n")
+    }
+
+    @Test func aTemplatesFixedPrefixIsIgnoredNotItsFirstFolder() throws {
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        #expect(try ignored("docs/screens/{branch}").entry == "docs/screens/")
+        try? FileManager.default.removeItem(atPath: base)
+        #expect(try ignored("shots/{device}").entry == "shots/")
+        try? FileManager.default.removeItem(atPath: base)
+        #expect(try ignored("fixed/all/the/way").entry == "fixed/all/the/way/")
+    }
+
+    @Test func aTemplateStartingWithAPlaceholderIgnoresItsFirstExpandedFolder() throws {
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        #expect(try ignored("{branch}/shots").entry == "main/")
+    }
+
+    @Test func aFolderOutsideTheMainCheckoutOrTheCheckoutItselfAddsNothing() throws {
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        let main = try checkout("main", head: "ref: refs/heads/main\n")
         #expect(try MediaFolder(directory: "/elsewhere/m", projectRoot: main).ensureIgnored() == nil)
+        #expect(try ignored("~/Captures/{worktree}").entry == nil)
+        try? FileManager.default.removeItem(atPath: base)
+        #expect(try ignored("/abs/shots").entry == nil)
+        try? FileManager.default.removeItem(atPath: base)
+        #expect(try ignored("../media/{device}").entry == nil)
+        try? FileManager.default.removeItem(atPath: base)
+        let atRoot = try ignored("./{device}")
+        #expect(atRoot.entry == "iphone/")      // no fixed prefix beyond the checkout: first expanded folder
+        #expect(try ignored("~").entry == nil)
     }
 
     @Test func theMediaRootIsThePartBeforeTheFirstPlaceholder() {

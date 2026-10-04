@@ -32,14 +32,17 @@ public struct MediaService: Sendable {
     public func screenshot(device requested: String?, out: String?, in ctx: inout WorktreeContext) async throws -> ScreenshotReport {
         let name = try provisioner.deviceName(requested, config: ctx.config)
         let (device, _) = try await provisioner.boot(name, in: &ctx)
-        let path = try destination(out, device: name, kind: "screenshot", ext: "png", in: ctx)
+        let target = try destination(out, device: name, kind: "screenshot", ext: "png", in: ctx)
+        let path = target.path
         let simctl = provisioner.simctl(for: ctx)
         try await simctl.screenshot(udid: device.udid, path: path)
         let size = PNGInfo.size(of: path)
         let types = (try? await simctl.catalog())?.deviceTypes ?? []
         let bundle = types.first { $0.identifier == device.deviceTypeIdentifier }?.bundlePath
         return ScreenshotReport(device: name, udid: device.udid, path: path, width: size?.width, height: size?.height,
-                                scale: bundle.flatMap(DeviceTypeProfile.scale(bundlePath:)), worktree: ctx.state.name)
+                                scale: bundle.flatMap(DeviceTypeProfile.scale(bundlePath:)), worktree: ctx.state.name,
+                                gitignoreAdded: target.gitignoreAdded, gitignoreWarning: target.gitignoreWarning,
+                                mainCheckout: ctx.location.projectRoot)
     }
 
     public func startRecording(device requested: String?, out: String?, in ctx: inout WorktreeContext) async throws -> RecordingReport {
@@ -53,7 +56,8 @@ public struct MediaService: Sendable {
             try? FileManager.default.removeItem(atPath: file)        // its recording ended without xcd
         }
         let (device, _) = try await provisioner.boot(name, in: &ctx)
-        let path = try destination(out, device: name, kind: "recording", ext: "mp4", in: ctx)
+        let target = try destination(out, device: name, kind: "recording", ext: "mp4", in: ctx)
+        let path = target.path
         let log = ctx.paths.recordingLog(device: name)
         let offset = ((try? FileManager.default.attributesOfItem(atPath: log))?[.size] as? NSNumber)?.intValue ?? 0
         let process = try detached.start(provisioner.simctl(for: ctx).recordVideoInvocation(udid: device.udid, path: path), log: log)
@@ -72,7 +76,9 @@ public struct MediaService: Sendable {
             throw error
         }
         return RecordingReport(action: .started, device: name, udid: device.udid, path: path, seconds: nil, bytes: nil,
-                               outcome: nil, limit: DurationText.format(ctx.config.maxRecording), worktree: ctx.state.name)
+                               outcome: nil, limit: DurationText.format(ctx.config.maxRecording), worktree: ctx.state.name,
+                               gitignoreAdded: target.gitignoreAdded, gitignoreWarning: target.gitignoreWarning,
+                               mainCheckout: ctx.location.projectRoot)
     }
 
     public func stopRecording(device requested: String?, in ctx: WorktreeContext) async throws -> RecordingReport {
@@ -98,14 +104,28 @@ public struct MediaService: Sendable {
         return stops
     }
 
+    /// Where a capture goes, and what happened to `.gitignore` getting there.
+    struct Destination {
+        let path: String
+        var gitignoreAdded: String?
+        var gitignoreWarning: String?
+    }
+
     /// `--out` against the current directory (it must not exist; its folder is created), or a new file in the media
-    /// folder, which is made git-ignored.
-    func destination(_ out: String?, device: String, kind: String, ext: String, in ctx: WorktreeContext) throws -> String {
+    /// folder, which is made git-ignored (a `.gitignore` that can't be written is a warning, not a failure).
+    func destination(_ out: String?, device: String, kind: String, ext: String, in ctx: WorktreeContext) throws -> Destination {
         guard let out else {
             let folder = MediaFolder.resolve(template: ctx.config.mediaDirTemplate, projectRoot: ctx.location.projectRoot,
                                              worktreeRoot: ctx.location.worktreeRoot, worktreeName: ctx.state.name, device: device)
-            _ = try? folder.ensureIgnored()
-            return folder.newFile(device: device, kind: kind, ext: ext, now: now())
+            var added: String?
+            var warning: String?
+            do {
+                added = try folder.ensureIgnored()
+            } catch {
+                warning = "could not add \(folder.ignoreEntry ?? "an entry") to .gitignore: \(error.localizedDescription)"
+            }
+            return Destination(path: folder.newFile(device: device, kind: kind, ext: ext, now: now()),
+                               gitignoreAdded: added, gitignoreWarning: warning)
         }
         let expanded = (out as NSString).expandingTildeInPath
         let path = ((expanded.hasPrefix("/") ? expanded : currentDirectory + "/" + expanded) as NSString).standardizingPath
@@ -113,7 +133,7 @@ public struct MediaService: Sendable {
             throw XcdError(.usage, "\(path) already exists", next: "pick another --out, or delete it first")
         }
         try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        return path
+        return Destination(path: path)
     }
 
     /// simctl prints "Recording started" once it is writing frames. Polls every 100ms, counted in
