@@ -172,12 +172,32 @@ import XcdevTestSupport
             "XCD_PROJECT_ROOT": dir, "XCD_WORKTREE": dir, "XCD_WORKTREE_NAME": "feat",
             "XCD_DEVICE": "iphone", "XCD_UDID": "U", "XCD_RUNTIME": "iOS 27.0",
             "XCD_DERIVED_DATA": dir + "/.xcdev/DerivedData",
+            "XCD_MEDIA_DIR": dir + "/.xcdev-media/feat/nobranch",
             "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
         ])
         #expect(info.text.hasPrefix("DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer\nXCD_DERIVED_DATA="))
         let unprovisioned = ContextInfo.build(ctx: ctx, device: "old")
         #expect(unprovisioned.environment["XCD_UDID"] == nil)
         #expect(unprovisioned.environment["XCD_DEVICE"] == "old")
+    }
+
+    @Test func mediaDirFollowsTheDeviceAndIsAContractKey() throws {
+        let ctx = try context()
+        #expect(ContextInfo.build(ctx: ctx, device: nil).mediaDir == dir + "/.xcdev-media/feat/nobranch")
+        let custom = try context("""
+        version: 1
+        project: App.xcodeproj
+        defaultDevice: iphone
+        devices:
+          iphone: { type: "iPhone 18 Pro" }
+        ui: { media: { dir: "shots/{device}" } }
+        """)
+        #expect(ContextInfo.build(ctx: custom, device: nil).mediaDir == dir + "/shots/iphone")
+        #expect(ContextInfo.beforeBuild(ctx: custom, device: "iphone").environment["XCD_MEDIA_DIR"] == dir + "/shots/iphone")
+        #expect(ContextInfo.worktree(custom.state, config: custom.config).mediaDir == dir + "/shots/iphone")
+        #expect(ContextInfo.worktree(custom.state, config: nil).mediaDir == dir + "/.xcdev-media/feat/nobranch")
+        #expect(ContextInfo.contractKeys.contains("XCD_MEDIA_DIR"))
+        #expect(ContextInfo.childEnvironment(inherited: ["XCD_MEDIA_DIR": "/parent"], overrides: [:])["XCD_MEDIA_DIR"] == nil)
     }
 
     @Test func xcodeOverrideIsUsedButNeverPinned() async throws {

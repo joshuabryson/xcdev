@@ -89,7 +89,7 @@ import Testing
                                   config: try ConfigLoader.parse(main: BuildServiceTests.config), state: state)
         #expect(ContextInfo.build(ctx: ctx, device: nil).environment["XCD_OUTPUT"] == nil)
         #expect(ContextInfo.build(ctx: ctx, device: nil, output: .json).environment["XCD_OUTPUT"] == "json")
-        let worktree = ContextInfo.worktree(state, output: .text).environment
+        let worktree = ContextInfo.worktree(state, config: nil, output: .text).environment
         #expect(worktree["XCD_WORKTREE_NAME"] == "feat" && worktree["XCD_OUTPUT"] == "text")
         #expect(worktree["XCD_DERIVED_DATA"] == dir + "/.xcdev/DerivedData" && worktree["XCD_DEVICE"] == nil)
     }

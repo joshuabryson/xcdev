@@ -174,7 +174,7 @@ import XcdevTestSupport
                          "XCD_UNRELATED": "kept"]
         let state = WorktreeState(id: "id", name: "feat", project: "App", projectRoot: "/p", path: "/p/wt", branch: "feat",
                                   xcode: nil, devices: [:], status: .ready, createdAt: Date())
-        let context = ContextInfo.worktree(state).environment
+        let context = ContextInfo.worktree(state, config: nil).environment
         let script = #"for v in XCD_UDID XCD_APP_PATH XCD_OUTPUT XCD_WORKTREE_NAME DEVELOPER_DIR XCD_UNRELATED; do eval "printf '%s=%s\n' $v \"\${$v-unset}\""; done"#
         let out = try await SystemProcessRunner(inheritedEnvironment: inherited)
             .run(Invocation("/bin/sh", ["-c", script], environment: context))

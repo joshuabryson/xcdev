@@ -12,6 +12,14 @@ public struct ContextInfo: Reportable {
     public let developerDir: String?
     /// "text" or "json": the output format xcd itself was asked for, so extensions can match it.
     public let output: String?
+    /// Where captures go for this worktree, branch, and device (`ui.media.dir`).
+    public let mediaDir: String?
+
+    static func media(_ config: XcdevConfig?, location: ProjectLocation, worktreeName: String, device: String?) -> String {
+        MediaFolder.resolve(template: config?.mediaDirTemplate ?? XcdevConfig.defaultMediaDir, projectRoot: location.projectRoot,
+                            worktreeRoot: location.worktreeRoot, worktreeName: worktreeName,
+                            device: device ?? config?.defaultDevice).directory
+    }
 
     /// Reports only already-provisioned devices and already-built apps; building context never clones or builds.
     public static func build(ctx: WorktreeContext, device: String?, output: OutputFormat? = nil) -> ContextInfo {
@@ -21,7 +29,8 @@ public struct ContextInfo: Reportable {
                            worktreeName: ctx.state.name, device: device, udid: provisioned?.udid,
                            runtime: provisioned?.runtime, derivedData: ctx.paths.derivedData,
                            appPath: product?.path, bundleId: product?.bundleId,
-                           developerDir: ctx.xcode?.developerDir, output: output?.rawValue)
+                           developerDir: ctx.xcode?.developerDir, output: output?.rawValue,
+                           mediaDir: media(ctx.config, location: ctx.location, worktreeName: ctx.state.name, device: device))
     }
 
     /// The context before a build resolves its project, simulator, and app (for `pre-build`): the requested device's
@@ -30,20 +39,23 @@ public struct ContextInfo: Reportable {
         ContextInfo(projectRoot: ctx.location.projectRoot, worktree: ctx.location.worktreeRoot,
                     worktreeName: ctx.state.name, device: device, udid: nil, runtime: nil,
                     derivedData: ctx.paths.derivedData, appPath: nil, bundleId: nil,
-                    developerDir: ctx.xcode?.developerDir, output: output?.rawValue)
+                    developerDir: ctx.xcode?.developerDir, output: output?.rawValue,
+                    mediaDir: media(ctx.config, location: ctx.location, worktreeName: ctx.state.name, device: device))
     }
 
     /// The context of a worktree known only by its state (for worktree hooks): no device, no app.
-    public static func worktree(_ state: WorktreeState, output: OutputFormat? = nil) -> ContextInfo {
-        ContextInfo(projectRoot: state.projectRoot, worktree: state.path, worktreeName: state.name, device: nil, udid: nil,
+    public static func worktree(_ state: WorktreeState, config: XcdevConfig?, output: OutputFormat? = nil) -> ContextInfo {
+        let location = ProjectLocation(projectRoot: state.projectRoot, worktreeRoot: state.path)
+        return ContextInfo(projectRoot: state.projectRoot, worktree: state.path, worktreeName: state.name, device: nil, udid: nil,
                     runtime: nil, derivedData: WorktreePaths(root: state.path).derivedData, appPath: nil, bundleId: nil,
-                    developerDir: state.xcode?.developerDir, output: output?.rawValue)
+                    developerDir: state.xcode?.developerDir, output: output?.rawValue,
+                    mediaDir: media(config, location: location, worktreeName: state.name, device: nil))
     }
 
     /// The contract's XCD_* variables. DEVELOPER_DIR is left out: it is replaced only when xcd sets one.
     public static let contractKeys: Set<String> = [
         "XCD_PROJECT_ROOT", "XCD_WORKTREE", "XCD_WORKTREE_NAME", "XCD_DEVICE", "XCD_UDID", "XCD_RUNTIME",
-        "XCD_DERIVED_DATA", "XCD_APP_PATH", "XCD_BUNDLE_ID", "XCD_OUTPUT",
+        "XCD_DERIVED_DATA", "XCD_APP_PATH", "XCD_BUNDLE_ID", "XCD_OUTPUT", "XCD_MEDIA_DIR",
     ]
 
     /// A child's environment: `inherited` without the contract's XCD_* variables, with `overrides` merged over it.
@@ -67,6 +79,7 @@ public struct ContextInfo: Reportable {
         env["XCD_BUNDLE_ID"] = bundleId
         env["DEVELOPER_DIR"] = developerDir
         env["XCD_OUTPUT"] = output
+        env["XCD_MEDIA_DIR"] = mediaDir
         return env
     }
 

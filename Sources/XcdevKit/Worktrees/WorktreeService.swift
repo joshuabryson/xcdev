@@ -178,7 +178,7 @@ public struct WorktreeService: Sendable {
         guard let hooks, let config = try hookConfig(worktree: state.path, projectRoot: ctx.location.projectRoot) else {
             return
         }
-        try await hooks.run(.postWorktreeCreate, config: config, context: .worktree(state, output: hooks.output),
+        try await hooks.run(.postWorktreeCreate, config: config, context: .worktree(state, config: config, output: hooks.output),
                             logs: ctx.paths)
     }
 
@@ -360,7 +360,7 @@ extension WorktreeService {
         guard let hooks, let state = try? WorktreeStateStore.load(WorktreePaths(root: entry.path)) else { return [] }
         do {
             guard let config = try hookConfig(worktree: entry.path, projectRoot: ctx.location.projectRoot) else { return [] }
-            try await hooks.run(.preWorktreeRemove, config: config, context: .worktree(state, output: hooks.output),
+            try await hooks.run(.preWorktreeRemove, config: config, context: .worktree(state, config: config, output: hooks.output),
                                 logs: ctx.paths)
             return []
         } catch var error as XcdError {
