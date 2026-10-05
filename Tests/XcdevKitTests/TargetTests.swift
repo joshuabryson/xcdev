@@ -13,7 +13,7 @@ import Testing
     }
 
     @Test func rejectsWhatIsNotATarget() {
-        for bad in ["signIn", "id:", "label:", "label~", "ref:12", "ref:e", "@1", "@a,b", "@1,2,3", ""] {
+        for bad in ["signIn", "id:", "label:", "label~", "ref:12", "ref:e", "@1", "@a,b", "@1,2,3", "", "@nan,1", "@1,inf", "@infinity,2", "ref:e-1", "ref:e+1", "ref:e1.0"] {
             guard case .failure(let failure) = TargetParser.parse(bad) else {
                 Issue.record("'\(bad)' parsed")
                 continue
@@ -43,6 +43,87 @@ import Testing
         #expect(TargetMatcher.match(.label("Sign In"), role: nil, index: nil, in: nodes(), refs: [:]) == .one(3))
         // Asking for the text by role still finds it.
         #expect(TargetMatcher.match(.label("Sign In"), role: "text", index: nil, in: nodes(), refs: [:]) == .one(4))
+    }
+
+    @Test func nestedInteractiveMatchesKeepTheInnermostInteractive() {
+        // cell(75) "Delete" > button(9) "Delete" → the button
+        var tree1: [FlatNode] = []
+        TreeBuilder.flatten(
+            TreeBuilderTests.node(2, frame: TreeBuilderTests.screen, [
+                TreeBuilderTests.node(4, frame: TreeBuilderTests.screen, [
+                    TreeBuilderTests.node(1, frame: TreeBuilderTests.screen, [
+                        TreeBuilderTests.node(75, label: "Delete", frame: ScreenRect(x: 0, y: 100, w: 100, h: 40), [
+                            TreeBuilderTests.node(9, label: "Delete", frame: ScreenRect(x: 10, y: 105, w: 80, h: 30))
+                        ])
+                    ])
+                ])
+            ]),
+            source: .app, into: &tree1)
+        let btnIdx1 = tree1.firstIndex { $0.role == "button" && $0.label == "Delete" }!
+        #expect(TargetMatcher.match(.label("Delete"), role: nil, index: nil, in: tree1, refs: [:]) == .one(btnIdx1))
+
+        // cell "Delete" > button "Delete" > text(48) "Delete" → the button
+        var tree2: [FlatNode] = []
+        TreeBuilder.flatten(
+            TreeBuilderTests.node(2, frame: TreeBuilderTests.screen, [
+                TreeBuilderTests.node(4, frame: TreeBuilderTests.screen, [
+                    TreeBuilderTests.node(1, frame: TreeBuilderTests.screen, [
+                        TreeBuilderTests.node(75, label: "Delete", frame: ScreenRect(x: 0, y: 100, w: 100, h: 40), [
+                            TreeBuilderTests.node(9, label: "Delete", frame: ScreenRect(x: 10, y: 105, w: 80, h: 30), [
+                                TreeBuilderTests.node(48, label: "Delete", frame: ScreenRect(x: 15, y: 110, w: 70, h: 20))
+                            ])
+                        ])
+                    ])
+                ])
+            ]),
+            source: .app, into: &tree2)
+        let btnIdx2 = tree2.firstIndex { $0.role == "button" && $0.label == "Delete" }!
+        #expect(TargetMatcher.match(.label("Delete"), role: nil, index: nil, in: tree2, refs: [:]) == .one(btnIdx2))
+
+        // other(1) "Delete" > text(48) "Delete" (none interactive) → the outer other
+        var tree3: [FlatNode] = []
+        TreeBuilder.flatten(
+            TreeBuilderTests.node(2, frame: TreeBuilderTests.screen, [
+                TreeBuilderTests.node(4, frame: TreeBuilderTests.screen, [
+                    TreeBuilderTests.node(1, label: "Delete", frame: ScreenRect(x: 0, y: 100, w: 100, h: 40), [
+                        TreeBuilderTests.node(48, label: "Delete", frame: ScreenRect(x: 10, y: 105, w: 80, h: 30))
+                    ])
+                ])
+            ]),
+            source: .app, into: &tree3)
+        let otherIdx = tree3.firstIndex { $0.role == "other" && $0.label == "Delete" }!
+        #expect(TargetMatcher.match(.label("Delete"), role: nil, index: nil, in: tree3, refs: [:]) == .one(otherIdx))
+
+        // button "Delete" > other "Delete" > button "Delete" (interactive, non-interactive, interactive) → the innermost button
+        var tree4: [FlatNode] = []
+        TreeBuilder.flatten(
+            TreeBuilderTests.node(2, frame: TreeBuilderTests.screen, [
+                TreeBuilderTests.node(4, frame: TreeBuilderTests.screen, [
+                    TreeBuilderTests.node(1, frame: TreeBuilderTests.screen, [
+                        TreeBuilderTests.node(9, label: "Delete", frame: ScreenRect(x: 0, y: 100, w: 100, h: 40), [
+                            TreeBuilderTests.node(1, label: "Delete", frame: ScreenRect(x: 10, y: 105, w: 80, h: 30), [
+                                TreeBuilderTests.node(9, label: "Delete", frame: ScreenRect(x: 15, y: 110, w: 70, h: 20))
+                            ])
+                        ])
+                    ])
+                ])
+            ]),
+            source: .app, into: &tree4)
+        let buttons = tree4.enumerated().filter { $0.element.role == "button" && $0.element.label == "Delete" }
+        let innermostBtnIdx = buttons.last!.offset
+        #expect(TargetMatcher.match(.label("Delete"), role: nil, index: nil, in: tree4, refs: [:]) == .one(innermostBtnIdx))
+    }
+
+    @Test func nestedPairsInSeparateBranchesAreStillAmbiguous() {
+        // Two cells each containing a "Delete" button → ambiguous, and index: 1 picks the second button.
+        var two: [FlatNode] = []
+        let cell = { (y: Double) in TreeBuilderTests.node(75, label: "Delete", frame: ScreenRect(x: 0, y: y, w: 100, h: 40), [
+            TreeBuilderTests.node(9, label: "Delete", frame: ScreenRect(x: 10, y: y + 5, w: 80, h: 30))
+        ]) }
+        TreeBuilder.flatten(TreeBuilderTests.node(2, frame: TreeBuilderTests.screen, [cell(100), cell(200)]), source: .app, into: &two)
+        let buttons = two.enumerated().filter { $0.element.role == "button" && $0.element.label == "Delete" }.map(\.offset)
+        #expect(TargetMatcher.match(.label("Delete"), role: nil, index: nil, in: two, refs: [:]) == .ambiguous(buttons))
+        #expect(TargetMatcher.match(.label("Delete"), role: nil, index: 1, in: two, refs: [:]) == .one(buttons[1]))
     }
 
     @Test func severalMatchesAreAmbiguousUnlessAnIndexPicksOne() {

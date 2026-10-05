@@ -20,7 +20,7 @@ public enum TargetParser {
         let failure = Result<TargetSpec, TargetParseFailure>.failure(TargetParseFailure(message: "'\(text)' is not a target"))
         if text.hasPrefix("@") {
             let parts = text.dropFirst().split(separator: ",", omittingEmptySubsequences: false)
-            guard parts.count == 2, let x = Double(parts[0]), let y = Double(parts[1]) else { return failure }
+            guard parts.count == 2, let x = Double(parts[0]), let y = Double(parts[1]), x.isFinite && y.isFinite else { return failure }
             return .success(.point(x: x, y: y))
         }
         func rest(_ prefix: String) -> String? {
@@ -32,7 +32,9 @@ public enum TargetParser {
         if let value = rest("label:") { return .success(.label(value)) }
         if let value = rest("label~") { return .success(.labelContains(value)) }
         if let value = rest("ref:") {
-            guard value.hasPrefix("e"), Int(value.dropFirst()) != nil else { return failure }
+            guard value.hasPrefix("e"), value.count > 1 else { return failure }
+            let digits = String(value.dropFirst())
+            guard !digits.isEmpty && digits.allSatisfy({ $0.isNumber }) && Int(digits) != nil else { return failure }
             return .success(.ref(value))
         }
         return failure
@@ -75,14 +77,20 @@ public enum TargetMatcher {
         }
     }
 
-    /// When one match is inside another (a button and its own label text), keeps one: the interactive one, else the outer.
+    /// Among matches nested inside one another, keeps the innermost interactive one; if none of the nested matches is interactive, keeps the outermost.
+    /// Matches in separate branches remain ambiguous with each other.
     static func withoutNestedDuplicates(_ found: [Int], in nodes: [FlatNode]) -> [Int] {
         var dropped = Set<Int>()
+        let foundSet = Set(found)
         for inner in found {
             var current = nodes[inner].parent
             while let outer = current {
-                if found.contains(outer) {
-                    if nodes[inner].isInteractive && !nodes[outer].isInteractive { dropped.insert(outer) } else { dropped.insert(inner) }
+                if foundSet.contains(outer) {
+                    if nodes[inner].isInteractive {
+                        dropped.insert(outer)  // keep inner, the more specific interactive match
+                    } else {
+                        dropped.insert(inner)  // keep outer (either it's interactive, or both are non-interactive and we want the outermost)
+                    }
                 }
                 current = nodes[outer].parent
             }
