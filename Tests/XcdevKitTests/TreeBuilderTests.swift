@@ -69,6 +69,36 @@ import Testing
         #expect(TreeBuilder.displayed(nodes, screen: Self.screen, all: true).count == nodes.count)
     }
 
+    /// An identifier is something to aim at even with no label: `id:` matches it, so the tree lists it.
+    @Test func anElementWithOnlyAnIdentifierIsShown() {
+        let nodes = flat(Self.node(2, frame: Self.screen, [
+            Self.node(43, id: "avatar"),                                // an image with an identifier and no label
+            Self.node(1, id: "card"),                                   // a custom view
+            Self.node(1),                                               // nothing to aim at
+            Self.node(3, id: "section"),                                // a container stays hidden
+            Self.node(19, id: "keys", [Self.node(1, id: "inKeyboard")]),
+        ]))
+        let shown = TreeBuilder.displayed(nodes, screen: Self.screen, all: false).map { nodes[$0] }
+        #expect(shown.map(\.identifier) == ["avatar", "card"])
+        #expect(shown.map(\.role) == ["image", "other"])
+    }
+
+    /// SwiftUI copies a container's identifier to its children; a child with nothing else to show only repeats it.
+    @Test func aChildThatOnlyRepeatsAnAncestorsIdentifierIsHidden() {
+        let nodes = flat(Self.node(2, frame: Self.screen, [
+            Self.node(9, id: "gear", label: "Gear", [Self.node(43, id: "gear")]),
+            Self.node(1, id: "panel", [
+                Self.node(1, id: "panel"),
+                Self.node(3, [Self.node(43, id: "panel")]),              // not a direct child
+                Self.node(48, id: "panel", label: "Total"),             // has text of its own: still shown
+                Self.node(43, id: "chart"),                             // its own identifier
+            ]),
+        ]))
+        let shown = TreeBuilder.displayed(nodes, screen: Self.screen, all: false).map { nodes[$0] }
+        #expect(shown.map(\.role) == ["button", "other", "text", "image"])
+        #expect(shown.map(\.identifier) == ["gear", "panel", "panel", "chart"])
+    }
+
     @Test func onScreenMeansTheCentreIsOnScreenAndTheFrameIsNotEmpty() {
         let nodes = flat()
         #expect(TreeBuilder.isOnScreen(nodes[3], screen: Self.screen))

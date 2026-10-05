@@ -13,6 +13,8 @@ public final class FakeDevice: DeviceDriving {
     /// Runs after each pause (e.g. to make an element appear after a few polls).
     public var onPause: ((FakeDevice) -> Void)?
     public var failSnapshots = false
+    /// How many of the next snapshots throw before they succeed again.
+    public var snapshotsToFail = 0
 
     public init(app: SnapshotNode?, system: SnapshotNode) {
         self.app = app
@@ -26,13 +28,22 @@ public final class FakeDevice: DeviceDriving {
     public func appState(_ bundleId: String) -> AppRunState { state }
 
     public func appSnapshot(_ bundleId: String) throws -> SnapshotNode {
-        guard !failSnapshots, let app else { throw Failure() }
+        try failIfAsked()
+        guard let app else { throw Failure() }
         return app
     }
 
     public func systemSnapshot() throws -> SnapshotNode {
-        guard !failSnapshots else { throw Failure() }
+        try failIfAsked()
         return system
+    }
+
+    private func failIfAsked() throws {
+        if snapshotsToFail > 0 {
+            snapshotsToFail -= 1
+            throw Failure()
+        }
+        if failSnapshots { throw Failure() }
     }
 
     public func systemAlert() -> SnapshotNode? { alert }

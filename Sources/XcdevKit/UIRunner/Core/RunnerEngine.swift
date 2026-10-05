@@ -75,18 +75,29 @@ public final class RunnerEngine {
         return RunnerFailure(code: RunnerFailure.Code.appNotForeground, message: what)
     }
 
-    /// Why a tap on `node` would not reach it: it is covered by a system alert or the keyboard. Only app elements can be covered.
+    /// The keyboard, when one is on screen.
+    func keyboard(in scene: Scene) -> FlatNode? {
+        scene.nodes.first { $0.role == "keyboard" && TreeBuilder.isOnScreen($0, screen: scene.screen) }
+    }
+
+    /// Why a tap on `node` would not reach it: a system alert is up, or the keyboard is over it. Only app elements can be
+    /// covered. A system alert is modal, so it covers every app element, not only those under its frame.
     func coveredBy(_ node: FlatNode, in scene: Scene) -> String? {
         guard node.source == .app else { return nil }
-        if let alert = scene.alert, scene.nodes[alert].frame.contains(x: node.frame.midX, y: node.frame.midY) {
-            return "the element is covered by a system alert"
-        }
-        if !node.inKeyboard, node.role != "keyboard",
-           let keyboard = scene.nodes.first(where: { $0.role == "keyboard" && TreeBuilder.isOnScreen($0, screen: scene.screen) }),
+        if scene.alert != nil { return "the element is covered by a system alert" }
+        if !node.inKeyboard, node.role != "keyboard", let keyboard = keyboard(in: scene),
            keyboard.frame.contains(x: node.frame.midX, y: node.frame.midY) {
             return "the element is covered by the keyboard"
         }
         return nil
+    }
+
+    /// Why `node` can't be tapped now, if it can't.
+    func unhittable(_ node: FlatNode, in scene: Scene) -> String? {
+        if !node.enabled { return "the element is disabled" }
+        if node.frame.isEmpty { return "the element has no size" }
+        if !TreeBuilder.isOnScreen(node, screen: scene.screen) { return "the element is off screen" }
+        return coveredBy(node, in: scene)
     }
 
     /// Seconds to keep looking: at most two minutes, so a runner can't be held for hours.
@@ -120,114 +131,139 @@ public final class RunnerEngine {
         do {
             let scene = try readScene(bundleId: request.bundleId, system: request.system)
             return .success(TreeResult(bundleId: request.bundleId, state: scene.state, screen: scene.screen, scale: device.scale,
-                                       orientation: device.orientation, keyboard: scene.nodes.contains { $0.role == "keyboard" },
+                                       orientation: device.orientation, keyboard: keyboard(in: scene) != nil,
                                        elements: elements(of: scene, all: request.all)))
         } catch {
             return .failure(RunnerFailure(code: RunnerFailure.Code.internal, message: "could not read the screen: \(error)"))
         }
     }
 
-    public func tap(_ request: TargetRequest) -> Result<ActionResult, RunnerFailure> {
+    /// What one look at the screen decided for a tap or a wait.
+    enum Attempt {
+        case done(Result<ActionResult, RunnerFailure>)
+        /// Not yet: look again until the timeout, then this is the answer.
+        case retry(RunnerFailure)
+    }
+
+    /// A tap or a wait must say where to look: an app, or the system. Without either it would read the Home Screen.
+    func refusal(_ request: TargetRequest) -> RunnerFailure? {
+        guard !request.system, request.bundleId == nil else { return nil }
+        return RunnerFailure(code: RunnerFailure.Code.badRequest, message: "the request names no app and is not for the system")
+    }
+
+    /// Looks at the screen every `pollInterval` until `attempt` settles or the request's timeout passes; the last look's
+    /// failure is then the answer. A snapshot that throws is one failed look, not the end: the screen may be changing.
+    func poll(_ request: TargetRequest, what: String, attempt: (Scene, _ elapsedMs: () -> Int) -> Attempt) -> Result<ActionResult, RunnerFailure> {
         let start = device.now()
         let timeout = Self.clamped(request.timeout)
-        func ms() -> Int { Int((device.now() - start) * 1000) }
+        let elapsedMs = { Int((self.device.now() - start) * 1000) }
+        while true {
+            let outcome: Attempt
+            do {
+                outcome = attempt(try readScene(bundleId: request.bundleId, system: request.system, forAction: true), elapsedMs)
+            } catch {
+                outcome = .retry(RunnerFailure(code: RunnerFailure.Code.internal, message: "the \(what) failed: \(error)"))
+            }
+            switch outcome {
+            case .done(let result):
+                return result
+            case .retry(let failure):
+                guard device.now() - start + Self.pollInterval <= timeout else { return .failure(failure) }
+            }
+            device.pause(Self.pollInterval)
+        }
+    }
+
+    public func tap(_ request: TargetRequest) -> Result<ActionResult, RunnerFailure> {
+        if let refusal = refusal(request) { return .failure(refusal) }
+        if case .point(let x, let y) = request.target {
+            let start = device.now()
+            return tapped(nil, x: x, y: y) { Int((self.device.now() - start) * 1000) }
+        }
+        return poll(request, what: "tap") { scene, elapsedMs in self.tapAttempt(request, in: scene, elapsedMs: elapsedMs) }
+    }
+
+    /// Taps the point and reports it. A tap that throws is never tried again: it may have landed.
+    func tapped(_ element: TreeElement?, x: Double, y: Double, elapsedMs: () -> Int) -> Result<ActionResult, RunnerFailure> {
         do {
-            if case .point(let x, let y) = request.target {
-                try device.tap(x: x, y: y)
-                return .success(ActionResult(element: nil, x: x, y: y, ms: ms()))
-            }
-            var last = RunnerFailure(code: RunnerFailure.Code.notFound, message: "no element matches")
-            while true {
-                let scene = try readScene(bundleId: request.bundleId, system: request.system, forAction: true)
-                if scene.appAway {
-                    last = appAwayFailure(scene)
-                } else {
-                    switch TargetMatcher.match(request.target, role: request.role, index: request.index, in: scene.nodes, refs: refs) {
-                    case .staleRef:
-                        return .failure(RunnerFailure(code: RunnerFailure.Code.staleRef, message: "that ref no longer names one element on screen"))
-                    case .ambiguous(let found):
-                        // The refs become exactly the candidates, each with its own, so `ref:eN` can pick one.
-                        var table: [String: RefSignature] = [:]
-                        var candidates: [TreeElement] = []
-                        for (number, index) in found.enumerated() {
-                            let ref = "e\(number + 1)"
-                            table[ref] = scene.nodes[index].signature
-                            candidates.append(TreeBuilder.element(scene.nodes[index], ref: ref, screen: scene.screen))
-                        }
-                        refs = table
-                        return .failure(RunnerFailure(code: RunnerFailure.Code.ambiguous, message: "\(found.count) elements match", candidates: candidates))
-                    case .one(let index):
-                        let node = scene.nodes[index]
-                        let problem: String?
-                        if !node.enabled {
-                            problem = "the element is disabled"
-                        } else if node.frame.isEmpty {
-                            problem = "the element has no size"
-                        } else if !TreeBuilder.isOnScreen(node, screen: scene.screen) {
-                            problem = "the element is off screen"
-                        } else {
-                            problem = coveredBy(node, in: scene)
-                        }
-                        if let problem {
-                            last = RunnerFailure(code: RunnerFailure.Code.notHittable, message: problem, frame: node.frame)
-                        } else {
-                            try device.tap(x: node.frame.midX, y: node.frame.midY)
-                            return .success(ActionResult(element: TreeBuilder.element(node, ref: nil, screen: scene.screen),
-                                                         x: node.frame.midX, y: node.frame.midY, ms: ms()))
-                        }
-                    case .none:
-                        last = RunnerFailure(code: RunnerFailure.Code.notFound, message: "no element matches", seen: seen(scene))
-                    }
-                }
-                guard device.now() - start + Self.pollInterval <= timeout else { return .failure(last) }
-                device.pause(Self.pollInterval)
-            }
+            try device.tap(x: x, y: y)
+            return .success(ActionResult(element: element, x: x, y: y, ms: elapsedMs()))
         } catch {
             return .failure(RunnerFailure(code: RunnerFailure.Code.internal, message: "the tap failed: \(error)"))
         }
     }
 
+    func tapAttempt(_ request: TargetRequest, in scene: Scene, elapsedMs: () -> Int) -> Attempt {
+        if scene.appAway { return .retry(appAwayFailure(scene)) }
+        switch TargetMatcher.match(request.target, role: request.role, index: request.index, in: scene.nodes, refs: refs) {
+        case .staleRef:
+            return .done(.failure(Self.staleRef))
+        case .ambiguous(let found):
+            return .done(.failure(ambiguous(found, in: scene)))
+        case .none:
+            return .retry(RunnerFailure(code: RunnerFailure.Code.notFound, message: "no element matches", seen: seen(scene)))
+        case .one(let index):
+            let node = scene.nodes[index]
+            if let problem = unhittable(node, in: scene) {
+                return .retry(RunnerFailure(code: RunnerFailure.Code.notHittable, message: problem, frame: node.frame))
+            }
+            return .done(tapped(TreeBuilder.element(node, ref: nil, screen: scene.screen), x: node.frame.midX, y: node.frame.midY,
+                                elapsedMs: elapsedMs))
+        }
+    }
+
+    static let staleRef = RunnerFailure(code: RunnerFailure.Code.staleRef, message: "that ref no longer names one element on screen")
+
+    /// The failure for several matches. The refs become exactly the candidates, each with its own, so `ref:eN` can pick one.
+    func ambiguous(_ found: [Int], in scene: Scene) -> RunnerFailure {
+        var table: [String: RefSignature] = [:]
+        var candidates: [TreeElement] = []
+        for (number, index) in found.enumerated() {
+            let ref = "e\(number + 1)"
+            table[ref] = scene.nodes[index].signature
+            candidates.append(TreeBuilder.element(scene.nodes[index], ref: ref, screen: scene.screen))
+        }
+        refs = table
+        return RunnerFailure(code: RunnerFailure.Code.ambiguous, message: "\(found.count) elements match", candidates: candidates)
+    }
+
     public func wait(_ request: TargetRequest) -> Result<ActionResult, RunnerFailure> {
+        if let refusal = refusal(request) { return .failure(refusal) }
         if case .point = request.target {
             return .failure(RunnerFailure(code: RunnerFailure.Code.badRequest, message: "a point can't be waited for"))
         }
-        let start = device.now()
-        let timeout = Self.clamped(request.timeout)
-        do {
-            while true {
-                let scene = try readScene(bundleId: request.bundleId, system: request.system, forAction: true)
-                var present: Int?
-                if !scene.appAway {
-                    switch TargetMatcher.match(request.target, role: request.role, index: request.index, in: scene.nodes, refs: refs) {
-                    case .one(let index):
-                        if TreeBuilder.isOnScreen(scene.nodes[index], screen: scene.screen) { present = index }
-                    case .ambiguous(let found):
-                        present = found.first { TreeBuilder.isOnScreen(scene.nodes[$0], screen: scene.screen) }
-                    case .staleRef:
-                        // A ref that was never issued is unknown; one that was issued and no longer matches is gone.
-                        if case .ref(let name) = request.target, !request.gone || refs[name] == nil {
-                            return .failure(RunnerFailure(code: RunnerFailure.Code.staleRef, message: "that ref no longer names one element on screen"))
-                        }
-                    case .none:
-                        break
-                    }
-                    let ms = Int((device.now() - start) * 1000)
-                    if request.gone, present == nil { return .success(ActionResult(element: nil, x: nil, y: nil, ms: ms)) }
-                    if !request.gone, let present {
-                        return .success(ActionResult(element: TreeBuilder.element(scene.nodes[present], ref: nil, screen: scene.screen),
-                                                     x: nil, y: nil, ms: ms))
-                    }
-                }
-                guard device.now() - start + Self.pollInterval <= timeout else {
-                    if scene.appAway { return .failure(appAwayFailure(scene)) }
-                    return .failure(RunnerFailure(code: RunnerFailure.Code.waitTimeout,
-                                                  message: request.gone ? "the element is still on screen" : "the element did not appear",
-                                                  seen: seen(scene)))
-                }
-                device.pause(Self.pollInterval)
-            }
-        } catch {
-            return .failure(RunnerFailure(code: RunnerFailure.Code.internal, message: "the wait failed: \(error)"))
+        return poll(request, what: "wait") { scene, elapsedMs in self.waitAttempt(request, in: scene, elapsedMs: elapsedMs) }
+    }
+
+    func waitAttempt(_ request: TargetRequest, in scene: Scene, elapsedMs: () -> Int) -> Attempt {
+        if scene.appAway { return .retry(appAwayFailure(scene)) }
+        let present: Int?
+        switch presence(of: request, in: scene) {
+        case .failure(let failure): return .done(.failure(failure))
+        case .success(let index): present = index
+        }
+        if request.gone, present == nil { return .done(.success(ActionResult(element: nil, x: nil, y: nil, ms: elapsedMs()))) }
+        if !request.gone, let present {
+            let element = TreeBuilder.element(scene.nodes[present], ref: nil, screen: scene.screen)
+            return .done(.success(ActionResult(element: element, x: nil, y: nil, ms: elapsedMs())))
+        }
+        return .retry(RunnerFailure(code: RunnerFailure.Code.waitTimeout,
+                                    message: request.gone ? "the element is still on screen" : "the element did not appear", seen: seen(scene)))
+    }
+
+    /// The index of the on-screen element the request waits for, nil when none is on screen; or why the wait can't go on.
+    func presence(of request: TargetRequest, in scene: Scene) -> Result<Int?, RunnerFailure> {
+        switch TargetMatcher.match(request.target, role: request.role, index: request.index, in: scene.nodes, refs: refs) {
+        case .one(let index):
+            return .success(TreeBuilder.isOnScreen(scene.nodes[index], screen: scene.screen) ? index : nil)
+        case .ambiguous(let found):
+            return .success(found.first { TreeBuilder.isOnScreen(scene.nodes[$0], screen: scene.screen) })
+        case .staleRef:
+            // A ref that was never issued is unknown; one that was issued and no longer matches is gone.
+            if case .ref(let name) = request.target, !request.gone || refs[name] == nil { return .failure(Self.staleRef) }
+            return .success(nil)
+        case .none:
+            return .success(nil)
         }
     }
 

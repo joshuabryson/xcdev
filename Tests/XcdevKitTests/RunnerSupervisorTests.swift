@@ -307,6 +307,22 @@ import XcdevTestSupport
         #expect(throws: Never.self) { try Runners.requireIOS(phone, name: "iphone") }
     }
 
+    /// XCTest in this Xcode is built for iOS 17, so the runner would not load on an older runtime.
+    @Test func anIOSRuntimeOlderThan17CannotBeDriven() {
+        func phone(_ runtime: String, _ identifier: String) -> ProvisionedDevice {
+            ProvisionedDevice(udid: "P", deviceType: "iPhone 15", deviceTypeIdentifier: "t", runtime: runtime,
+                              runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime." + identifier)
+        }
+        let error = #expect(throws: XcdError.self) { try Runners.requireIOS(phone("iOS 16.4", "iOS-16-4"), name: "old") }
+        #expect(error?.code == .platformUnsupported && error?.message == "the UI runner needs iOS 17 or later; 'old' runs iOS 16.4")
+        #expect(error?.next == "give 'old' an iOS 17 or later runtime in .xcdev.yml, or pick another device with `--device <name>`")
+        #expect(throws: XcdError.self) { try Runners.requireIOS(phone("iOS 15.0", "iOS-15-0"), name: "older") }
+        #expect(throws: Never.self) { try Runners.requireIOS(phone("iOS 17.0", "iOS-17-0"), name: "lowest") }
+        #expect(throws: Never.self) { try Runners.requireIOS(phone("iOS 18.2", "iOS-18-2"), name: "newer") }
+        // A version xcd can't read is not refused: the runner's own start reports what goes wrong.
+        #expect(throws: Never.self) { try Runners.requireIOS(phone("iOS", "iOS-beta"), name: "odd") }
+    }
+
     @Test func stoppingUsesSIGTERMAndRemovesTheRecordAndReadyFile() async throws {
         defer { worktree.remove() }
         let detached = FakeDetachedProcesses(onStart: Self.writesReady)

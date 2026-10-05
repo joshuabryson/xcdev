@@ -85,11 +85,21 @@ public enum Runners {
         return globalPaths.locksDirectory + "/ui-runner-" + key + "-" + name + ".lock"
     }
 
-    /// UI driving works on iPhone and iPad simulators only.
+    /// The runner's deployment target: this Xcode's XCTest is built for iOS 17, so the runner can't load on anything older.
+    public static let minimumIOS = 17
+
+    /// UI driving works on iPhone and iPad simulators only, running iOS 17 or later.
     public static func requireIOS(_ device: ProvisionedDevice, name: String) throws {
-        guard device.runtimeIdentifier.contains("SimRuntime.iOS-") else {
+        let marker = "SimRuntime.iOS-"
+        guard let found = device.runtimeIdentifier.range(of: marker) else {
             throw XcdError(.platformUnsupported, "UI driving supports iPhone and iPad simulators; '\(name)' runs \(device.runtime)",
                            next: "use an iPhone or iPad device from .xcdev.yml with `--device <name>`")
+        }
+        // "…SimRuntime.iOS-16-4" is iOS 16.4. A version that can't be read is let through: the runner's start reports what goes wrong.
+        let major = Int(device.runtimeIdentifier[found.upperBound...].prefix { $0.isNumber })
+        if let major, major < minimumIOS {
+            throw XcdError(.platformUnsupported, "the UI runner needs iOS \(minimumIOS) or later; '\(name)' runs \(device.runtime)",
+                           next: "give '\(name)' an iOS \(minimumIOS) or later runtime in .xcdev.yml, or pick another device with `--device <name>`")
         }
     }
 }

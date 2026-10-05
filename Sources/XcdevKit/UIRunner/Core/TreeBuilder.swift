@@ -41,17 +41,26 @@ public struct FlatNode: Sendable, Equatable {
     public var hasText: Bool { !label.isEmpty || !(value ?? "").isEmpty }
 }
 
-public enum TreeBuilder {
-    /// Appends `root` and its descendants to `nodes`, depth first.
-    public static func flatten(_ root: SnapshotNode, source: ElementSource, into nodes: inout [FlatNode]) {
-        var windows = -1
-        visit(root, depth: 0, parent: nil, path: [root.elementType, 0], inKeyboard: false, window: 0, windows: &windows, source: source, into: &nodes)
-    }
+/// Where an element sits in the snapshot being flattened.
+private struct TreePosition {
+    var depth: Int
+    /// Index of the parent in the flat list.
+    var parent: Int?
+    var path: [Int]
+    var inKeyboard: Bool
+    var window: Int
+}
 
-    private static func visit(_ node: SnapshotNode, depth: Int, parent: Int?, path: [Int], inKeyboard: Bool, window: Int,
-                              windows: inout Int, source: ElementSource, into nodes: inout [FlatNode]) {
+/// One depth-first walk of a snapshot, appending to `nodes`.
+private struct TreeWalk {
+    let source: ElementSource
+    var nodes: [FlatNode]
+    /// The number of the last window met; -1 before the first.
+    var windows = -1
+
+    mutating func visit(_ node: SnapshotNode, at position: TreePosition) {
         let role = ElementRole.name(for: node.elementType)
-        var window = window
+        var window = position.window
         if role == "window" {
             windows += 1
             window = windows
@@ -59,17 +68,27 @@ public enum TreeBuilder {
         // An empty text field reports its placeholder as its value.
         let value = node.placeholder != nil && node.value == node.placeholder ? "" : node.value
         let index = nodes.count
+        let signature = RefSignature(role: role, identifier: node.identifier, label: node.label, path: position.path, source: source)
         nodes.append(FlatNode(role: role, identifier: node.identifier, label: node.label, value: value, placeholder: node.placeholder,
-                              frame: finite(node.frame), enabled: node.enabled, selected: node.selected, depth: depth, source: source,
-                              parent: parent, signature: RefSignature(role: role, identifier: node.identifier, label: node.label, path: path, source: source),
-                              inKeyboard: inKeyboard, window: window))
+                              frame: TreeBuilder.finite(node.frame), enabled: node.enabled, selected: node.selected, depth: position.depth,
+                              source: source, parent: position.parent, signature: signature, inKeyboard: position.inKeyboard, window: window))
         var seen: [Int: Int] = [:]
         for child in node.children {
-            let position = seen[child.elementType, default: 0]
-            seen[child.elementType] = position + 1
-            visit(child, depth: depth + 1, parent: index, path: path + [child.elementType, position], inKeyboard: inKeyboard || role == "keyboard",
-                  window: window, windows: &windows, source: source, into: &nodes)
+            let place = seen[child.elementType, default: 0]
+            seen[child.elementType] = place + 1
+            visit(child, at: TreePosition(depth: position.depth + 1, parent: index, path: position.path + [child.elementType, place],
+                                          inKeyboard: position.inKeyboard || role == "keyboard", window: window))
         }
+    }
+}
+
+public enum TreeBuilder {
+    /// Appends `root` and its descendants to `nodes`, depth first.
+    public static func flatten(_ root: SnapshotNode, source: ElementSource, into nodes: inout [FlatNode]) {
+        var walk = TreeWalk(source: source, nodes: [])
+        swap(&walk.nodes, &nodes)                       // the walk appends in place, without copying what is already there
+        walk.visit(root, at: TreePosition(depth: 0, parent: nil, path: [root.elementType, 0], inKeyboard: false, window: 0))
+        swap(&walk.nodes, &nodes)
     }
 
     /// A frame with every non-finite component replaced by 0, so it is empty or off screen and can be encoded.
@@ -94,17 +113,26 @@ public enum TreeBuilder {
     }
 
     /// Indices of the elements `xcd ui tree` shows. With `all`, every element. By default: on screen, not in the
-    /// keyboard, and either interactive or a non-container with a label or value, unless it only repeats the label
-    /// of an interactive ancestor (a button's own text).
+    /// keyboard, and either interactive or a non-container with something to aim at (`isWorthShowing`).
     public static func displayed(_ nodes: [FlatNode], screen: ScreenRect, all: Bool) -> [Int] {
         if all { return Array(nodes.indices) }
         return nodes.indices.filter { index in
             let node = nodes[index]
             guard isOnScreen(node, screen: screen), !node.inKeyboard, node.role != "keyboard" else { return false }
             if node.isInteractive { return true }
-            guard node.hasText, !ElementRole.structural.contains(node.role) else { return false }
+            return !ElementRole.structural.contains(node.role) && isWorthShowing(index, in: nodes)
+        }
+    }
+
+    /// Whether a non-interactive, non-container element gives an agent something to aim at: a label or value, unless
+    /// it only repeats the label of an interactive ancestor (a button's own text); or else an identifier, unless an
+    /// ancestor carries the same one (SwiftUI copies a container's identifier to its children).
+    static func isWorthShowing(_ index: Int, in nodes: [FlatNode]) -> Bool {
+        let node = nodes[index]
+        if node.hasText {
             return !hasAncestor(index, in: nodes) { $0.isInteractive && !$0.label.isEmpty && $0.label == node.label }
         }
+        return !node.identifier.isEmpty && !hasAncestor(index, in: nodes) { $0.identifier == node.identifier }
     }
 
     public static func element(_ node: FlatNode, ref: String?, screen: ScreenRect) -> TreeElement {

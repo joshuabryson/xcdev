@@ -11,11 +11,17 @@ out="$root/Sources/XcdevKit/UIRunner/EmbeddedRunner.swift"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-# Lists "<path inside the written project><TAB><source file>" for every file, in a fixed order.
+# Writes the files to embed, as sorted paths relative to their folder: the project's to project.txt, Core's to core.txt.
+# Each find is a command of its own, so `set -e` stops the script when one fails, and an empty list is an error.
 list() {
-    (cd "$project" && find . -type f ! -name .DS_Store ! -path '*/xcuserdata/*' ! -path '*/project.xcworkspace/*') \
-        | sed 's|^\./||' | LC_ALL=C sort > "$work/project.txt"
-    (cd "$core" && find . -type f -name '*.swift') | sed 's|^\./||' | LC_ALL=C sort > "$work/core.txt"
+    (cd "$project" && find . -type f ! -name .DS_Store ! -path '*/xcuserdata/*' ! -path '*/project.xcworkspace/*') > "$work/project.found"
+    sed 's|^\./||' "$work/project.found" | LC_ALL=C sort > "$work/project.txt"
+    (cd "$core" && find . -type f -name '*.swift') > "$work/core.found"
+    sed 's|^\./||' "$work/core.found" | LC_ALL=C sort > "$work/core.txt"
+    if [ ! -s "$work/project.txt" ] || [ ! -s "$work/core.txt" ]; then
+        echo "embed-runner: found no files in $project or in $core" >&2
+        exit 1
+    fi
 }
 add() {
     # $1: path inside the written project, $2: source file

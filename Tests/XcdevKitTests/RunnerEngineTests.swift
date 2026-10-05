@@ -160,6 +160,72 @@ import XcdevTestSupport
         #expect(try engine.wait(request(.id("under"))).get().element?.identifier == "under")
     }
 
+    /// A system alert is modal: it blocks the whole app, not only what lies under its frame.
+    @Test func anAppElementOutsideASystemAlertsFrameIsStillCoveredByIt() throws {
+        let (engine, device) = make(FakeDevice(app: Self.appWithoutKeyboard, system: Self.home))
+        device.alert = Self.alert                                           // y 325...577; signIn's centre is at y 725
+        guard case .failure(let covered) = engine.tap(request(.id("signIn"), timeout: 0.3)) else { Issue.record("tapped"); return }
+        #expect(covered.code == RunnerFailure.Code.notHittable && covered.message == "the element is covered by a system alert")
+        #expect(covered.frame?.y == 700 && device.taps.isEmpty)
+        _ = try engine.tap(request(.point(x: 201, y: 725))).get()          // a point is not checked
+        #expect(device.taps.count == 1)
+        device.alert = nil
+        _ = try engine.tap(request(.id("signIn"))).get()
+        #expect(device.taps.count == 2)
+    }
+
+    @Test func aSnapshotThatFailsOnceDoesNotEndATapOrAWait() throws {
+        let (engine, device) = make(FakeDevice(app: Self.appWithoutKeyboard, system: Self.home))
+        device.snapshotsToFail = 1
+        #expect(try engine.tap(request(.id("signIn"), timeout: 1)).get().element?.identifier == "signIn")
+        #expect(device.taps.count == 1 && device.pauses == 1)
+        device.snapshotsToFail = 1
+        #expect(try engine.wait(request(.id("signIn"), timeout: 1)).get().element?.identifier == "signIn")
+        #expect(device.pauses == 2)
+    }
+
+    @Test func aSnapshotThatKeepsFailingIsReportedAtTheDeadline() {
+        let (engine, device) = make()
+        device.failSnapshots = true
+        guard case .failure(let tap) = engine.tap(request(.id("signIn"), timeout: 0.5)) else { Issue.record("tapped"); return }
+        #expect(tap.code == RunnerFailure.Code.internal && tap.message == "the tap failed: snapshot failed")
+        #expect(device.pauses >= 4 && device.taps.isEmpty)
+        device.pauses = 0
+        guard case .failure(let wait) = engine.wait(request(.id("signIn"), timeout: 0.5)) else { Issue.record("met"); return }
+        #expect(wait.code == RunnerFailure.Code.internal && wait.message == "the wait failed: snapshot failed" && device.pauses >= 4)
+        // The last look decides: a snapshot that works again at the end gives the ordinary answer.
+        device.failSnapshots = false
+        device.snapshotsToFail = 2
+        guard case .failure(let missing) = engine.tap(request(.id("never"), timeout: 0.5)) else { Issue.record("tapped"); return }
+        #expect(missing.code == RunnerFailure.Code.notFound)
+    }
+
+    @Test func aTapOrWaitWithNeitherAnAppNorSystemIsABadRequest() {
+        let (engine, device) = make()
+        for target in [TargetSpec.label("Settings"), .point(x: 1, y: 2)] {
+            let request = TargetRequest(bundleId: nil, system: false, target: target, role: nil, index: nil, timeout: 1, gone: false)
+            guard case .failure(let tap) = engine.tap(request) else { Issue.record("tapped \(target)"); continue }
+            #expect(tap.code == RunnerFailure.Code.badRequest && tap.message == "the request names no app and is not for the system")
+        }
+        let request = TargetRequest(bundleId: nil, system: false, target: .label("Settings"), role: nil, index: nil, timeout: 1, gone: false)
+        guard case .failure(let wait) = engine.wait(request) else { Issue.record("met"); return }
+        #expect(wait.code == RunnerFailure.Code.badRequest && device.taps.isEmpty && device.pauses == 0)
+    }
+
+    @Test func theKeyboardFlagMeansAKeyboardIsOnScreen() throws {
+        func keyboard(_ frame: ScreenRect) -> SnapshotNode {
+            TreeBuilderTests.node(2, frame: Self.screen, [TreeBuilderTests.node(19, frame: frame)])
+        }
+        let (engine, device) = make()
+        let tree = TreeRequest(bundleId: "b", system: false, all: false)
+        device.app = keyboard(ScreenRect(x: 0, y: 600, w: 402, h: 274))
+        #expect(try engine.tree(tree).get().keyboard)
+        device.app = keyboard(ScreenRect(x: 0, y: 874, w: 402, h: 274))    // slid off the bottom
+        #expect(try engine.tree(tree).get().keyboard == false)
+        device.app = keyboard(ScreenRect(x: 0, y: 600, w: 0, h: 0))        // no size
+        #expect(try engine.tree(tree).get().keyboard == false)
+    }
+
     @Test func anElementWithNoSizeIsReportedAsSuch() {
         let (engine, device) = make()
         device.app = TreeBuilderTests.node(2, frame: Self.screen, [

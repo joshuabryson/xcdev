@@ -1,6 +1,6 @@
 import Foundation
 
-// RunnerCore: these files are compiled into xcd AND into the UI runner (Swift 5, iOS 15). Foundation only.
+// RunnerCore: these files are compiled into xcd AND into the UI runner (Swift 5, iOS 17). Foundation only.
 
 /// A rectangle in screen points, in the current interface orientation.
 public struct ScreenRect: Codable, Sendable, Equatable {
