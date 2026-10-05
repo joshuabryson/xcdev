@@ -113,6 +113,135 @@ struct UIRunnerIntegrationTests {
     }
 }
 
+/// Typing, swipes, long-presses, buttons, rotation, `--tree`, the image pasteboard, crashes, and `xcd test`.
+extension UIRunnerIntegrationTests {
+    var withTree: UIOptions {
+        var options = options
+        options.tree = true
+        return options
+    }
+
+    @Test(.timeLimit(.minutes(30))) func typeSwipeAndPressWithoutTakingFocusOnTheMac() async throws {
+        try await withApp { ctx, svc in
+            let simulatorWasRunning = try await simulatorAppIsRunning()
+            let front = try await frontmostMacApp()
+
+            try await typesIntoTheEmailField(&ctx, svc)
+            try await swipesTheList(&ctx, svc)
+            try await longPresses(&ctx, svc)
+
+            #expect(try await frontmostMacApp() == front, "driving the simulator changed the frontmost Mac app")
+            #expect(try await simulatorAppIsRunning() == simulatorWasRunning, "a ui command started Simulator.app")
+        }
+    }
+
+    func typesIntoTheEmailField(_ ctx: inout WorktreeContext, _ svc: Services) async throws {
+        let typed = try await svc.ui.type("me@example.com", TypeOptions(into: "id:emailField", clear: false, submit: false), withTree, in: &ctx)
+        #expect(typed.method == "keyboard" && typed.element?.identifier == "emailField", "\(typed.text)")
+        let tree = try #require(typed.tree, "no tree came back with --tree: \(typed.text)")
+        #expect(tree.keyboard && tree.elements.first { $0.identifier == "emailField" }?.value == "me@example.com", "\(typed.text)")
+        // The keyboard's own keys and bars are not listed, and a ref from this tree works.
+        #expect(!tree.elements.contains { $0.label == "Emoji" || $0.identifier == "inputView" || $0.role == "key" }, "\(typed.text)")
+        let toggle = try #require(tree.elements.first { $0.identifier == "rememberMe" }?.ref)
+        _ = try await svc.ui.tap("ref:\(toggle)", options, in: &ctx)
+
+        // --clear replaces what the field holds; --submit presses Return, which the app records.
+        let replaced = try await svc.ui.type("new", TypeOptions(into: "id:emailField", clear: true, submit: true), withTree, in: &ctx)
+        #expect(replaced.tree?.elements.first { $0.identifier == "emailField" }?.value == "new", "\(replaced.text)")
+        #expect(try await svc.ui.wait("label:submitted: new", gone: false, options, in: &ctx).element?.identifier == "submitted")
+    }
+
+    func swipesTheList(_ ctx: inout WorktreeContext, _ svc: Services) async throws {
+        let swiped = try await svc.ui.swipe(SwipeOptions(direction: "up", on: nil, from: nil, to: nil), withTree, in: &ctx)
+        let tree = try #require(swiped.tree)
+        #expect(!tree.elements.contains { $0.identifier == "emailField" }, "the form did not scroll: \(swiped.text)")
+        #expect(tree.elements.contains { $0.label.hasPrefix("Row ") })
+        let row = try #require(tree.elements.first { $0.label.hasPrefix("Row ") })
+        let onRow = try await svc.ui.swipe(SwipeOptions(direction: "down", on: "label:\(row.label)", from: nil, to: nil), options, in: &ctx)
+        #expect(onRow.element?.label == row.label && (onRow.toY ?? 0) > (onRow.y ?? 0))
+        // Back to the top with point swipes.
+        for _ in 0..<3 {
+            _ = try await svc.ui.swipe(SwipeOptions(direction: nil, on: nil, from: "200,300", to: "200,800"), options, in: &ctx)
+        }
+        _ = try await svc.ui.wait("id:emailField", gone: false, options, in: &ctx)
+    }
+
+    func longPresses(_ ctx: inout WorktreeContext, _ svc: Services) async throws {
+        let pressed = try await svc.ui.longPress("id:holdTarget", duration: .seconds(1), options, in: &ctx)
+        #expect(pressed.element?.identifier == "holdTarget")
+        #expect(try await svc.ui.wait("label:held", gone: false, options, in: &ctx).element?.identifier == "holdTarget")
+    }
+
+    @Test(.timeLimit(.minutes(30))) func rotateTheImagePasteboardAndTheHomeButton() async throws {
+        try await withApp { ctx, svc in
+            let turned = try await svc.ui.rotate("landscape-left", withTree, in: &ctx)
+            let sideways = try #require(turned.tree)
+            #expect(sideways.orientation == "landscape-left" && sideways.screen.w > sideways.screen.h, "\(turned.text)")
+            let upright = try #require(try await svc.ui.rotate("portrait", withTree, in: &ctx).tree)
+            #expect(upright.orientation == "portrait" && upright.screen.h > upright.screen.w)
+
+            let shot = try await svc.media.screenshot(device: nil, out: nil, in: &ctx)
+            let copied = try await svc.ui.setPasteboardImage(file: shot.path, device: nil, in: &ctx)
+            #expect(copied.text.contains("set the pasteboard to the image"), "\(copied.text)")
+            let notImage = await #expect(throws: XcdError.self) {
+                _ = try await svc.ui.setPasteboardImage(file: ctx.location.worktreeRoot + "/README.md", device: nil, in: &ctx)
+            }
+            #expect(notImage?.code == .usage, "\(String(describing: notImage))")
+
+            let missing = await #expect(throws: XcdError.self) { _ = try await svc.ui.button("camera", options, in: &ctx) }
+            if let missing { #expect(missing.code == .platformUnsupported, "\(missing)") }   // some devices do have one
+            // Home sends the app to the background: not a crash, and the tree then shows the Home Screen.
+            let home = try await svc.ui.button("home", withTree, in: &ctx)
+            #expect(home.tree?.state == "background", "\(home.text)")
+            let away = await #expect(throws: XcdError.self) { _ = try await svc.ui.tap("id:signInButton", options, in: &ctx) }
+            #expect(away?.code == .elementNotFound && away?.message.contains("isn't in the foreground") == true)
+        }
+    }
+
+    @Test(.timeLimit(.minutes(30))) func anActionThatCrashesTheAppSaysSo() async throws {
+        try await withApp { ctx, svc in
+            // The button is below the fold on a small screen: bring it into view first.
+            _ = try await svc.ui.swipe(SwipeOptions(direction: nil, on: nil, from: "200,600", to: "200,400"), options, in: &ctx)
+            let crash = await #expect(throws: XcdError.self) { _ = try await svc.ui.tap("id:crashButton", options, in: &ctx) }
+            #expect(crash?.code == .appCrashed && crash?.message.hasPrefix("the app ") == true, "\(String(describing: crash))")
+            // The runner is fine; the app is simply gone.
+            #expect(try await svc.ui.tree(all: false, options, in: &ctx).tree.state == "not_running")
+        }
+    }
+
+    @Test(.timeLimit(.minutes(45))) func unitTestsRunBesideTheRunnerAndASecondWorktreeGetsItsOwn() async throws {
+        try await withApp { ctx, svc in
+            let session = try await svc.runners.session(device: nil, in: &ctx)
+            // SampleApp's scheme tests a unit-test bundle only, so the runner is left alone.
+            let tests = try await svc.tests.test(TestOptions(only: ["SampleAppTests/passes()"]), in: &ctx)
+            #expect(tests.outcome == .passed && tests.notes.isEmpty, "\(tests.text)")
+            let after = try await svc.runners.session(device: nil, in: &ctx)
+            #expect(after.endpoint == session.endpoint && !after.restarted)
+            // The tests ran inside the app and closed it when they finished.
+            #expect(try await svc.ui.tree(all: false, options, in: &ctx).tree.state == "not_running")
+            _ = try await svc.apps.launch(device: nil, options: LaunchOptions(environment: [:]), in: &ctx)
+
+            // A second worktree drives its own clone through its own runner while this one keeps working.
+            _ = try await svc.worktrees.create(name: "second", in: ctx)
+            var other = try await svc.open(worktree: "second")
+            do {
+                async let here = svc.ui.tree(all: false, options, in: &ctx)
+                var system = options
+                system.system = true
+                let there = try await svc.ui.tree(all: false, system, in: &other)
+                let mine = try await here
+                #expect(there.udid != mine.udid && there.tree.state == "system" && mine.tree.state == "foreground")
+                let second = try await svc.runners.session(device: nil, in: &other)
+                #expect(second.port != session.port && second.token != session.token)
+            } catch {
+                _ = await Runners.stopAll(in: other.paths, detached: svc.detached)
+                throw error
+            }
+            _ = await Runners.stopAll(in: other.paths, detached: svc.detached)
+        }
+    }
+}
+
 /// What the driving tests share: a throwaway SampleApp project, the app running on its own clone, and the Mac's state.
 extension UIRunnerIntegrationTests {
     var options: UIOptions { UIOptions(device: nil, bundle: nil, system: false, role: nil, index: nil, timeout: .seconds(5)) }

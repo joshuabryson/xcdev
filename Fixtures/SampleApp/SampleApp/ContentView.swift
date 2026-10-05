@@ -6,13 +6,20 @@ struct ContentView: View {
     @State private var remember = false
     @State private var signedIn = false
     @State private var taps = 0
+    @State private var submitted = ""
+    @State private var held = false
 
     var body: some View {
         Form {
             Section {
                 Text("SampleApp")
                 TextField("Email", text: $email)
+                    .onSubmit { submitted = email }
                     .accessibilityIdentifier("emailField")
+                if !submitted.isEmpty {
+                    Text("submitted: \(submitted)")
+                        .accessibilityIdentifier("submitted")
+                }
                 Toggle("Remember me", isOn: $remember)
                     .accessibilityIdentifier("rememberMe")
             }
@@ -34,6 +41,13 @@ struct ContentView: View {
             Section {
                 Button("Ask for Photos") { PHPhotoLibrary.requestAuthorization(for: .readWrite) { _ in /* the answer is not used */ } }
                     .accessibilityIdentifier("askPhotos")
+                Text(held ? "held" : "Hold me")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())                 // the whole row takes the press, not only the letters
+                    .onLongPressGesture { held = true }
+                    .accessibilityIdentifier("holdTarget")
+                Button("Crash") { fatalError("SampleApp crashed on purpose") }
+                    .accessibilityIdentifier("crashButton")
             }
             Section("Rows") {
                 ForEach(1...40, id: \.self) { row in
