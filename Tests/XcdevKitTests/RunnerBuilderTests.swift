@@ -11,9 +11,11 @@ import XcdevTestSupport
     var builder: RunnerBuilder { RunnerBuilder(runner: fake, globalPaths: GlobalPaths(base: home)) }
 
     /// Stubs a build that writes an .xctestrun with the given timeouts setting.
-    func stubBuild(timeoutsEnabled: Bool = false, exitCode: Int32 = 0, counter: Counter = Counter()) {
+    func stubBuild(timeoutsEnabled: Bool = false, exitCode: Int32 = 0, counter: Counter = Counter(),
+                   beforeBuilding: (@Sendable () -> Void)? = nil) {
         fake.stub(["xcrun", "xcodebuild", "build-for-testing"]) { invocation in
             counter.increment()
+            beforeBuilding?()
             guard exitCode == 0 else { return ProcessOutput(exitCode: exitCode, stderr: "error: something broke\n") }
             let derived = invocation.arguments[invocation.arguments.firstIndex(of: "-derivedDataPath")! + 1]
             let products = derived + "/Build/Products"
@@ -70,12 +72,13 @@ import XcdevTestSupport
         #expect(builds.value == 2)
     }
 
-    @Test func anInterruptedBuildIsNotRememberedAsFailed() async throws {
+    @Test(arguments: [Int32(130), Int32(143)])
+    func anInterruptedBuildIsNotRememberedAsFailed(exitCode: Int32) async throws {
         defer { try? FileManager.default.removeItem(atPath: home) }
         let builds = Counter()
-        stubBuild(exitCode: 130, counter: builds)
+        stubBuild(exitCode: exitCode, counter: builds)
         let first = await #expect(throws: XcdError.self) { _ = try await builder.ensureBuilt(xcode: xcode) }
-        #expect(first?.code == .runnerFailed && first?.message.contains("interrupted or failed to run") == true)
+        #expect(first?.code == .runnerFailed && first?.message.contains("interrupted or failed to run (exit \(exitCode))") == true)
         #expect(first?.next == "run the command again; if it keeps failing, read the build log")
         let dir = home + "/cache/ui-runner/" + builder.key(for: xcode)
         #expect(!FileManager.default.fileExists(atPath: dir + "/failed"))
@@ -95,28 +98,55 @@ import XcdevTestSupport
         #expect(!FileManager.default.fileExists(atPath: dir + "/failed"))
     }
 
-    @Test func discardWaitsForABuildInProgress() async throws {
+    @Test func discardingABuildThatDoesNotExistDoesNothing() async throws {
         defer { try? FileManager.default.removeItem(atPath: home) }
-        // Verify that discard properly holds the build lock and works correctly.
-        // The invariant: if ensureBuilt returns a build, the xctestrun file exists.
-        // With proper locking, discard can't delete the directory while ensureBuilt holds the lock.
-        let builds = Counter()
-        stubBuild(counter: builds)
-
-        // First: build successfully
-        let build1 = try await builder.ensureBuilt(xcode: xcode)
-        #expect(FileManager.default.fileExists(atPath: build1.xctestrun))
-
-        // Discard and verify it's gone
         try await builder.discard(xcode: xcode)
-        let dir = home + "/cache/ui-runner/" + builder.key(for: xcode)
-        #expect(!FileManager.default.fileExists(atPath: dir))
+        #expect(!FileManager.default.fileExists(atPath: home + "/cache/ui-runner/" + builder.key(for: xcode)))
+    }
 
-        // Build again: verify the second build works after discard
-        stubBuild(counter: builds)
-        let build2 = try await builder.ensureBuilt(xcode: xcode)
-        #expect(FileManager.default.fileExists(atPath: build2.xctestrun))
-        #expect(builds.value == 2)
+    @Test func aBuildThatProducesNoXctestrunIsRememberedAsFailed() async throws {
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let builds = Counter()
+        fake.stub(["xcrun", "xcodebuild", "build-for-testing"]) { _ in
+            builds.increment()
+            return ProcessOutput()
+        }
+        let first = await #expect(throws: XcdError.self) { _ = try await builder.ensureBuilt(xcode: xcode) }
+        #expect(first?.code == .runnerFailed && first?.message == "the UI runner built but produced no .xctestrun")
+        #expect(first?.next == "read the build log, then run `xcd ui stop --rebuild` to try again")
+        #expect(FileManager.default.fileExists(atPath: home + "/cache/ui-runner/" + builder.key(for: xcode) + "/failed"))
+        await #expect(throws: XcdError.self) { _ = try await builder.ensureBuilt(xcode: xcode) }
+        #expect(builds.value == 1)                                   // not retried
+    }
+
+    @Test func discardWaitsForABuildInProgress() async throws {
+        let gate = home + "-gate"
+        try FileManager.default.createDirectory(atPath: gate, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(atPath: home)
+            try? FileManager.default.removeItem(atPath: gate)
+        }
+        let directory = home + "/cache/ui-runner/" + builder.key(for: xcode)
+        stubBuild(beforeBuilding: {
+            FileManager.default.createFile(atPath: gate + "/started", contents: nil)
+            for _ in 0..<3000 where !FileManager.default.fileExists(atPath: gate + "/release") { usleep(10_000) }
+        })
+        let discarded = Counter()
+        let builder = self.builder
+        let xcode = self.xcode
+        let building = Task { try await builder.ensureBuilt(xcode: xcode) }
+        for _ in 0..<3000 where !FileManager.default.fileExists(atPath: gate + "/started") { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(FileManager.default.fileExists(atPath: gate + "/started"))
+        let discarding = Task { try await builder.discard(xcode: xcode); discarded.increment() }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(discarded.value == 0)                                // blocked behind the build lock
+        #expect(FileManager.default.fileExists(atPath: directory + "/project"))
+        FileManager.default.createFile(atPath: gate + "/release", contents: nil)
+        let build = try await building.value                          // returns only after the marker is written
+        try await discarding.value
+        #expect(build.directory == directory)
+        #expect(discarded.value == 1)
+        #expect(!FileManager.default.fileExists(atPath: directory))
     }
 
     @Test func anotherXcodeGetsItsOwnBuild() async throws {

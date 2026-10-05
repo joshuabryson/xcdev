@@ -29,7 +29,7 @@ public struct RunnerBuilder: Sendable {
     public func discard(xcode: XcodeInstall) async throws {
         let directory = directory(for: xcode)
         try await FileLock.withLock(at: globalPaths.locksDirectory + "/ui-runner-build.lock") {
-            try FileManager.default.removeItem(atPath: directory)
+            if FileManager.default.fileExists(atPath: directory) { try FileManager.default.removeItem(atPath: directory) }
         }
     }
 
@@ -60,24 +60,24 @@ public struct RunnerBuilder: Sendable {
         } catch let xcErr as XcdError where xcErr.code == .timeout {
             throw XcdError(.runnerFailed, "building the UI runner timed out",
                            next: "run the command again; the first build can be slow on a busy Mac", details: ["log: \(log)"])
-        } catch is CancellationError {
-            throw CancellationError()
         }
     }
 
     func handleBuildResult(output: ProcessOutput, directory: String, log: String) throws -> String {
-        guard output.succeeded, let xctestrun = Self.xctestrun(in: directory) else {
+        guard output.succeeded else {
             if output.exitCode == 65 {
-                FileManager.default.createFile(atPath: directory + "/failed", contents: nil)
+                markFailed(in: directory)
                 throw failure(log: log)
-            } else {
-                let tail = ((try? String(contentsOfFile: log, encoding: .utf8)) ?? "").split(separator: "\n").suffix(20).map(String.init)
-                throw XcdError(.runnerFailed, "building the UI runner was interrupted or failed to run (exit \(output.exitCode))",
-                               next: "run the command again; if it keeps failing, read the build log", details: ["log: \(log)"] + tail)
             }
+            throw interrupted(exitCode: output.exitCode, log: log)
+        }
+        guard let xctestrun = Self.xctestrun(in: directory) else {
+            markFailed(in: directory)
+            throw XcdError(.runnerFailed, "the UI runner built but produced no .xctestrun",
+                           next: "read the build log, then run `xcd ui stop --rebuild` to try again", details: ["log: \(log)"])
         }
         guard Self.timeoutsDisabled(xctestrun) else {
-            FileManager.default.createFile(atPath: directory + "/failed", contents: nil)
+            markFailed(in: directory)
             throw XcdError(.runnerFailed, "the UI runner was built with test timeouts on, so XCTest would stop it after 10 minutes",
                            next: "this is a bug in xcd; please report it", details: ["xctestrun: \(xctestrun)"])
         }
@@ -95,6 +95,17 @@ public struct RunnerBuilder: Sendable {
         guard FileManager.default.fileExists(atPath: directory + "/built"),
               let xctestrun = Self.xctestrun(in: directory) else { return nil }
         return RunnerBuild(key: key(for: xcode), directory: directory, xctestrun: xctestrun)
+    }
+
+    /// Writes the permanent marker that stops later builds retrying until `discard`.
+    func markFailed(in directory: String) {
+        try? Data().write(to: URL(fileURLWithPath: directory + "/failed"))
+    }
+
+    func interrupted(exitCode: Int32, log: String) -> XcdError {
+        let tail = ((try? String(contentsOfFile: log, encoding: .utf8)) ?? "").split(separator: "\n").suffix(20).map(String.init)
+        return XcdError(.runnerFailed, "building the UI runner was interrupted or failed to run (exit \(exitCode))",
+                        next: "run the command again; if it keeps failing, read the build log", details: ["log: \(log)"] + tail)
     }
 
     func failure(log: String) -> XcdError {
