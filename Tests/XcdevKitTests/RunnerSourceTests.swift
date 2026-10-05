@@ -6,25 +6,41 @@ import Testing
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         .deletingLastPathComponent().path
 
-    /// The embedded runner is generated; this fails until `scripts/embed-runner.sh` is re-run after an edit.
-    @Test func theEmbeddedRunnerMatchesItsSources() throws {
-        let project = Self.repo + "/Sources/XcdevKit/UIRunner/Project"
-        let core = Self.repo + "/Sources/XcdevKit/UIRunner/Core"
-        var expected: [String: String] = [:]
+    /// The runner sources on disk, as the embed script lists them.
+    static func sourcesOnDisk() throws -> [String: Data] {
+        let project = repo + "/Sources/XcdevKit/UIRunner/Project"
+        let core = repo + "/Sources/XcdevKit/UIRunner/Core"
+        var expected: [String: Data] = [:]
         for file in try FileManager.default.subpathsOfDirectory(atPath: project) {
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: project + "/" + file, isDirectory: &isDirectory), !isDirectory.boolValue,
                   !file.hasSuffix(".DS_Store"), !file.contains("/xcuserdata/"), !file.contains("/project.xcworkspace/") else { continue }
-            expected[file] = try String(contentsOfFile: project + "/" + file, encoding: .utf8)
+            expected[file] = try Data(contentsOf: URL(fileURLWithPath: project + "/" + file))
         }
         for file in try FileManager.default.contentsOfDirectory(atPath: core) where file.hasSuffix(".swift") {
-            expected["XcdRunner/Core/" + file] = try String(contentsOfFile: core + "/" + file, encoding: .utf8)
+            expected["XcdRunner/Core/" + file] = try Data(contentsOf: URL(fileURLWithPath: core + "/" + file))
         }
-        let embedded = Dictionary(uniqueKeysWithValues: EmbeddedRunner.files.map { ($0.path, $0.contents + "\n") })
+        return expected
+    }
+
+    /// The embedded runner is generated; this fails until `scripts/embed-runner.sh` is re-run after an edit.
+    @Test func theEmbeddedRunnerMatchesItsSources() throws {
+        let expected = try Self.sourcesOnDisk()
+        let embedded = Dictionary(uniqueKeysWithValues: try RunnerSource.embedded.get().map { ($0.path, $0.contents) })
         #expect(embedded.keys.sorted() == expected.keys.sorted(), "run scripts/embed-runner.sh")
         for (path, contents) in expected {
             #expect(embedded[path] == contents, "run scripts/embed-runner.sh: \(path) changed")
         }
+    }
+
+    @Test func aCorruptedArchiveIsAnInternalErrorNotATrap() {
+        let valid = EmbeddedRunner.archive
+        let truncated = String(valid.prefix(valid.count / 2))
+        for broken in ["", "not base64 !!!", "AAAA", "H4sIAAAAAAAA", truncated] {
+            #expect(throws: XcdError.self) { try RunnerSource.decode(broken) }
+        }
+        #expect(throws: XcdError(.internalError, "the embedded UI runner source is unreadable",
+                                 next: "this is a bug in xcd; please report it")) { try RunnerSource.decode("AAAA") }
     }
 
     @Test func coreFilesImportOnlyFoundation() throws {
@@ -44,6 +60,9 @@ import Testing
                        "XcdRunner.xctestplan", "XcdRunnerHost/HostApp.swift", "XcdRunner/XcdRunnerTests.swift",
                        "XcdRunner/XCUIDriver.swift", "XcdRunner/RunnerServer.swift", "XcdRunner/Core/RunnerEngine.swift"] {
             #expect(FileManager.default.fileExists(atPath: dir + "/" + needed), "\(needed) is missing")
+        }
+        for (path, contents) in try Self.sourcesOnDisk() {
+            #expect(try Data(contentsOf: URL(fileURLWithPath: dir + "/" + path)) == contents, "\(path) differs from its source")
         }
         #expect(RunnerSource.hash.count == 12 && RunnerSource.hash.allSatisfy(\.isHexDigit))
         #expect(RunnerSource.runnerBundleId == "dev.xcdev.XcdRunner.xctrunner")
