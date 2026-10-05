@@ -232,4 +232,34 @@ final class SentRequests: Sendable {
         }
         #expect(error?.code == .elementNotFound && error?.message == "nothing has keyboard focus, so there was nowhere to type")
         #expect(error?.next == "focus a field first: pass `--into <target>`, or tap it")
-    }}
+    }
+
+    @Test func buttonsAndRotationNeedNoApp() async throws {
+        defer { base.worktree.remove() }
+        var (service, ctx, sent) = try setup(ActionResult(element: nil, x: nil, y: nil, ms: 310))
+        #expect(try await service.button("home", options, in: &ctx).text == "pressed home  310ms")
+        #expect(try sent.last(as: DeviceRequest.self) == ("/button", DeviceRequest(scope: Self.scope, name: "home")))
+        #expect(try await service.rotate("landscape-left", options, in: &ctx).text == "rotated to landscape-left  310ms")
+        #expect(try sent.last(as: DeviceRequest.self) == ("/rotate", DeviceRequest(scope: Self.scope, name: "landscape-left")))
+        // With no build there is no app to name: the action still happens, reporting on the Home Screen.
+        try AppStateStore.save(AppState(), ctx.paths)
+        _ = try await service.button("home", options, in: &ctx)
+        #expect(try sent.last(as: DeviceRequest.self).request.scope == ActionScope(bundleId: nil, system: true, timeout: 2, tree: false))
+        let button = await #expect(throws: XcdError.self) { _ = try await service.button("volume-up", options, in: &ctx) }
+        #expect(button?.code == .usage && button?.next == "use one of: home, action, camera")
+        let turn = await #expect(throws: XcdError.self) { _ = try await service.rotate("sideways", options, in: &ctx) }
+        #expect(turn?.code == .usage && turn?.next == "use one of: portrait, portrait-upside-down, landscape-left, landscape-right")
+        #expect(sent.count == 3)
+    }
+
+    @Test func aButtonTheDeviceLacksIsUnsupported() async throws {
+        defer { base.worktree.remove() }
+        var (service, ctx, _, _) = try base.setup { _, _ in
+            FakeRunnerTransport.reply(Result<ActionResult, RunnerFailure>.failure(
+                RunnerFailure(code: RunnerFailure.Code.unsupported, message: "this device has no action button")))
+        }
+        let error = await #expect(throws: XcdError.self) { _ = try await service.button("action", options, in: &ctx) }
+        #expect(error?.code == .platformUnsupported && error?.code.exitCode == 2 && error?.message == "this device has no action button")
+        #expect(error?.next == "`xcd ui button home` works on every iPhone and iPad simulator")
+    }
+}

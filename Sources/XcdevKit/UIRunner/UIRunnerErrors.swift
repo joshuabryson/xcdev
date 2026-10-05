@@ -13,6 +13,7 @@ enum UIRunnerErrors {
         RunnerFailure.Code.waitTimeout: waitTimeout,
         RunnerFailure.Code.appNotForeground: appNotForeground,
         RunnerFailure.Code.appCrashed: appCrashed,
+        RunnerFailure.Code.unsupported: unsupported,
         RunnerFailure.Code.badRequest: badRequest,
         RunnerFailure.Code.internal: internalFailure,
     ]
@@ -89,6 +90,10 @@ enum UIRunnerErrors {
     /// `UIService` adds the crash report when it can find one; this is the error without it.
     static func appCrashed(_ failure: RunnerFailure, target _: String, _: Duration) -> XcdError {
         XcdError(.appCrashed, failure.message, next: "see its last output with `xcd logs --app`, then start it again with `xcd run`")
+    }
+
+    static func unsupported(_ failure: RunnerFailure, target _: String, _: Duration) -> XcdError {
+        XcdError(.platformUnsupported, failure.message, next: "`xcd ui button home` works on every iPhone and iPad simulator")
     }
 
     static func badRequest(_ failure: RunnerFailure, target _: String, _: Duration) -> XcdError {

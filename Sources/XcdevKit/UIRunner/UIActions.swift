@@ -108,6 +108,12 @@ extension UIService {
                     timeout: DurationText.seconds(options.effectiveTimeout), tree: options.tree)
     }
 
+    /// Buttons and rotation act on the device, so they need no app: with none to name, they report on the Home Screen.
+    func deviceScope(_ options: UIOptions, in ctx: WorktreeContext) -> ActionScope {
+        let bundle = try? bundleId(options, in: ctx)
+        return ActionScope(bundleId: bundle, system: bundle == nil, timeout: DurationText.seconds(options.effectiveTimeout), tree: options.tree)
+    }
+
     public func longPress(_ target: String, duration: Duration, _ options: UIOptions,
                           in ctx: inout WorktreeContext) async throws -> UIActionReport {
         guard duration >= .milliseconds(100), duration <= .seconds(20) else {
@@ -182,5 +188,24 @@ extension UIService {
         let count = "\(text.count) character\(text.count == 1 ? "" : "s")"
         let how = ["by \(done.result.method ?? "keyboard")", typing.clear ? "after clearing" : nil, typing.submit ? "then Return" : nil]
         return done.report("typed \(count) into", target: typing.into ?? "the focused element", detail: how.compactMap { $0 }.joined(separator: ", "))
+    }
+
+    public func button(_ name: String, _ options: UIOptions, in ctx: inout WorktreeContext) async throws -> UIActionReport {
+        guard HardwareButton(rawValue: name) != nil else {
+            throw XcdError(.usage, "'\(name)' is not a button", next: "use one of: " + HardwareButton.allCases.map(\.rawValue).joined(separator: ", "))
+        }
+        let request = DeviceRequest(scope: deviceScope(options, in: ctx), name: name)
+        let done = try await act(ActionCall(path: RunnerProtocol.buttonPath, request: request, what: "button press", target: name), options, in: &ctx)
+        return done.report("pressed", target: name)
+    }
+
+    public func rotate(_ orientation: String, _ options: UIOptions, in ctx: inout WorktreeContext) async throws -> UIActionReport {
+        guard DeviceOrientation(rawValue: orientation) != nil else {
+            throw XcdError(.usage, "'\(orientation)' is not an orientation",
+                           next: "use one of: " + DeviceOrientation.allCases.map(\.rawValue).joined(separator: ", "))
+        }
+        let request = DeviceRequest(scope: deviceScope(options, in: ctx), name: orientation)
+        let done = try await act(ActionCall(path: RunnerProtocol.rotatePath, request: request, what: "rotation", target: orientation), options, in: &ctx)
+        return done.report("rotated to", target: orientation)
     }
 }

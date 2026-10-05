@@ -26,6 +26,9 @@ public protocol DeviceDriving: AnyObject {
     func pressKey(_ key: String, command: Bool) throws
     /// Puts text on the device's pasteboard.
     func setPasteboard(text: String)
+    /// Presses a hardware button. False when this device has no such button.
+    func pressButton(_ button: HardwareButton) throws -> Bool
+    func rotate(to orientation: DeviceOrientation) throws
     func pause(_ seconds: Double)
     /// Seconds from any fixed origin.
     func now() -> Double

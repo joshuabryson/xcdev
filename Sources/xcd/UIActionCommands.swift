@@ -73,4 +73,34 @@ extension UICommand {
             try await UICommand.act("ui swipe", options) { service, ctx in try await service.swipe(swipe, ui, in: &ctx) }
         }
     }
+
+    struct Button: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Press a hardware button: home, action, or camera.",
+            discussion: "`home` works on every device; `action` and `camera` only on device types that have the button. Volume and lock can't be pressed in a simulator."
+        )
+        @Argument(help: "home, action, or camera.", completion: .list(HardwareButton.allCases.map(\.rawValue))) var button: String
+        @OptionGroup var action: ActionOptions
+        @OptionGroup var options: GlobalOptions
+
+        func run() async throws {
+            let (button, ui) = (button, try action.options())
+            try await UICommand.act("ui button", options) { service, ctx in try await service.button(button, ui, in: &ctx) }
+        }
+    }
+
+    struct Rotate: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Rotate the device: portrait, portrait-upside-down, landscape-left, or landscape-right.",
+            discussion: "An app that doesn't support the orientation stays as it is; the tree's first line says which orientation the screen is in."
+        )
+        @Argument(help: "The orientation.", completion: .list(DeviceOrientation.allCases.map(\.rawValue))) var orientation: String
+        @OptionGroup var action: ActionOptions
+        @OptionGroup var options: GlobalOptions
+
+        func run() async throws {
+            let (orientation, ui) = (orientation, try action.options())
+            try await UICommand.act("ui rotate", options) { service, ctx in try await service.rotate(orientation, ui, in: &ctx) }
+        }
+    }
 }

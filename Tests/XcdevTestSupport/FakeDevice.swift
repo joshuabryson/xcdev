@@ -19,6 +19,8 @@ public final class FakeDevice: DeviceDriving {
     /// Every gesture and pasteboard write, in order, e.g. "tap 201,725", "type \"hi\"", "key cmd-\"a\"".
     public var events: [String] = []
     public var pasteboardText: String?
+    /// The hardware buttons this device has.
+    public var buttons: Set<HardwareButton> = [.home]
     /// Makes every gesture throw.
     public var failGestures = false
     /// Runs after each gesture (e.g. to make the app quit, or the keyboard appear).
@@ -60,7 +62,7 @@ public final class FakeDevice: DeviceDriving {
 
     public func systemAlert() -> SnapshotNode? { alert }
     public var scale: Double { 3 }
-    public var orientation: String { "portrait" }
+    public var orientation = "portrait"
     public func tap(x: Double, y: Double) throws {
         try gesture("tap \(Self.number(x)),\(Self.number(y))")
         taps.append((x, y))
@@ -81,6 +83,17 @@ public final class FakeDevice: DeviceDriving {
     public func setPasteboard(text: String) {
         pasteboardText = text
         events.append("pasteboard \(text.debugDescription)")
+    }
+
+    public func pressButton(_ button: HardwareButton) throws -> Bool {
+        guard buttons.contains(button) else { return false }
+        try gesture("button \(button.rawValue)")
+        return true
+    }
+
+    public func rotate(to orientation: DeviceOrientation) throws {
+        try gesture("rotate \(orientation.rawValue)")
+        self.orientation = orientation.rawValue
     }
 
     /// "201" for a whole number, else one decimal.

@@ -41,6 +41,8 @@ extension RunnerEngine {
         case RunnerProtocol.longPressPath: return answering(TargetRequest.self, longPress)
         case RunnerProtocol.swipePath: return answering(SwipeRequest.self, swipe)
         case RunnerProtocol.typePath: return answering(TypeRequest.self, enterText)
+        case RunnerProtocol.buttonPath: return answering(DeviceRequest.self, button)
+        case RunnerProtocol.rotatePath: return answering(DeviceRequest.self, rotate)
         default: return nil
         }
     }

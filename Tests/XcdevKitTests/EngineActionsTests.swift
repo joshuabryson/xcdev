@@ -302,3 +302,67 @@ import XcdevTestSupport
         #expect(reply.ok && reply.result?.method == "keyboard" && device.events.last == "type \"via http\"")
     }
 }
+
+@Suite struct EngineDeviceTests {
+    let base = EngineActionsTests()
+
+    func request(_ name: String, tree: Bool = false, system: Bool = false) -> DeviceRequest {
+        DeviceRequest(scope: ActionScope(bundleId: system ? nil : EngineActionsTests.bundle, system: system, timeout: 2, tree: tree), name: name)
+    }
+
+    @Test func aButtonThisDeviceHasIsPressed() throws {
+        let (engine, device) = base.make()
+        device.onGesture = { $0.state = .background }                       // Home sends the app to the background
+        let result = try engine.button(request("home", tree: true)).get()
+        #expect(device.events == ["button home"] && result.element == nil && result.x == nil)
+        #expect(result.tree?.state == "background")                         // not a crash; the tree shows Springboard
+        guard case .failure(let missing) = engine.button(request("action")) else { Issue.record("pressed"); return }
+        #expect(missing.code == RunnerFailure.Code.unsupported && missing.message == "this device has no action button")
+        guard case .failure(let unknown) = engine.button(request("volume-up")) else { Issue.record("pressed"); return }
+        #expect(unknown.code == RunnerFailure.Code.badRequest && unknown.message == "'volume-up' is not a button; use one of: home, action, camera")
+        #expect(device.events.count == 1)
+        device.buttons = [.home, .camera]
+        _ = try engine.button(request("camera", system: true)).get()
+        #expect(device.events.last == "button camera")
+    }
+
+    /// On a real device the app is still in front for a moment after Home is pressed.
+    @Test func homeWaitsForTheAppToLeaveTheScreen() throws {
+        let (engine, device) = base.make()
+        device.onPause = { if $0.pauses == 3 { $0.state = .background } }
+        let result = try engine.button(request("home", tree: true)).get()
+        #expect(result.tree?.state == "background" && device.pauses == 4)   // three waiting, one before the tree
+        // An app that never leaves is not waited for beyond two seconds, and another button is not waited for at all.
+        device.onPause = nil
+        device.state = .foreground
+        device.pauses = 0
+        #expect(try engine.button(request("home")).get().tree == nil)
+        #expect(device.pauses == 20)
+        device.buttons = [.home, .action]
+        device.pauses = 0
+        _ = try engine.button(request("action")).get()
+        #expect(device.pauses == 0)
+    }
+
+    @Test func rotatingChangesTheOrientationTheTreeReports() throws {
+        let (engine, device) = base.make()
+        let result = try engine.rotate(request("landscape-left", tree: true)).get()
+        #expect(device.events == ["rotate landscape-left"] && result.tree?.orientation == "landscape-left")
+        guard case .failure(let unknown) = engine.rotate(request("sideways")) else { Issue.record("rotated"); return }
+        #expect(unknown.code == RunnerFailure.Code.badRequest)
+        #expect(unknown.message == "'sideways' is not an orientation; use one of: portrait, portrait-upside-down, landscape-left, landscape-right")
+        let nowhere = DeviceRequest(scope: ActionScope(bundleId: nil, system: false, timeout: 1, tree: false), name: "portrait")
+        guard case .failure(let refused) = engine.rotate(nowhere) else { Issue.record("rotated"); return }
+        #expect(refused.code == RunnerFailure.Code.badRequest && device.events.count == 1)
+    }
+
+    @Test func buttonsAndRotationAreServedOverHTTP() throws {
+        let (engine, device) = base.make()
+        for (path, name) in [("/button", "home"), ("/rotate", "portrait-upside-down")] {
+            let reply = try JSONDecoder().decode(RunnerReply<ActionResult>.self,
+                                                 from: engine.handle(path: path, body: try JSONEncoder().encode(request(name))))
+            #expect(reply.ok, "\(path)")
+        }
+        #expect(device.events == ["button home", "rotate portrait-upside-down"])
+    }
+}

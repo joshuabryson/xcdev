@@ -5,6 +5,7 @@ import XCTest
 /// It never launches, activates, or terminates an app.
 final class XCUIDriver: DeviceDriving {
     private let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+    private let hardware = XCUIDevice.shared
     private var apps: [String: XCUIApplication] = [:]
     /// The app last read, whose coordinate space taps use while it is in front.
     private var current: XCUIApplication?
@@ -45,7 +46,7 @@ final class XCUIDriver: DeviceDriving {
     var scale: Double { Double(UIScreen.main.scale) }
 
     var orientation: String {
-        switch XCUIDevice.shared.orientation {
+        switch hardware.orientation {
         case .landscapeLeft: return "landscape-left"
         case .landscapeRight: return "landscape-right"
         case .portraitUpsideDown: return "portrait-upside-down"
@@ -85,6 +86,27 @@ final class XCUIDriver: DeviceDriving {
 
     /// Setting the pasteboard shows no prompt; only reading what another process wrote does.
     func setPasteboard(text: String) { UIPasteboard.general.string = text }
+
+    func pressButton(_ button: HardwareButton) throws -> Bool {
+        let key: XCUIDevice.Button
+        switch button {
+        case .home: key = .home
+        case .action: key = .action
+        case .camera: key = .camera
+        }
+        guard hardware.hasHardwareButton(key) else { return false }
+        hardware.press(key)
+        return true
+    }
+
+    func rotate(to orientation: DeviceOrientation) throws {
+        switch orientation {
+        case .portrait: hardware.orientation = .portrait
+        case .portraitUpsideDown: hardware.orientation = .portraitUpsideDown
+        case .landscapeLeft: hardware.orientation = .landscapeLeft
+        case .landscapeRight: hardware.orientation = .landscapeRight
+        }
+    }
 
     /// Waits by running the main run loop, not by sleeping. XCUITest learns that an app changed state through the run
     /// loop, so a sleeping thread keeps seeing the old state for the whole request (seen: an app sent to the
