@@ -459,8 +459,7 @@ final class RunnerServer: @unchecked Sendable {
         }
         listener.newConnectionHandler = { [weak self] connection in
             guard let self else { return }
-            connection.start(queue: self.queue)
-            self.read(connection, Data())
+            self.accept(connection)
         }
         listener.start(queue: queue)
         _ = ready.wait(timeout: .now() + 10)
@@ -486,31 +485,53 @@ final class RunnerServer: @unchecked Sendable {
         lock.unlock()
     }
 
-    private func read(_ connection: NWConnection, _ soFar: Data) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { [weak self] data, _, done, error in
+    /// Seconds a connection has to send a whole request before it is closed.
+    private static let requestDeadline = 10.0
+
+    private func accept(_ connection: NWConnection) {
+        connection.start(queue: queue)
+        let deadline = DispatchWorkItem { connection.cancel() }
+        queue.asyncAfter(deadline: .now() + Self.requestDeadline, execute: deadline)
+        read(connection, Data(), deadline)
+    }
+
+    private func read(_ connection: NWConnection, _ soFar: Data, _ deadline: DispatchWorkItem) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 16) { [weak self] data, _, done, error in
             guard let self else { return }
             var buffer = soFar
             if let data { buffer.append(data) }
-            if let request = Self.parse(buffer) {
+            switch HTTPRequestParser.parse(buffer) {
+            case .request(let request):
+                deadline.cancel()
                 self.dispatch(request, connection)
-                return
+            case .malformed:
+                deadline.cancel()
+                Self.send(400, Data(#"{"ok":false}"#.utf8), on: connection)
+            case .tooLarge:
+                deadline.cancel()
+                Self.send(413, Data(#"{"ok":false}"#.utf8), on: connection)
+            case .needMore:
+                if done || error != nil {
+                    deadline.cancel()
+                    connection.cancel()
+                } else {
+                    self.read(connection, buffer, deadline)
+                }
             }
-            if done || error != nil {
-                connection.cancel()
-                return
-            }
-            self.read(connection, buffer)
         }
     }
 
-    private func dispatch(_ request: (path: String, headers: [String: String], body: Data), _ connection: NWConnection) {
-        let reply: (Int, Data) -> Void = { status, data in
-            let reason = status == 200 ? "OK" : "Error"
-            var out = Data("HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nContent-Length: \(data.count)\r\nConnection: close\r\n\r\n".utf8)
-            out.append(data)
-            connection.send(content: out, completion: .contentProcessed { _ in connection.cancel() })
-        }
-        if let token, request.headers["authorization"] != "Bearer \(token)" {
+    private static func send(_ status: Int, _ data: Data, on connection: NWConnection) {
+        let reason = status == 200 ? "OK" : "Error"
+        var out = Data("HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nContent-Length: \(data.count)\r\nConnection: close\r\n\r\n".utf8)
+        out.append(data)
+        connection.send(content: out, completion: .contentProcessed { _ in connection.cancel() })
+    }
+
+    private func dispatch(_ request: HTTPRequest, _ connection: NWConnection) {
+        let reply: (Int, Data) -> Void = { status, data in Self.send(status, data, on: connection) }
+        // Authentication fails closed: with no token set, nothing is answered.
+        guard let token, !token.isEmpty, request.headers["authorization"] == "Bearer \(token)" else {
             reply(401, Data(#"{"ok":false}"#.utf8))
             return
         }
@@ -532,24 +553,6 @@ final class RunnerServer: @unchecked Sendable {
         // Wake the main run loop so the test method picks the job up.
         CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue) { CFRunLoopStop(CFRunLoopGetMain()) }
         CFRunLoopWakeUp(CFRunLoopGetMain())
-    }
-
-    static func parse(_ buffer: Data) -> (path: String, headers: [String: String], body: Data)? {
-        guard let separator = buffer.range(of: Data("\r\n\r\n".utf8)) else { return nil }
-        let head = String(decoding: buffer[..<separator.lowerBound], as: UTF8.self).components(separatedBy: "\r\n")
-        guard let requestLine = head.first else { return nil }
-        let first = requestLine.split(separator: " ")
-        guard first.count >= 2 else { return nil }
-        var headers: [String: String] = [:]
-        for line in head.dropFirst() {
-            if let colon = line.firstIndex(of: ":") {
-                headers[line[..<colon].lowercased()] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
-            }
-        }
-        let length = Int(headers["content-length"] ?? "0") ?? 0
-        let body = buffer[separator.upperBound...]
-        guard body.count >= length else { return nil }
-        return (String(first[1]), headers, Data(body.prefix(length)))
     }
 }
 """#),
@@ -582,8 +585,9 @@ final class XCUIDriver: DeviceDriving {
 
     func appSnapshot(_ bundleId: String) throws -> SnapshotNode {
         let app = app(bundleId)
+        let node = Self.node(try app.snapshot())
         current = app
-        return Self.node(try app.snapshot())
+        return node
     }
 
     func systemSnapshot() throws -> SnapshotNode {
@@ -623,10 +627,8 @@ final class XCUIDriver: DeviceDriving {
 
     func pause(_ seconds: Double) { Thread.sleep(forTimeInterval: seconds) }
 
-    func now() -> Double {
-        let value = Date().timeIntervalSinceReferenceDate
-        return value.isFinite ? value : 0
-    }
+    /// Monotonic, so a clock change can't stretch or cut a wait.
+    func now() -> Double { ProcessInfo.processInfo.systemUptime }
 
     static func node(_ snapshot: XCUIElementSnapshot) -> SnapshotNode {
         SnapshotNode(elementType: Int(snapshot.elementType.rawValue), identifier: snapshot.identifier, label: snapshot.label,
@@ -688,22 +690,35 @@ final class XcdRunnerTests: XCTestCase {
         engine.rolesVerified = XCUIDriver.rolesVerified
         let health = engine.handle(path: RunnerProtocol.healthPath, body: Data())
 
-        let server = RunnerServer(token: environment["XCD_TOKEN"]) { health }
-        let port = try server.start()
-        if let ready = environment["XCD_READY_FILE"] {
-            try FileManager.default.createDirectory(atPath: (ready as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-            try Data("{\"port\": \(port)}\n".utf8).write(to: URL(fileURLWithPath: ready), options: .atomic)
+        let token = environment["XCD_TOKEN"]
+        if token?.isEmpty ?? true { NSLog("XCD_TOKEN is not set; refusing all requests") }
+        let server = RunnerServer(token: token) { health }
+        // The overridden `record` swallows issues, so a start-up error is logged here before it ends the test.
+        do {
+            let port = try server.start()
+            if let ready = environment["XCD_READY_FILE"] {
+                try FileManager.default.createDirectory(atPath: (ready as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+                try Data("{\"port\": \(port)}\n".utf8).write(to: URL(fileURLWithPath: ready), options: .atomic)
+            }
+            NSLog("XCD_READY port=\(port)")
+        } catch {
+            NSLog("XCD_RUNNER_FAILED: \(error)")
+            throw error
         }
-        NSLog("XCD_READY port=\(port)")
 
         while true {
             CFRunLoopRunInMode(.defaultMode, 1.0, false)
             while let job = server.next() {
-                var reply = engine.handle(path: job.path, body: job.body)
-                let issues = IssueLog.shared.drain()
-                if !issues.isEmpty { reply = Self.adding(issues, to: reply) }
-                job.reply(200, reply)
-                server.finished()
+                autoreleasepool {
+                    // An issue recorded outside a request isn't this request's.
+                    _ = IssueLog.shared.drain()
+                    var reply = engine.handle(path: job.path, body: job.body)
+                    let issues = IssueLog.shared.drain()
+                    if !issues.isEmpty { reply = Self.adding(issues, to: reply) }
+                    // Free the slot first: once the client has the reply its next request may arrive at once.
+                    server.finished()
+                    job.reply(200, reply)
+                }
             }
         }
     }
@@ -763,6 +778,68 @@ public enum ElementRole {
         "application", "window", "group", "keyboard", "key", "navigationBar", "tabBar", "tabGroup", "toolbar", "statusBar", "table",
         "collectionView", "scrollView", "scrollBar",
     ]
+}
+"""#),
+        ("XcdRunner/Core/HTTPRequest.swift", #"""
+import Foundation
+
+public struct HTTPRequest: Equatable {
+    public var method: String
+    public var path: String
+    /// Header names, lower-cased.
+    public var headers: [String: String]
+    public var body: Data
+
+    public init(method: String, path: String, headers: [String: String], body: Data) {
+        self.method = method
+        self.path = path
+        self.headers = headers
+        self.body = body
+    }
+}
+
+public enum HTTPParse: Equatable {
+    /// The buffer holds only part of a request.
+    case needMore
+    case request(HTTPRequest)
+    case malformed(String)
+    case tooLarge
+}
+
+/// Reads one HTTP/1.1 request from bytes a local client sent before it is trusted, so it never traps and never asks
+/// for more than the limits below.
+public enum HTTPRequestParser {
+    public static let maxHeaderBytes = 64 * 1024
+    public static let maxBodyBytes = 1024 * 1024
+
+    public static func parse(_ buffer: Data) -> HTTPParse {
+        let terminator = Data("\r\n\r\n".utf8)
+        guard let separator = buffer.range(of: terminator) else {
+            return buffer.count > maxHeaderBytes ? .tooLarge : .needMore
+        }
+        if separator.lowerBound > maxHeaderBytes { return .tooLarge }
+        let head = String(decoding: buffer[buffer.startIndex..<separator.lowerBound], as: UTF8.self).components(separatedBy: "\r\n")
+        let requestLine = (head.first ?? "").split(separator: " ")
+        guard requestLine.count >= 2 else { return .malformed("the request line has no method and path") }
+        var headers: [String: String] = [:]
+        for line in head.dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            headers[line[..<colon].lowercased()] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+        }
+        var length = 0
+        if let declared = headers["content-length"] {
+            guard !declared.isEmpty, declared.utf8.allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }) else {
+                return .malformed("Content-Length is not a non-negative integer")
+            }
+            // Digits that overflow an Int are certainly too large.
+            guard let parsed = Int(declared), parsed <= maxBodyBytes else { return .tooLarge }
+            length = parsed
+        }
+        let body = buffer[separator.upperBound...]
+        guard body.count >= length else { return .needMore }
+        return .request(HTTPRequest(method: String(requestLine[0]), path: String(requestLine[1]), headers: headers,
+                                    body: Data(body.prefix(length))))
+    }
 }
 """#),
         ("XcdRunner/Core/RunnerEngine.swift", #"""

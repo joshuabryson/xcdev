@@ -26,8 +26,9 @@ final class XCUIDriver: DeviceDriving {
 
     func appSnapshot(_ bundleId: String) throws -> SnapshotNode {
         let app = app(bundleId)
+        let node = Self.node(try app.snapshot())
         current = app
-        return Self.node(try app.snapshot())
+        return node
     }
 
     func systemSnapshot() throws -> SnapshotNode {
@@ -67,10 +68,8 @@ final class XCUIDriver: DeviceDriving {
 
     func pause(_ seconds: Double) { Thread.sleep(forTimeInterval: seconds) }
 
-    func now() -> Double {
-        let value = Date().timeIntervalSinceReferenceDate
-        return value.isFinite ? value : 0
-    }
+    /// Monotonic, so a clock change can't stretch or cut a wait.
+    func now() -> Double { ProcessInfo.processInfo.systemUptime }
 
     static func node(_ snapshot: XCUIElementSnapshot) -> SnapshotNode {
         SnapshotNode(elementType: Int(snapshot.elementType.rawValue), identifier: snapshot.identifier, label: snapshot.label,

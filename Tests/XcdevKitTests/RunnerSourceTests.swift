@@ -14,7 +14,7 @@ import Testing
         for file in try FileManager.default.subpathsOfDirectory(atPath: project) {
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: project + "/" + file, isDirectory: &isDirectory), !isDirectory.boolValue,
-                  !file.hasSuffix(".DS_Store") else { continue }
+                  !file.hasSuffix(".DS_Store"), !file.contains("/xcuserdata/"), !file.contains("/project.xcworkspace/") else { continue }
             expected[file] = try String(contentsOfFile: project + "/" + file, encoding: .utf8)
         }
         for file in try FileManager.default.contentsOfDirectory(atPath: core) where file.hasSuffix(".swift") {

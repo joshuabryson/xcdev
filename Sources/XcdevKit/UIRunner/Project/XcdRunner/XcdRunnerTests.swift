@@ -37,22 +37,35 @@ final class XcdRunnerTests: XCTestCase {
         engine.rolesVerified = XCUIDriver.rolesVerified
         let health = engine.handle(path: RunnerProtocol.healthPath, body: Data())
 
-        let server = RunnerServer(token: environment["XCD_TOKEN"]) { health }
-        let port = try server.start()
-        if let ready = environment["XCD_READY_FILE"] {
-            try FileManager.default.createDirectory(atPath: (ready as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-            try Data("{\"port\": \(port)}\n".utf8).write(to: URL(fileURLWithPath: ready), options: .atomic)
+        let token = environment["XCD_TOKEN"]
+        if token?.isEmpty ?? true { NSLog("XCD_TOKEN is not set; refusing all requests") }
+        let server = RunnerServer(token: token) { health }
+        // The overridden `record` swallows issues, so a start-up error is logged here before it ends the test.
+        do {
+            let port = try server.start()
+            if let ready = environment["XCD_READY_FILE"] {
+                try FileManager.default.createDirectory(atPath: (ready as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+                try Data("{\"port\": \(port)}\n".utf8).write(to: URL(fileURLWithPath: ready), options: .atomic)
+            }
+            NSLog("XCD_READY port=\(port)")
+        } catch {
+            NSLog("XCD_RUNNER_FAILED: \(error)")
+            throw error
         }
-        NSLog("XCD_READY port=\(port)")
 
         while true {
             CFRunLoopRunInMode(.defaultMode, 1.0, false)
             while let job = server.next() {
-                var reply = engine.handle(path: job.path, body: job.body)
-                let issues = IssueLog.shared.drain()
-                if !issues.isEmpty { reply = Self.adding(issues, to: reply) }
-                job.reply(200, reply)
-                server.finished()
+                autoreleasepool {
+                    // An issue recorded outside a request isn't this request's.
+                    _ = IssueLog.shared.drain()
+                    var reply = engine.handle(path: job.path, body: job.body)
+                    let issues = IssueLog.shared.drain()
+                    if !issues.isEmpty { reply = Self.adding(issues, to: reply) }
+                    // Free the slot first: once the client has the reply its next request may arrive at once.
+                    server.finished()
+                    job.reply(200, reply)
+                }
             }
         }
     }
