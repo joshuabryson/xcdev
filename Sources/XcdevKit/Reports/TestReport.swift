@@ -26,6 +26,8 @@ public struct TestReport: Reportable {
     /// The log's last lines, when xcodebuild failed without reporting an error.
     public let logTail: [String]?
     public let worktree: String
+    /// What xcd did around the run that the reader should know, e.g. that it stopped the UI runner.
+    public var notes: [String] = []
 
     public init(outcome: Outcome, scheme: String, target: String, targetSummary: String, seconds: Double,
                 counts: TestCounts, failures: [TestFailure], buildErrors: [Diagnostic], filtered: Bool,
@@ -63,6 +65,7 @@ public struct TestReport: Reportable {
         lines += failures.map(\.diagnostic.text)
         lines += buildErrors.map(\.text)
         lines += (logTail ?? []).map { "  " + $0 }
+        lines += notes.map { "note: " + $0 }
         if let resultBundle { lines.append("result: \(resultBundle)") }
         lines.append("log: \(log)")
         return lines.joined(separator: "\n")

@@ -111,4 +111,53 @@ import XcdevTestSupport
         #expect(report.buildErrors.first?.message == "xcodebuild failed (exit 65) without reporting an error; the log's last lines follow")
         #expect(report.logTail == ["Testing started", "Restarting after unexpected exit", "** TEST FAILED **"])
     }
+
+    /// Runs a passing `xcd test` with a UI runner recorded for `iphone`. Returns the report and what was stopped.
+    func runBesideARunner(yaml: String, container: String, _ options: TestOptions = TestOptions()) async throws -> (TestReport, FakeDetachedProcesses, WorktreeContext) {
+        _ = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        FakeXcodebuild(runner: fake).onRun(.init(testSummary: Self.passingSummary))
+        var ctx = try worktree.context(yaml, container: container)
+        let detached = FakeDetachedProcesses()
+        let process = ProcessIdentity(pid: 4242, startTime: 1, arguments: ["xcodebuild", "test-without-building"])
+        detached.adopt(process)
+        try Runners.save(RunnerRecord(device: "iphone", udid: "U", process: process, token: "t", port: 1, runnerKey: "k", log: "/l",
+                                      readyFile: "/r", startedAt: Date(), restarts: [], failed: false),
+                         to: ctx.paths.runnerFile(device: "iphone"))
+        let builds = BuildService(runner: fake, provisioner: worktree.provisioner, now: { Date(timeIntervalSince1970: 1_790_040_000) })
+        let report = try await TestService(builds: builds, detached: detached).test(options, in: &ctx)
+        return (report, detached, ctx)
+    }
+
+    static let phoneConfig = """
+    version: 1
+    project: Phone.xcodeproj
+    schemes: { app: Phone, test: Phone }
+    defaultDevice: iphone
+    devices:
+      iphone: { type: "iPhone 18 Pro" }
+    """
+
+    @Test func aRunThatMayDriveTheUIStopsTheUIRunnerFirst() async throws {
+        defer { worktree.remove() }
+        // App.xcodeproj is an empty folder here, so xcd can't tell what the scheme tests.
+        let (report, detached, ctx) = try await runBesideARunner(yaml: BuildServiceTests.config, container: "App.xcodeproj")
+        #expect(report.outcome == .passed && detached.stops == [.init(pid: 4242, signal: SIGTERM)] && ctx.paths.runnerFiles.isEmpty)
+        #expect(report.notes == ["stopped the iphone UI runner first: these tests may drive the UI themselves; the next `xcd ui` command starts it again"])
+        #expect(report.text.contains("\nnote: stopped the iphone UI runner first: these tests may drive the UI themselves;"))
+    }
+
+    @Test func aUnitTestRunLeavesTheUIRunnerAlone() async throws {
+        defer { worktree.remove() }
+        try Fixture.copy("ProjectFiles/Phone", to: worktree.root)              // its scheme tests PhoneTests, a unit-test bundle
+        let (report, detached, ctx) = try await runBesideARunner(yaml: Self.phoneConfig, container: "Phone.xcodeproj")
+        #expect(report.outcome == .passed && detached.stops.isEmpty && report.notes.isEmpty)
+        #expect(ctx.paths.runnerFiles == [ctx.paths.runnerFile(device: "iphone")])
+        #expect(!report.text.contains("note:"))
+    }
+
+    @Test func withoutARunnerNothingIsStoppedOrNoted() async throws {
+        defer { worktree.remove() }
+        let (report, _) = try await run(.init(testSummary: Self.passingSummary))
+        #expect(report.notes.isEmpty && !report.text.contains("note:"))
+    }
 }

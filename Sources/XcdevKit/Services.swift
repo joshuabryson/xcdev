@@ -69,7 +69,7 @@ public struct Services: Sendable {
     public var deviceState: DeviceStateService { DeviceStateService(provisioner: provisioner) }
     public var hooks: HookRunner { HookRunner(runner: runner, output: output, progress: progress) }
     public var builds: BuildService { BuildService(runner: runner, provisioner: provisioner, progress: progress, hooks: hooks) }
-    public var tests: TestService { TestService(builds: builds) }
+    public var tests: TestService { TestService(builds: builds, detached: detached) }
     public var apps: RunService {
         RunService(builds: builds, watcher: CrashWatcher(probe: SystemProcessProbe(), locator: CrashReportLocator()))
     }
