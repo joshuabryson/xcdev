@@ -229,16 +229,20 @@ public struct WorktreeService: Sendable {
             state.path = Paths.canonical(path)
             let paths = WorktreePaths(root: state.path)
             try WorktreeStateStore.save(state, paths)
-            let seed = WorktreePaths(root: projectRoot).sourcePackages
-            if FileManager.default.fileExists(atPath: seed) {
-                // APFS clonefile copy: instant and space-free until files diverge.
-                try await runner.runChecked(Invocation("/bin/cp", ["-c", "-R", seed, paths.sourcePackages]))
-            }
+            try await seedSourcePackages(from: projectRoot, into: paths)
             return Checkout(state: state, created: true, branchCreated: branchCreated)
         } catch {
             await rollBack(state, worktreeAdded: worktreeAdded, branchCreated: branchCreated)
             throw error
         }
+    }
+
+    /// The project's resolved packages are copied into a new checkout, so it doesn't resolve them again.
+    private func seedSourcePackages(from projectRoot: String, into paths: WorktreePaths) async throws {
+        let seed = WorktreePaths(root: projectRoot).sourcePackages
+        guard FileManager.default.fileExists(atPath: seed) else { return }
+        // APFS clonefile copy: instant and space-free until files diverge.
+        try await runner.runChecked(Invocation("/bin/cp", ["-c", "-R", seed, paths.sourcePackages]))
     }
 
     /// Undoes a creation attempt: only what it created, never a checkout or branch that was already there.

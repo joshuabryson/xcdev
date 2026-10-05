@@ -3,16 +3,20 @@ import Testing
 import XcdevTestSupport
 @testable import XcdevKit
 
+extension FakeProcessRunner {
+    /// A project with its main worktree registered, git run for real, and no xcd clones.
+    func doctorProject() async throws -> (TempProject, WorktreeContext) {
+        let project = try TempProject.make(config: WorktreeServiceTests.config)
+        _ = try FakeSimulators(runner: self, catalogJSON: Fixture.string("simctl-list.json"))
+        let worktrees = WorktreeService(runner: RoutingRunner(fake: self), globalPaths: GlobalPaths(base: project.home))
+        return (project, try await worktrees.open(from: project.root))
+    }
+}
+
 @Suite struct RunnersCheckTests {
     let fake = FakeProcessRunner()
 
-    /// A project with its main worktree registered, git run for real, and no xcd clones.
-    func setup() async throws -> (TempProject, WorktreeContext) {
-        let project = try TempProject.make(config: WorktreeServiceTests.config)
-        _ = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
-        let worktrees = WorktreeService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home))
-        return (project, try await worktrees.open(from: project.root))
-    }
+    func setup() async throws -> (TempProject, WorktreeContext) { try await fake.doctorProject() }
 
     func runnerRecord(_ device: String, pid: Int32, in ctx: WorktreeContext) throws -> ProcessIdentity {
         let id = ProcessIdentity(pid: pid, startTime: 1, arguments: ["xcodebuild", "test-without-building"])
