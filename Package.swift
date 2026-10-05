@@ -15,7 +15,8 @@ let package = Package(
     targets: [
         .target(
             name: "XcdevKit",
-            dependencies: [.product(name: "Yams", package: "Yams")]
+            dependencies: [.product(name: "Yams", package: "Yams")],
+            exclude: ["UIRunner/Project"]
         ),
         .executableTarget(
             name: "xcd",

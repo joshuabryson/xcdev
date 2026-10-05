@@ -1,0 +1,25 @@
+{
+  "configurations" : [
+    {
+      "id" : "5C0E6F0A-4B0B-4E0B-9B5E-000000000001",
+      "name" : "Default",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "testTimeoutsEnabled" : false
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:XcdRunner.xcodeproj",
+        "identifier" : "BB0000000000000000000201",
+        "name" : "XcdRunner"
+      }
+    }
+  ],
+  "version" : 1
+}
