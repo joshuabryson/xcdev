@@ -14,6 +14,8 @@ public struct DoctorProblem: Codable, Sendable, Equatable {
         case deletePackageCache = "delete_package_cache"
         case stopRecording = "stop_recording"
         case forgetRecording = "forget_recording"
+        case stopRunner = "stop_ui_runner"
+        case forgetRunner = "forget_ui_runner"
     }
 
     /// The check's id, e.g. "orphaned-clones".
@@ -101,6 +103,14 @@ public struct DoctorEnvironment: Sendable {
     public var fixing = false
     /// How recorded processes are inspected and stopped.
     public var detached: any DetachedProcessLaunching = SystemDetachedProcesses()
+    /// How a UI runner is asked whether it still answers.
+    public var runnerClient: RunnerClient = RunnerClient(transport: URLSessionRunnerTransport())
+
+    /// Sets how recorded processes and UI runners are inspected, stopped, and asked for health.
+    mutating func useProcesses(detached: any DetachedProcessLaunching, runnerClient: RunnerClient) {
+        self.detached = detached
+        self.runnerClient = runnerClient
+    }
 
     public var simctl: SimctlClient { SimctlClient(runner: runner, developerDir: nil, sleep: sleep) }
 

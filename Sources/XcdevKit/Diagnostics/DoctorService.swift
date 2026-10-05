@@ -85,17 +85,20 @@ public struct DoctorService: Sendable {
     public let discovery: XcodeDiscovery
     public let now: @Sendable () -> Date
     public let detached: any DetachedProcessLaunching
+    public let runnerClient: RunnerClient
     let sleep: @Sendable (Duration) async throws -> Void
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, discovery: XcodeDiscovery? = nil,
                 now: @escaping @Sendable () -> Date = { Date() },
                 detached: any DetachedProcessLaunching = SystemDetachedProcesses(),
+                runnerClient: RunnerClient = RunnerClient(transport: URLSessionRunnerTransport()),
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.runner = runner
         self.globalPaths = globalPaths
         self.discovery = discovery ?? XcodeDiscovery(runner: runner)
         self.now = now
         self.detached = detached
+        self.runnerClient = runnerClient
         self.sleep = sleep
     }
 
@@ -104,7 +107,8 @@ public struct DoctorService: Sendable {
     /// own setup.
     public static var allChecks: [any DoctorCheck] {
         [CoreSimulatorCheck(), MissingWorktreesCheck(), IncompleteWorktreesCheck(), OrphanedClonesCheck(),
-         StuckClonesCheck(), TemplatesCheck(), RecordingsCheck(), InitScratchCheck(), PackageCacheCheck(),
+         StuckClonesCheck(), TemplatesCheck(), RecordingsCheck(), StaleUIRunnersCheck(),
+         InitScratchCheck(), PackageCacheCheck(),
          ProjectCheck()]
     }
 
@@ -180,7 +184,7 @@ public struct DoctorService: Sendable {
                                  registry: registry, registryError: registryError, states: states,
                                  project: await project(from: directory), discovery: discovery, now: now(), sleep: sleep,
                                  busy: busy, fixing: fixing)
-        env.detached = detached
+        env.useProcesses(detached: detached, runnerClient: runnerClient)
         return env
     }
 

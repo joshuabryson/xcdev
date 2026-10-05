@@ -80,4 +80,20 @@ import XcdevTestSupport
         #expect(detached.stops == [.init(pid: 4343, signal: SIGINT)])
         #expect(removal.stoppedRecordings.count == 1 && removal.text.contains("stopped the iphone recording"))
     }
+
+    @Test func removeStopsTheWorktreesUIRunner() async throws {
+        let (project, _, ctx, state) = try await setup()
+        defer { project.remove() }
+        let id = ProcessIdentity(pid: 5252, startTime: 1, arguments: ["xcodebuild", "test-without-building"])
+        let detached = FakeDetachedProcesses()
+        detached.adopt(id)
+        let paths = WorktreePaths(root: state.path)
+        try Runners.save(RunnerRecord(device: "iphone", udid: "U", process: id, token: "t", port: 1, runnerKey: "k", log: "/l",
+                                      readyFile: "/r", startedAt: Date(), restarts: [], failed: false),
+                         to: paths.runnerFile(device: "iphone"))
+        let svc = WorktreeService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home), detached: detached)
+        let removal = try await svc.remove(name: state.name, force: true, in: ctx)
+        #expect(detached.stops == [.init(pid: 5252, signal: SIGTERM)])
+        #expect(removal.stoppedRecordings == ["stopped the iphone UI runner"])
+    }
 }

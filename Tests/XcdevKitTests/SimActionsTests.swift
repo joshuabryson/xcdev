@@ -4,8 +4,9 @@ import XcdevTestSupport
 @testable import XcdevKit
 
 @Suite struct SimActionsTests {
-    let fake = FakeProcessRunner()
-    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xcd-simact-\(UUID().uuidString)").path
+    let worktree = FakeWorktree(prefix: "xcd-simact")
+    var fake: FakeProcessRunner { worktree.runner }
+    var dir: String { worktree.root }
 
     func context(_ yaml: String = """
     version: 1
@@ -15,11 +16,7 @@ import XcdevTestSupport
       iphone: { type: "iPhone 18 Pro" }
       old: { type: "iPhone 16", runtime: "iOS 26.5" }
     """) throws -> WorktreeContext {
-        let state = WorktreeState(id: "id", name: "feat", project: "App", projectRoot: dir, path: dir, branch: "feat",
-                                  xcode: XcodeInstall(path: "/Applications/Xcode.app", version: "27.0", build: "27A266a"),
-                                  devices: [:], status: .ready, createdAt: Date())
-        return WorktreeContext(location: ProjectLocation(projectRoot: dir, worktreeRoot: dir),
-                               config: try ConfigLoader.parse(main: yaml), state: state)
+        try worktree.context(yaml)
     }
 
     var provisioner: DeviceProvisioner { DeviceProvisioner(runner: fake, globalPaths: GlobalPaths(base: dir + "/home")) }
@@ -111,5 +108,22 @@ import XcdevTestSupport
         let report = try await provisioner.shutdownReport(nil, in: ctx, detached: detached)
         #expect(detached.stops == [.init(pid: 4242, signal: SIGINT)])
         #expect(report.notes.count == 1 && report.text.contains("\nstopped the iphone recording after"))
+    }
+
+    @Test func shutdownStopsThatDevicesUIRunner() async throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        _ = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        var ctx = try context()
+        let phone = try await provisioner.boot("iphone", in: &ctx)
+        let id = ProcessIdentity(pid: 5151, startTime: 1, arguments: ["xcodebuild", "test-without-building"])
+        let detached = FakeDetachedProcesses()
+        detached.adopt(id)
+        try Runners.save(RunnerRecord(device: "iphone", udid: phone.device.udid, process: id, token: "t", port: 1, runnerKey: "k",
+                                      log: dir + "/l", readyFile: dir + "/r", startedAt: Date(), restarts: [], failed: false),
+                         to: ctx.paths.runnerFile(device: "iphone"))
+        let report = try await provisioner.shutdownReport(nil, in: ctx, detached: detached)
+        #expect(detached.stops == [.init(pid: 5151, signal: SIGTERM)])
+        #expect(report.notes == ["stopped the iphone UI runner"])
+        #expect(ctx.paths.runnerFiles.isEmpty)
     }
 }

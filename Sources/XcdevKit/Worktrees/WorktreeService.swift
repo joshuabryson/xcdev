@@ -402,6 +402,7 @@ extension WorktreeService {
 
         let state = exists ? try WorktreeStateStore.load(WorktreePaths(root: entry.path)) : nil
         let stopped = exists ? await Recordings.stopAll(in: WorktreePaths(root: entry.path), detached: detached, now: Date()) : []
+        let runners = exists ? await Runners.stopAll(in: WorktreePaths(root: entry.path), detached: detached) : []
         let removedDevices = if let state { try await deleteClones(of: state) } else { [String]() }
 
         if exists {
@@ -415,7 +416,7 @@ extension WorktreeService {
         try await registry.remove(id: entry.id)
         return WorktreeRemoval(name: name, project: ctx.location.projectName, path: entry.path, branch: state?.branch ?? name,
                                removedDevices: removedDevices, stateMissing: state == nil,
-                               stoppedRecordings: stopped.map(\.note), warnings: warnings)
+                               stoppedRecordings: stopped.map(\.note) + runners, warnings: warnings)
     }
 }
 

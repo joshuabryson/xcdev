@@ -79,7 +79,8 @@ public struct Services: Sendable {
     public var setup: InitService {
         InitService(runner: runner, globalPaths: globalPaths, progress: activity, interrupts: interrupts)
     }
-    public var doctor: DoctorService { DoctorService(runner: runner, globalPaths: globalPaths, detached: detached) }
+    public var doctor: DoctorService { DoctorService(runner: runner, globalPaths: globalPaths, detached: detached,
+                  runnerClient: RunnerClient(transport: runnerTransport)) }
     public var externalCommands: ExternalCommands { ExternalCommands(services: self) }
     public var help: HelpService { HelpService(services: self) }
     public var logs: LogService { LogService(runner: runner, provisioner: provisioner) }
