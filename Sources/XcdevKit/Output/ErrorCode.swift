@@ -15,6 +15,13 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
     case buildFailed = "build_failed"
     case testFailed = "test_failed"
     case appCrashed = "app_crashed"
+    case elementNotFound = "element_not_found"
+    case elementNotHittable = "element_not_hittable"
+    case waitTimeout = "wait_timeout"
+    case elementAmbiguous = "element_ambiguous"
+    case staleRef = "stale_ref"
+    case platformUnsupported = "platform_unsupported"
+    case runnerFailed = "runner_failed"
     case hookFailed = "hook_failed"
     case xcodeMissing = "xcode_missing"
     case xcodeRuntimeMismatch = "xcode_runtime_mismatch"
@@ -29,13 +36,13 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
     /// 1 = the task failed (fix the code), 2 = fix the invocation or config, 3 = fix the environment (`xcd doctor`).
     public var exitCode: Int32 {
         switch self {
-        case .buildFailed, .testFailed, .appCrashed, .hookFailed:
+        case .buildFailed, .testFailed, .appCrashed, .elementNotFound, .elementNotHittable, .waitTimeout, .hookFailed:
             return 1
         case .usage, .notInProject, .configMissing, .configInvalid, .deviceUnknown,
-             .deviceTypeUnknown, .worktreeNotFound, .worktreeDirty, .appNotBuilt:
+             .deviceTypeUnknown, .worktreeNotFound, .worktreeDirty, .appNotBuilt, .elementAmbiguous, .staleRef, .platformUnsupported:
             return 2
         case .xcodeMissing, .xcodeRuntimeMismatch, .runtimeMissing, .cloneFailed, .simulatorFailed,
-             .subprocessFailed, .timeout, .doctorProblems, .internalError:
+             .subprocessFailed, .timeout, .doctorProblems, .internalError, .runnerFailed:
             return 3
         }
     }
@@ -55,6 +62,13 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .buildFailed: return "xcodebuild reported build errors; they are listed in compiler format."
         case .testFailed: return "Tests failed, or no tests ran."
         case .appCrashed: return "The app crashed or exited during the crash window after launch."
+        case .elementNotFound: return "No element on screen matched the target within the timeout."
+        case .elementNotHittable: return "The element exists but is off screen or disabled, so it wasn't acted on."
+        case .waitTimeout: return "`xcd ui wait` gave up: the element didn't appear (or, with --gone, didn't go away)."
+        case .elementAmbiguous: return "More than one element matched the target; the error lists them with refs."
+        case .staleRef: return "A ref from an earlier `xcd ui tree` no longer names one element; read the tree again."
+        case .platformUnsupported: return "UI driving works on iPhone and iPad simulators only."
+        case .runnerFailed: return "The UI runner inside the simulator could not be built or started, or stopped answering."
         case .hookFailed: return "A hook from .xcdev.yml exited non-zero; the error names the hook and its log."
         case .xcodeMissing: return "The Xcode that .xcdev.yml or --xcode asks for isn't installed."
         case .xcodeRuntimeMismatch: return "A simulator runtime is newer than the selected Xcode supports."
