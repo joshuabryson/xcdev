@@ -52,23 +52,34 @@ public struct StaleUIRunnersCheck: DoctorCheck {
         }
     }
 
-    /// Looks again before acting: the record is re-read, and a runner that came back or is being started is left alone.
+    /// Takes the runner's lock without waiting (a runner being started holds it), then looks again before acting:
+    /// the record is re-read, and a runner that came back is left alone. The lock is held through the health probe
+    /// and the stop, so no `xcd ui` can start a new runner in between and have it stopped or its record deleted.
     public func fix(_ problem: DoctorProblem, _ env: DoctorEnvironment) async throws {
         guard let file = problem.subject, let item = found(env).first(where: { $0.file == file }) else { return }
-        guard !starting(item, env) else {
+        let lock = Runners.lockPath(globalPaths: env.globalPaths, worktreeRoot: item.entry.path, device: item.record.device)
+        let acted: Void? = try await FileLock.withLockIfFree(at: lock) {
+            try await act(on: problem, file: file, entry: item.entry, env)
+        }
+        if acted == nil {
             throw DoctorLeftAlone(note: "the \(item.record.device) UI runner is being started by another xcd; left alone")
         }
-        let running = env.detached.inspector.isRunning(item.record.process, marker: Runners.marker)
+    }
+
+    /// The fix itself, with the runner's lock held. Everything is re-read here, not taken from before the lock.
+    private func act(on problem: DoctorProblem, file: String, entry: RegistryEntry, _ env: DoctorEnvironment) async throws {
+        guard let record = Runners.load(file) else { return }
+        let running = env.detached.inspector.isRunning(record.process, marker: Runners.marker)
         switch problem.action {
         case .forgetRunner?:
-            guard !running else { throw DoctorLeftAlone(note: "the \(item.record.device) UI runner in \(file) is running again; left alone") }
+            guard !running else { throw DoctorLeftAlone(note: "the \(record.device) UI runner in \(file) is running again; left alone") }
             try FileManager.default.removeItem(atPath: file)
-            try? FileManager.default.removeItem(atPath: item.record.readyFile)
+            try? FileManager.default.removeItem(atPath: record.readyFile)
         case .stopRunner?:
-            guard running, !(await answers(item.record, env)) else {
-                throw DoctorLeftAlone(note: "the \(item.record.device) UI runner in \(file) changed since doctor looked; left alone")
+            guard running, !(await answers(record, env)) else {
+                throw DoctorLeftAlone(note: "the \(record.device) UI runner in \(file) changed since doctor looked; left alone")
             }
-            await Runners.stop(item.record, file: file, detached: env.detached)
+            await Runners.stop(record, file: file, detached: env.detached)
         default:
             return
         }

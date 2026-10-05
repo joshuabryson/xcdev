@@ -74,4 +74,32 @@ extension FakeProcessRunner {
         #expect(check?.inProgress == ["\(ctx.state.project)/\(ctx.state.name)'s starting UI runner is being started by another xcd; left alone"])
         #expect(ctx.paths.runnerFiles == [ctx.paths.runnerFile(device: "starting")])
     }
+
+    @Test func aRunnerStartedBetweenDetectAndFixIsNeitherStoppedNorForgotten() async throws {
+        let (project, ctx) = try await setup()
+        defer { project.remove() }
+        let detached = FakeDetachedProcesses()
+        detached.adopt(try runnerRecord("deaf", pid: 12, in: ctx))
+        let globalPaths = GlobalPaths(base: project.home)
+        let service = DoctorService(runner: RoutingRunner(fake: fake), globalPaths: globalPaths,
+                                    discovery: XcodeDiscovery(runner: fake, applicationsDirectories: []), detached: detached,
+                                    runnerClient: RunnerClient(transport: PortTransport(healthyPort: 0, healthy: FakeRunnerTransport())))
+        let env = await service.environment(from: nil, fixing: true)
+        let problem = try #require(await StaleUIRunnersCheck().detect(env).first)
+        #expect(problem.action == .stopRunner)
+
+        // Another xcd takes the runner's lock after doctor looked, to start a runner.
+        let lock = Runners.lockPath(globalPaths: globalPaths, worktreeRoot: ctx.paths.root, device: "deaf")
+        let outcome: DoctorLeftAlone? = try await FileLock.withLock(at: lock) {
+            do {
+                try await StaleUIRunnersCheck().fix(problem, env)
+                return nil
+            } catch let left as DoctorLeftAlone {
+                return left
+            }
+        }
+        #expect(outcome?.note == "the deaf UI runner is being started by another xcd; left alone")
+        #expect(detached.stops.isEmpty)
+        #expect(ctx.paths.runnerFiles == [ctx.paths.runnerFile(device: "deaf")])
+    }
 }
