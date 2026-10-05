@@ -320,6 +320,8 @@ public struct WorktreeRemoval: Codable, Sendable, Equatable {
     public let stateMissing: Bool
     /// One line per screen recording stopped before the clones were deleted.
     public var stoppedRecordings: [String] = []
+    /// One line per UI runner stopped (or stale runner record removed) before the clones were deleted.
+    public var stoppedRunners: [String] = []
     /// Problems that `--force` removed the worktree despite, such as a failing `pre-worktree-remove` hook.
     public var warnings: [String] = []
 }
@@ -420,7 +422,7 @@ extension WorktreeService {
         try await registry.remove(id: entry.id)
         return WorktreeRemoval(name: name, project: ctx.location.projectName, path: entry.path, branch: state?.branch ?? name,
                                removedDevices: removedDevices, stateMissing: state == nil,
-                               stoppedRecordings: stopped.map(\.note) + runners, warnings: warnings)
+                               stoppedRecordings: stopped.map(\.note), stoppedRunners: runners, warnings: warnings)
     }
 }
 

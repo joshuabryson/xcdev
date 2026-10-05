@@ -26,7 +26,7 @@ it gives each git worktree its own simulator clones and DerivedData, so parallel
 | Install, launch, stop | `xcd install`, `xcd launch`, `xcd terminate` |
 | Simulator | `xcd sim boot`, `xcd sim open`, `xcd sim erase` |
 | Screenshot or video | `xcd ui screenshot`, `xcd ui record start` … `xcd ui record stop` (each prints the file's path; read it) |
-| Read and drive the UI (iPhone/iPad) | Launch the app first (`xcd run` or `xcd launch`). `xcd ui tree` lists what is on screen with refs; `xcd ui tap <target>`; `xcd ui wait <target> [--gone]`. A target is `id:<identifier>`, `"label:<text>"`, `"label~<part>"`, `ref:e<N>`, or `@x,y` (tap only) |
+| Read and drive the UI (iPhone/iPad) | Launch the app first (`xcd run` or `xcd launch`; not needed with `--system`). `xcd ui tree` lists what is on screen with refs; `xcd ui tap <target>`; `xcd ui wait <target> [--gone]`. A target is `id:<identifier>`, `"label:<text>"`, `"label~<part>"`, `ref:e<N>`, or `@x,y` (tap only) |
 | Device state | `xcd sim open-url <url>`, `xcd sim push --alert <text>`, `xcd sim privacy grant photos`, `xcd sim status-bar --time 9:41`, `xcd sim appearance dark`, `xcd sim location <lat>,<lon>`, `xcd sim pasteboard set --text <s>`, `xcd sim addmedia <file>` |
 | Context for scripts | `xcd context` (prints XCD_* variables) |
 | Explain a config key | `xcd config explain <key>` |

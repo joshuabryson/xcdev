@@ -75,8 +75,9 @@ public struct RunnerClient: Sendable {
         case 409:
             throw XcdError(.runnerFailed, "another ui command is running in this worktree", next: "wait for it to finish, then retry")
         case 400, 413:
-            // The runner is alive and refused the request, so restarting it would not help.
-            throw XcdError(.runnerFailed, "the UI runner refused the request (HTTP \(status))", next: "retry; if it keeps failing, run `xcd ui stop`, then retry")
+            // The runner is alive and refused the request, so restarting it would not help, and neither would sending it again.
+            throw XcdError(.runnerFailed, "the UI runner refused the request (HTTP \(status))",
+                           next: "this is likely an xcd bug; run `xcd ui stop`, then retry")
         default:
             throw RunnerUnreachable(reason: "HTTP \(status)")
         }

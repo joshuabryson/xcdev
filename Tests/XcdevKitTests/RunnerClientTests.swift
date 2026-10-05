@@ -93,7 +93,8 @@ import XcdevTestSupport
             let error = await callTree(status: status, body: #"{"ok":false}"#)
             #expect(error?.code == .runnerFailed, "status \(status)")
             #expect(error?.message == "the UI runner refused the request (HTTP \(status))", "status \(status)")
-            #expect(error?.next != nil, "status \(status)")
+            // The refusal is deterministic, so the advice is not to retry the same request.
+            #expect(error?.next == "this is likely an xcd bug; run `xcd ui stop`, then retry", "status \(status)")
         }
     }
 

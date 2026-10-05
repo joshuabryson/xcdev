@@ -25,11 +25,21 @@ enum UIRunnerErrors {
     }
 
     static func notFound(_ failure: RunnerFailure, target: String, _: Duration) -> XcdError {
-        let wanted = target.split(separator: ":", maxSplits: 1).last.map(String.init) ?? target
+        let wanted = text(of: target)
         let close = Suggest.closest(to: wanted, in: failure.seen, limit: 5)
         return XcdError(.elementNotFound, "\(failure.message) \(target)",
                         next: close.isEmpty ? "run `xcd ui tree` to see what is on screen"
                                             : "closest on screen: \(close.joined(separator: ", ")); run `xcd ui tree` to see everything")
+    }
+
+    /// The text a target looks for, without its `id:`, `label:`, `label~`, or `ref:` prefix, to compare with what is on screen.
+    static func text(of target: String) -> String {
+        switch TargetParser.parse(target) {
+        case .success(.id(let text)), .success(.label(let text)), .success(.labelContains(let text)), .success(.ref(let text)):
+            return text
+        case .success(.point), .failure:
+            return target
+        }
     }
 
     /// The runner says why: disabled, no size, off screen, or covered by a system alert or the keyboard.
@@ -65,7 +75,7 @@ enum UIRunnerErrors {
 
     static func waitTimeout(_ failure: RunnerFailure, target: String, timeout: Duration) -> XcdError {
         let appeared = failure.message.contains("did not appear")
-        return XcdError(.waitTimeout, "\(target) \(appeared ? "did not appear" : "is still on screen") within \(DurationText.format(timeout))",
+        return XcdError(.waitTimeout, "\(target) \(appeared ? "did not appear within" : "is still on screen after") \(DurationText.format(timeout))",
                         next: failure.seen.isEmpty ? "run `xcd ui tree`"
                                                    : "on screen now: \(failure.seen.prefix(8).joined(separator: ", ")); run `xcd ui tree`")
     }

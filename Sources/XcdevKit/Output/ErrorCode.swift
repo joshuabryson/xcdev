@@ -63,7 +63,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .testFailed: return "Tests failed, or no tests ran."
         case .appCrashed: return "The app crashed or exited during the crash window after launch."
         case .elementNotFound: return "No element on screen matched the target within the timeout."
-        case .elementNotHittable: return "The element exists but is off screen or disabled, so it wasn't acted on."
+        case .elementNotHittable: return "The element exists but is off screen, disabled, or covered by a system alert or the keyboard, so it wasn't acted on."
         case .waitTimeout: return "`xcd ui wait` gave up: the element didn't appear (or, with --gone, didn't go away)."
         case .elementAmbiguous: return "More than one element matched the target; the error lists them with refs."
         case .staleRef: return "A ref from an earlier `xcd ui tree` no longer names one element; read the tree again."

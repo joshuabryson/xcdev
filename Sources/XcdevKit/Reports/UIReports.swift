@@ -53,6 +53,7 @@ public struct UITreeReport: Reportable {
         if tree.elements.isEmpty { lines.append("(no elements; `xcd ui tree --all` shows containers and off-screen elements)") }
         if restarted { lines.append(UIText.restartNote) }
         if tree.state == "not_running" { lines.append("next: start the app with `xcd run` or `xcd launch`") }
+        if tree.state == "background" { lines.append("next: bring it forward with `xcd launch`, or act on the Home Screen with `--system`") }
         return lines.joined(separator: "\n")
     }
 

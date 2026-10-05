@@ -65,6 +65,67 @@ import XcdevTestSupport
         #expect(error?.next?.contains("`ref:eN`") == true && error?.next?.contains("replace any refs from an earlier tree") == true)
     }
 
+    @Test func suggestionsCompareTheTargetsTextWithoutItsPrefix() async throws {
+        let seen = ["Sign In", "signIn", "Email", "Welcome back"]
+        for target in ["label~Emial", "label:Emial", "id:Emial"] {
+            let error = try await tapError(RunnerFailure(code: RunnerFailure.Code.notFound, message: "no element matches", seen: seen), target: target)
+            #expect(error?.message == "no element matches \(target)")
+            #expect(error?.next == "closest on screen: Email; run `xcd ui tree` to see everything", "\(target)")
+        }
+    }
+
+    @Test func anElementThatDidNotGoAwayIsStillOnScreenAfterTheTimeout() async throws {
+        defer { base.worktree.remove() }
+        var (service, ctx, _, _) = try base.setup { _, _ in
+            FakeRunnerTransport.reply(Result<ActionResult, RunnerFailure>.failure(
+                RunnerFailure(code: RunnerFailure.Code.waitTimeout, message: "the element is still on screen")))
+        }
+        var three = options
+        three.timeout = .seconds(3)
+        let error = await #expect(throws: XcdError.self) { _ = try await service.wait("id:spinner", gone: true, three, in: &ctx) }
+        #expect(error?.code == .waitTimeout && error?.message == "id:spinner is still on screen after 3.0s")
+    }
+
+    @Test func anUnknownRoleIsRefusedBeforeAnyRunnerStarts() async throws {
+        defer { base.worktree.remove() }
+        var (service, ctx, transport, detached) = try base.setup { _, _ in FakeRunnerTransport.reply(Result<ActionResult, RunnerFailure>.success(ActionResult(element: nil, x: nil, y: nil, ms: 1))) }
+        var wrong = options
+        wrong.role = "buton"
+        let tap = await #expect(throws: XcdError.self) { _ = try await service.tap("label:Sign In", wrong, in: &ctx) }
+        #expect(tap?.code == .usage && tap?.message == "'buton' is not a role")
+        #expect(tap?.next == "use one of: " + ElementRole.all.joined(separator: ", "))
+        let wait = await #expect(throws: XcdError.self) { _ = try await service.wait("label:Sign In", gone: false, wrong, in: &ctx) }
+        #expect(wait?.code == .usage && transport.calls.isEmpty && detached.starts.isEmpty)
+        for role in ["button", "text", "cell", "other"] {
+            var right = options
+            right.role = role
+            _ = try await service.tap("label:Sign In", right, in: &ctx)
+        }
+        #expect(transport.calls.filter { $0 == "/tap" }.count == 4)
+    }
+
+    @Test func theRoleNamesAreEveryRoleTheTreeCanShow() {
+        #expect(ElementRole.all == ElementRole.all.sorted() && Set(ElementRole.all).count == ElementRole.all.count)
+        #expect(Set(ElementRole.all) == Set(ElementRole.names.values).union(["other"]))
+        #expect(ElementRole.interactive.isSubset(of: ElementRole.all) && ElementRole.structural.isSubset(of: ElementRole.all))
+    }
+
+    @Test func aTreeOfABackgroundAppSaysHowToGoOn() {
+        func report(_ state: String) -> UITreeReport {
+            var tree = UIServiceTests.tree
+            tree.state = state
+            return UITreeReport(device: "iphone", udid: "U", restarted: false, tree: tree, worktree: "feat")
+        }
+        #expect(report("background").text.hasSuffix("\nnext: bring it forward with `xcd launch`, or act on the Home Screen with `--system`"))
+        #expect(report("not_running").text.hasSuffix("\nnext: start the app with `xcd run` or `xcd launch`"))
+        #expect(!report("foreground").text.contains("next:") && !report("system").text.contains("next:"))
+    }
+
+    @Test func notHittableIsDescribedWithEveryReason() {
+        #expect(ErrorCode.elementNotHittable.summary
+            == "The element exists but is off screen, disabled, or covered by a system alert or the keyboard, so it wasn't acted on.")
+    }
+
     @Test func aWaitForAPointIsRefusedBeforeAnyRunnerStarts() async throws {
         defer { base.worktree.remove() }
         var (service, ctx, transport, detached) = try base.setup { _, _ in FakeRunnerTransport.reply(Result<ActionResult, RunnerFailure>.success(ActionResult(element: nil, x: nil, y: nil, ms: 1))) }

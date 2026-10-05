@@ -79,6 +79,7 @@ import XcdevTestSupport
         let removal = try await svc.remove(name: state.name, force: true, in: ctx)
         #expect(detached.stops == [.init(pid: 4343, signal: SIGINT)])
         #expect(removal.stoppedRecordings.count == 1 && removal.text.contains("stopped the iphone recording"))
+        #expect(removal.stoppedRunners.isEmpty)
     }
 
     @Test func removeStopsTheWorktreesUIRunner() async throws {
@@ -94,6 +95,9 @@ import XcdevTestSupport
         let svc = WorktreeService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home), detached: detached)
         let removal = try await svc.remove(name: state.name, force: true, in: ctx)
         #expect(detached.stops == [.init(pid: 5252, signal: SIGTERM)])
-        #expect(removal.stoppedRecordings == ["stopped the iphone UI runner"])
+        #expect(removal.stoppedRunners == ["stopped the iphone UI runner"] && removal.stoppedRecordings.isEmpty)
+        #expect(removal.text.contains("\nstopped the iphone UI runner"))
+        let json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(removal)) as? [String: Any])
+        #expect(json["stoppedRunners"] as? [String] == ["stopped the iphone UI runner"] && json["stoppedRecordings"] as? [String] == [])
     }
 }

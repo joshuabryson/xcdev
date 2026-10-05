@@ -88,6 +88,9 @@ public struct UIService: Sendable {
         guard case .success(let spec) = TargetParser.parse(target) else {
             throw XcdError(.usage, "'\(target)' is not a target", next: "use " + TargetParser.forms)
         }
+        if let role = options.role, !ElementRole.all.contains(role) {
+            throw XcdError(.usage, "'\(role)' is not a role", next: "use one of: " + ElementRole.all.joined(separator: ", "))
+        }
         return TargetRequest(bundleId: try bundleId(options, in: ctx), system: options.system, target: spec, role: options.role,
                              index: options.index, timeout: DurationText.seconds(options.effectiveTimeout), gone: gone)
     }

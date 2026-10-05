@@ -18,7 +18,8 @@ extension UICommand {
     }
 
     struct MatchOptions: ParsableArguments {
-        @Option(help: "Only match elements with this role, e.g. button, textField, text, cell.") var role: String?
+        @Option(help: "Only match elements with this role, e.g. button, textField, text, cell.", completion: .list(ElementRole.all))
+        var role: String?
         @Option(help: "Pick one of several matches: 0 is the first.") var index: Int?
     }
 
@@ -44,7 +45,8 @@ extension UICommand {
         static let configuration = CommandConfiguration(
             abstract: "Tap an element or a point.",
             discussion: """
-            The app must be running in front (`xcd run` or `xcd launch`); a system alert over it can be tapped too. \
+            The app must be running in front (`xcd run` or `xcd launch`; not needed with --system); a system alert over it \
+            can be tapped too. \
             An element covered by an alert or the keyboard is not tapped. When several elements match, the failure \
             lists them as e1, e2, …: those become the refs, so `ref:e<N>` (or --index) picks one. \
             A tap that succeeds says where it landed, not what it did: check with `xcd ui wait` or `xcd ui tree`.
@@ -69,7 +71,7 @@ extension UICommand {
     struct Wait: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Wait for an element to be on screen, or with --gone, to be gone.",
-            discussion: "The app must be running in front (`xcd run` or `xcd launch`). A point (@x,y) can't be waited for."
+            discussion: "The app must be running in front (`xcd run` or `xcd launch`; not needed with --system). A point (@x,y) can't be waited for."
         )
         @Argument(help: "What to wait for, e.g. id:welcome or \"label~Welcome\".") var target: String
         @Flag(help: "Wait for it to go away instead.") var gone = false

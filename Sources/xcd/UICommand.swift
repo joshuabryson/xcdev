@@ -9,7 +9,7 @@ struct UICommand: AsyncParsableCommand {
         A target is one of: id:<identifier>, label:<text>, label~<part of the label>, ref:e<N> (from the newest `xcd ui tree`), \
         or @x,y (points; tap only). The app is the one from the last build; --bundle picks another, --system the Home Screen. \
         tap and wait act on the app and any system alert over it, so the app must be running in front: start it with \
-        `xcd run` or `xcd launch` first. Driving works on iPhone and iPad simulators. \
+        `xcd run` or `xcd launch` first (not needed with --system). Driving works on iPhone and iPad simulators. \
         Nothing here opens Simulator.app or takes focus on the Mac.
 
         Captures go to ui.media.dir (default .xcdev-media/<worktree>/<branch> in the main checkout); each prints its path.

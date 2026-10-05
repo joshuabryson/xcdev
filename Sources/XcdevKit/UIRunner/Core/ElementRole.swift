@@ -15,6 +15,9 @@ public enum ElementRole {
 
     public static func name(for elementType: Int) -> String { names[elementType] ?? "other" }
 
+    /// Every role name, sorted: what `--role` accepts.
+    public static let all: [String] = Set(names.values).union(["other"]).sorted()
+
     /// Roles an agent acts on. They are shown even without a label.
     public static let interactive: Set<String> = [
         "button", "radioButton", "checkBox", "popUpButton", "menuButton", "toolbarButton", "slider", "segmentedControl",
