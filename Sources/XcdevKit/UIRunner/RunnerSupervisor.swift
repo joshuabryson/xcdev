@@ -43,8 +43,10 @@ public struct RunnerSupervisor: Sendable {
         // Whether the clone was already booted decides how long the start may take.
         let catalog = try? await provisioner.simctl(for: ctx).catalog()
         let bootedAlready = ctx.state.devices[name].flatMap { catalog?.device(udid: $0.udid)?.state } == "Booted"
-        let (device, _) = try await provisioner.boot(name, in: &ctx)
+        // Clone first and check the platform, so a watch or TV device is rejected without being booted.
+        let device = try await provisioner.ensure(name, in: &ctx)
         try Runners.requireIOS(device, name: name)
+        _ = try await provisioner.simctl(for: ctx).boot(udid: device.udid)
         let xcode = try await provisioner.ensureXcode(&ctx)
         let target = Target(name: name, udid: device.udid, key: builder.key(for: xcode), developerDir: xcode.developerDir,
                             paths: ctx.paths, timeout: Self.startTimeout(wasBooted: bootedAlready))
@@ -93,7 +95,8 @@ public struct RunnerSupervisor: Sendable {
         }
         let build = try await builder.ensureBuilt(xcode: xcode)
         let record = try await start(target, build: build, restarts: restarts)
-        return RunnerSession(device: target.name, udid: target.udid, port: record.port ?? 0, token: record.token, restarted: replacing)
+        guard let port = record.port else { throw XcdError(.internalError, "the \(target.name) UI runner started without a port") }
+        return RunnerSession(device: target.name, udid: target.udid, port: port, token: record.token, restarted: replacing)
     }
 
     static func gaveUp(_ name: String, record: RunnerRecord, message: String) -> XcdError {
@@ -113,25 +116,25 @@ public struct RunnerSupervisor: Sendable {
         while true {
             let record = try launch(target, build: build, restarts: restarts)
             let file = target.paths.runnerFile(device: target.name)
+            let ready: RunnerRecord?
             do {
                 try Runners.save(record, to: file)                  // findable from now on, even if this xcd is interrupted
-                if let ready = try await waitUntilReady(record, timeout: target.timeout) {
-                    try Runners.save(ready, to: file)
-                    return ready
-                }
-                // xcodebuild exited before the runner was up.
-                let tail = Self.tail(record.log)
-                await Runners.stop(record, file: file, detached: detached)
-                if !retried, tail.contains(where: { $0.contains("Unable to find a device matching") }) {
-                    retried = true                                  // seen once just after a clone was created
-                    continue
-                }
-                throw XcdError(.runnerFailed, "the \(target.name) UI runner stopped before it was ready",
-                               next: "run `xcd doctor`; if it keeps happening, `xcd ui stop --rebuild`", details: ["log: \(record.log)"] + tail)
+                ready = try await waitUntilReady(record, timeout: target.timeout)
+                if let ready { try Runners.save(ready, to: file) }
             } catch {
                 await Runners.stop(record, file: file, detached: detached)
                 throw error
             }
+            if let ready { return ready }
+            // xcodebuild exited before the runner was up.
+            let tail = Self.tail(record.log)
+            await Runners.stop(record, file: file, detached: detached)
+            if !retried, tail.contains(where: { $0.contains("Unable to find a device matching") }) {
+                retried = true                                      // seen once just after a clone was created
+                continue
+            }
+            throw XcdError(.runnerFailed, "the \(target.name) UI runner stopped before it was ready",
+                           next: "run `xcd doctor`; if it keeps happening, `xcd ui stop --rebuild`", details: ["log: \(record.log)"] + tail)
         }
     }
 

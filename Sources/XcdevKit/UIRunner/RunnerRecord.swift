@@ -48,13 +48,15 @@ public enum Runners {
         try JSONCoding.encoder(pretty: true).encode(record).write(to: URL(fileURLWithPath: file), options: .atomic)
     }
 
-    /// Stops the runner with SIGTERM (never SIGINT: xcodebuild lingers for minutes), then removes its record, if the
-    /// record still names this process, and its ready file.
+    /// Stops the runner with SIGTERM (never SIGINT: xcodebuild lingers for minutes), then removes its record and ready
+    /// file, but only while the record on disk still names this process: a newer runner's files are left alone.
     @discardableResult
     public static func stop(_ record: RunnerRecord, file: String, detached: any DetachedProcessLaunching) async -> DetachedStop {
         let outcome = await detached.stop(record.process, marker: marker, signal: SIGTERM, timeout: stopTimeout)
-        if load(file).map({ $0.process == record.process }) ?? true { try? FileManager.default.removeItem(atPath: file) }
-        try? FileManager.default.removeItem(atPath: record.readyFile)
+        if load(file).map({ $0.process == record.process }) ?? true {
+            try? FileManager.default.removeItem(atPath: file)
+            try? FileManager.default.removeItem(atPath: record.readyFile)
+        }
         return outcome
     }
 
@@ -63,8 +65,8 @@ public enum Runners {
         var notes: [String] = []
         for file in paths.runnerFiles {
             guard let record = load(file), device == nil || record.device == device else { continue }
-            await stop(record, file: file, detached: detached)
-            notes.append("stopped the \(record.device) UI runner")
+            let outcome = await stop(record, file: file, detached: detached)
+            notes.append(outcome == .notRunning ? "removed the stale \(record.device) UI runner record" : "stopped the \(record.device) UI runner")
         }
         return notes
     }

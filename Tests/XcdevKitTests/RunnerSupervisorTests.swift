@@ -145,6 +145,7 @@ import XcdevTestSupport
         var (supervisor, ctx) = try setup(detached: detached)
         let error = await #expect(throws: XcdError.self) { _ = try await supervisor.session(device: nil, in: &ctx) }
         #expect(error?.code == .runnerFailed && error?.message.contains("did not start within") == true)
+        #expect(error?.message.contains("did not start within 10m00s") == true)     // a clone this command booted: first boot allowance
         #expect(error?.details.contains("Testing started") == true)
         #expect(detached.stops.map(\.signal) == [SIGTERM])
         #expect(Runners.load(ctx.paths.runnerFile(device: "iphone")) == nil)
@@ -187,9 +188,64 @@ import XcdevTestSupport
         #expect(detached.starts.count == 1 && first.token == second.token)
     }
 
-    @Test func aCloneThisCommandBootedGetsTheLongTimeout() {
+    @Test func aCloneThisCommandBootedGetsTheLongTimeout() async throws {
         #expect(RunnerSupervisor.startTimeout(wasBooted: true) == .seconds(120))
         #expect(RunnerSupervisor.startTimeout(wasBooted: false) == .seconds(600))
+        defer { worktree.remove() }
+        var (supervisor, ctx) = try setup(detached: FakeDetachedProcesses())            // never ready
+        let error = await #expect(throws: XcdError.self) { _ = try await supervisor.session(device: nil, in: &ctx) }
+        #expect(error?.message.contains("did not start within 10m00s") == true)
+    }
+
+    @Test func aCloneThatWasAlreadyBootedGetsTheShortTimeout() async throws {
+        defer { worktree.remove() }
+        let (supervisor, ctx) = try setup(detached: FakeDetachedProcesses())            // never ready
+        var booted = ctx
+        _ = try await worktree.provisioner.boot("iphone", in: &booted)
+        let error = await #expect(throws: XcdError.self) { _ = try await supervisor.session(device: nil, in: &booted) }
+        #expect(error?.message.contains("did not start within 2m00s") == true)
+    }
+
+    @Test func aWatchIsRejectedBeforeItIsBooted() async throws {
+        defer { worktree.remove() }
+        let (supervisor, _) = try setup()
+        var ctx = try worktree.context(Self.yaml + "\n  watch: { type: \"Apple Watch Series 11 (46mm)\", pairWith: iphone }")
+        let error = await #expect(throws: XcdError.self) { _ = try await supervisor.session(device: "watch", in: &ctx) }
+        #expect(error?.code == .platformUnsupported)
+        #expect(!worktree.runner.commandLines.contains { $0.contains("simctl boot") })
+    }
+
+    @Test func stoppingAnOldRecordLeavesANewerRunnersFilesAlone() async throws {
+        defer { worktree.remove() }
+        let detached = FakeDetachedProcesses(onStart: Self.writesReady)
+        let (_, ctx) = try setup(detached: detached)
+        let file = ctx.paths.runnerFile(device: "iphone")
+        let ready = ctx.paths.runnerReadyFile(device: "iphone")
+        func record(pid: Int32) -> RunnerRecord {
+            RunnerRecord(device: "iphone", udid: "U", process: ProcessIdentity(pid: pid, startTime: 1, arguments: ["xcodebuild", Runners.marker]),
+                         token: "t", port: 1, runnerKey: "k", log: "/l", readyFile: ready, startedAt: Date(timeIntervalSince1970: 0),
+                         restarts: [], failed: false)
+        }
+        let newer = record(pid: 2)
+        try Runners.save(newer, to: file)
+        try FileManager.default.createDirectory(atPath: (ready as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try "{}".write(toFile: ready, atomically: true, encoding: .utf8)
+        await Runners.stop(record(pid: 1), file: file, detached: detached)             // an older record, loaded before the restart
+        #expect(Runners.load(file) == newer && FileManager.default.fileExists(atPath: ready))
+        await Runners.stop(newer, file: file, detached: detached)
+        #expect(Runners.load(file) == nil && !FileManager.default.fileExists(atPath: ready))
+    }
+
+    @Test func stoppingAStaleRecordSaysSoInsteadOfClaimingToHaveStoppedIt() async throws {
+        defer { worktree.remove() }
+        let detached = FakeDetachedProcesses(onStart: Self.writesReady)
+        let (supervisor, ctx) = try setup(detached: detached)
+        let stale = RunnerRecord(device: "iphone", udid: "U", process: ProcessIdentity(pid: 9, startTime: 1, arguments: ["xcodebuild", Runners.marker]),
+                                 token: "t", port: 1, runnerKey: "k", log: "/l", readyFile: "/r", startedAt: Date(timeIntervalSince1970: 0),
+                                 restarts: [], failed: false)
+        try Runners.save(stale, to: ctx.paths.runnerFile(device: "iphone"))
+        let notes = try await supervisor.stop(device: nil, in: ctx)
+        #expect(notes == ["removed the stale iphone UI runner record"] && detached.stops.isEmpty)
     }
 
     @Test func onlyIOSClonesCanBeDriven() {
