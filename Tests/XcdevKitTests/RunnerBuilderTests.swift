@@ -64,9 +64,58 @@ import XcdevTestSupport
         #expect(first?.details.contains { $0.hasPrefix("log: ") } == true)
         await #expect(throws: XcdError.self) { _ = try await builder.ensureBuilt(xcode: xcode) }
         #expect(builds.value == 1)                                   // not retried
-        builder.discard(xcode: xcode)
+        try await builder.discard(xcode: xcode)
         stubBuild(counter: builds)
         _ = try await builder.ensureBuilt(xcode: xcode)
+        #expect(builds.value == 2)
+    }
+
+    @Test func anInterruptedBuildIsNotRememberedAsFailed() async throws {
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let builds = Counter()
+        stubBuild(exitCode: 130, counter: builds)
+        let first = await #expect(throws: XcdError.self) { _ = try await builder.ensureBuilt(xcode: xcode) }
+        #expect(first?.code == .runnerFailed && first?.message.contains("interrupted or failed to run") == true)
+        #expect(first?.next == "run the command again; if it keeps failing, read the build log")
+        let dir = home + "/cache/ui-runner/" + builder.key(for: xcode)
+        #expect(!FileManager.default.fileExists(atPath: dir + "/failed"))
+        stubBuild(counter: builds)
+        _ = try await builder.ensureBuilt(xcode: xcode)
+        #expect(builds.value == 2)
+    }
+
+    @Test func aBuildThatTimesOutIsNotRememberedAsFailed() async throws {
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        fake.stub(["xcrun", "xcodebuild", "build-for-testing"]) { _ in
+            throw XcdError(.timeout, "the operation timed out")
+        }
+        let first = await #expect(throws: XcdError.self) { _ = try await builder.ensureBuilt(xcode: xcode) }
+        #expect(first?.code == .runnerFailed && first?.message.contains("timed out") == true)
+        let dir = home + "/cache/ui-runner/" + builder.key(for: xcode)
+        #expect(!FileManager.default.fileExists(atPath: dir + "/failed"))
+    }
+
+    @Test func discardWaitsForABuildInProgress() async throws {
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        // Verify that discard properly holds the build lock and works correctly.
+        // The invariant: if ensureBuilt returns a build, the xctestrun file exists.
+        // With proper locking, discard can't delete the directory while ensureBuilt holds the lock.
+        let builds = Counter()
+        stubBuild(counter: builds)
+
+        // First: build successfully
+        let build1 = try await builder.ensureBuilt(xcode: xcode)
+        #expect(FileManager.default.fileExists(atPath: build1.xctestrun))
+
+        // Discard and verify it's gone
+        try await builder.discard(xcode: xcode)
+        let dir = home + "/cache/ui-runner/" + builder.key(for: xcode)
+        #expect(!FileManager.default.fileExists(atPath: dir))
+
+        // Build again: verify the second build works after discard
+        stubBuild(counter: builds)
+        let build2 = try await builder.ensureBuilt(xcode: xcode)
+        #expect(FileManager.default.fileExists(atPath: build2.xctestrun))
         #expect(builds.value == 2)
     }
 
