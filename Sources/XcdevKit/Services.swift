@@ -16,11 +16,14 @@ public struct Services: Sendable {
     public let interrupts: Interrupts
     /// Launches processes that outlive the command (screen recordings), and stops them again.
     public let detached: any DetachedProcessLaunching
+    /// Carries requests to a clone's UI runner over loopback HTTP.
+    public let runnerTransport: any RunnerTransport
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, currentDirectory: String,
                 environment: [String: String], progress: @escaping @Sendable (String) -> Void = { _ in },
                 terminal: (@Sendable (String) -> Void)? = nil, output: OutputFormat? = nil, interrupts: Interrupts = .shared,
-                detached: any DetachedProcessLaunching = SystemDetachedProcesses()) {
+                detached: any DetachedProcessLaunching = SystemDetachedProcesses(),
+                runnerTransport: any RunnerTransport = URLSessionRunnerTransport()) {
         self.runner = runner
         self.globalPaths = globalPaths
         self.currentDirectory = currentDirectory
@@ -30,6 +33,7 @@ public struct Services: Sendable {
         self.output = output ?? OutputFormat.resolve(jsonFlag: false, environment: environment)
         self.interrupts = interrupts
         self.detached = detached
+        self.runnerTransport = runnerTransport
     }
 
     /// Progress stops once Ctrl-C has fired the handler: what follows would only describe the stopped children.
@@ -56,6 +60,12 @@ public struct Services: Sendable {
     public var worktrees: WorktreeService { WorktreeService(runner: runner, globalPaths: globalPaths, hooks: hooks, detached: detached) }
     public var provisioner: DeviceProvisioner { DeviceProvisioner(runner: runner, globalPaths: globalPaths) }
     public var media: MediaService { MediaService(provisioner: provisioner, detached: detached, currentDirectory: currentDirectory) }
+    public var runnerBuilder: RunnerBuilder { RunnerBuilder(runner: runner, globalPaths: globalPaths, progress: progress) }
+    public var runners: RunnerSupervisor {
+        RunnerSupervisor(provisioner: provisioner, builder: runnerBuilder, detached: detached,
+                         client: RunnerClient(transport: runnerTransport), globalPaths: globalPaths)
+    }
+    public var ui: UIService { UIService(supervisor: runners, client: RunnerClient(transport: runnerTransport)) }
     public var deviceState: DeviceStateService { DeviceStateService(provisioner: provisioner) }
     public var hooks: HookRunner { HookRunner(runner: runner, output: output, progress: progress) }
     public var builds: BuildService { BuildService(runner: runner, provisioner: provisioner, progress: progress, hooks: hooks) }

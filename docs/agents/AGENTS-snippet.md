@@ -12,6 +12,9 @@ working in parallel never collide.
 - See the app: `xcd ui screenshot` prints the PNG's path; `xcd ui record start` / `xcd ui record stop` make a video.
   Set device state with `xcd sim open-url`, `xcd sim push`, `xcd sim privacy`, `xcd sim status-bar`, and friends
   (`xcd help sim`).
+- Drive the app (iPhone/iPad simulators), once it is running in front: `xcd ui tree` lists elements with refs;
+  `xcd ui tap id:<identifier>` (or `"label:<text>"`, `ref:e<N>` from the newest tree, `@x,y`); `xcd ui wait <target>`
+  to confirm what happened. None of it takes focus on the Mac.
 - Every failure ends with `next:`; do that. `--json` gives one JSON object per command; `xcd help errors` lists codes.
 - If simulators or worktrees misbehave: `xcd doctor`, then `xcd doctor --fix`. Read the problems first: `--fix` may
   restart CoreSimulator, which shuts down every agent's simulators.

@@ -4,9 +4,17 @@ import XcdevKit
 struct UICommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "ui",
-        abstract: "See the simulator: screenshots and screen recordings.",
-        discussion: "Captures go to ui.media.dir (default .xcdev-media/<worktree>/<branch> in the main checkout); each prints its path.",
-        subcommands: [Screenshot.self, Record.self]
+        abstract: "See and drive the simulator: the element tree, taps, waits, screenshots, and recordings.",
+        discussion: """
+        A target is one of: id:<identifier>, label:<text>, label~<part of the label>, ref:e<N> (from the newest `xcd ui tree`), \
+        or @x,y (points; tap only). The app is the one from the last build; --bundle picks another, --system the Home Screen. \
+        tap and wait act on the app and any system alert over it, so the app must be running in front: start it with \
+        `xcd run` or `xcd launch` first. Driving works on iPhone and iPad simulators. \
+        Nothing here opens Simulator.app or takes focus on the Mac.
+
+        Captures go to ui.media.dir (default .xcdev-media/<worktree>/<branch> in the main checkout); each prints its path.
+        """,
+        subcommands: [Tree.self, Tap.self, Wait.self, Screenshot.self, Record.self, Stop.self]
     )
 
     struct Screenshot: AsyncParsableCommand {

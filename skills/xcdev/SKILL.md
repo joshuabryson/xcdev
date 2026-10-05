@@ -26,6 +26,7 @@ it gives each git worktree its own simulator clones and DerivedData, so parallel
 | Install, launch, stop | `xcd install`, `xcd launch`, `xcd terminate` |
 | Simulator | `xcd sim boot`, `xcd sim open`, `xcd sim erase` |
 | Screenshot or video | `xcd ui screenshot`, `xcd ui record start` … `xcd ui record stop` (each prints the file's path; read it) |
+| Read and drive the UI (iPhone/iPad) | Launch the app first (`xcd run` or `xcd launch`). `xcd ui tree` lists what is on screen with refs; `xcd ui tap <target>`; `xcd ui wait <target> [--gone]`. A target is `id:<identifier>`, `"label:<text>"`, `"label~<part>"`, `ref:e<N>`, or `@x,y` (tap only) |
 | Device state | `xcd sim open-url <url>`, `xcd sim push --alert <text>`, `xcd sim privacy grant photos`, `xcd sim status-bar --time 9:41`, `xcd sim appearance dark`, `xcd sim location <lat>,<lon>`, `xcd sim pasteboard set --text <s>`, `xcd sim addmedia <file>` |
 | Context for scripts | `xcd context` (prints XCD_* variables) |
 | Explain a config key | `xcd config explain <key>` |
@@ -35,6 +36,12 @@ it gives each git worktree its own simulator clones and DerivedData, so parallel
 
 - Captures go to the media folder (`ui.media.dir`, default `.xcdev-media/<worktree>/<branch>` in the main checkout;
   `$XCD_MEDIA_DIR` in scripts). Screenshot sizes are pixels; divide by the reported scale for points.
+- Driving loop: `xcd ui tree` (see), `xcd ui tap …` (act), `xcd ui wait …` or `xcd ui tree` again (verify). A tap that
+  reports success can still have done nothing, so always verify. Refs are only good until the next `xcd ui tree`
+  (or the next "ambiguous" failure, whose numbered candidates become the refs).
+- `xcd ui tap` and `xcd ui wait` act on the app in front and any system alert over it; when the app
+  isn't in front they fail, saying so (`xcd launch` or `xcd run` fixes that). An element under an alert or the
+  keyboard can't be tapped: deal with the alert or keyboard first.
 - Output is compact text by default; add `--json` (or set `XCD_OUTPUT=json`) for one JSON object per command.
 - Every failure ends with `next:`. Do what it says before trying anything else.
 - Exit codes: 1 = the task failed (fix the code), 2 = fix the command line or config, 3 = fix the environment
