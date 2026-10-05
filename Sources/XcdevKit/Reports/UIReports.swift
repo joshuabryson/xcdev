@@ -31,15 +31,9 @@ enum UIText {
     }
 }
 
-/// `xcd ui tree`.
-public struct UITreeReport: Reportable {
-    public let device: String
-    public let udid: String
-    public let restarted: Bool
-    public let tree: TreeResult
-    public let worktree: String
-
-    public var text: String {
+extension UIText {
+    /// The tree's header line and its rows, as `xcd ui tree` and an action with `--tree` print them.
+    static func tree(_ tree: TreeResult) -> [String] {
         let subject: String
         switch tree.state {
         case "system": subject = "springboard"
@@ -51,6 +45,20 @@ public struct UITreeReport: Reportable {
             + "@\(ScreenRect.number(tree.scale))x  \(tree.orientation)  keyboard: \(tree.keyboard ? "shown" : "hidden")"
         var lines = [header] + UIText.rows(tree.elements)
         if tree.elements.isEmpty { lines.append("(no elements; `xcd ui tree --all` shows containers and off-screen elements)") }
+        return lines
+    }
+}
+
+/// `xcd ui tree`.
+public struct UITreeReport: Reportable {
+    public let device: String
+    public let udid: String
+    public let restarted: Bool
+    public let tree: TreeResult
+    public let worktree: String
+
+    public var text: String {
+        var lines = UIText.tree(tree)
         if restarted { lines.append(UIText.restartNote) }
         if tree.state == "not_running" { lines.append("next: start the app with `xcd run` or `xcd launch`") }
         if tree.state == "background" { lines.append("next: bring it forward with `xcd launch`, or act on the Home Screen with `--system`") }
@@ -60,9 +68,11 @@ public struct UITreeReport: Reportable {
     public var envelopeWorktree: String? { worktree }
 }
 
-/// `xcd ui tap` (and, later, the other actions).
+/// `xcd ui tap`, `long-press`, `swipe`, `type`, `button`, and `rotate`.
 public struct UIActionReport: Reportable {
+    /// What was done, up to its object: "tapped", "swiped up on", "typed 5 characters into".
     public let action: String
+    /// The target as given, or what stands in for one ("the screen", "home").
     public let target: String
     public let element: TreeElement?
     public let x: Double?
@@ -72,10 +82,24 @@ public struct UIActionReport: Reportable {
     public let device: String
     public let udid: String
     public let worktree: String
+    /// Where a swipe ended.
+    public var toX: Double?
+    public var toY: Double?
+    /// How text was entered: "keyboard" or "paste".
+    public var method: String?
+    /// What follows the object in the text: "for 1.0s", "to 201,87", "by keyboard, then Return".
+    public var detail: String?
+    /// The tree after the action (`--tree`).
+    public var tree: TreeResult?
+    public var notes: [String] = []
 
     public var text: String {
-        let point = x.flatMap { x in y.map { " at \(ScreenRect.number(x)),\(ScreenRect.number($0))" } } ?? ""
-        var lines = ["\(action) \(element.map(UIText.name) ?? target)\(element == nil ? "" : point)  \(ms)ms"]
+        var line = "\(action) \(element.map(UIText.name) ?? target)"
+        if element != nil, let x, let y { line += " at \(ScreenRect.number(x)),\(ScreenRect.number(y))" }
+        if let detail { line += " \(detail)" }
+        var lines = [line + "  \(ms)ms"]
+        if let tree { lines += UIText.tree(tree) }
+        lines += notes
         if restarted { lines.append(UIText.restartNote) }
         return lines.joined(separator: "\n")
     }

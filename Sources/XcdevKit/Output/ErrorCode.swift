@@ -61,7 +61,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .appNotBuilt: return "The command needs a build (or launch) that hasn't happened in this worktree yet."
         case .buildFailed: return "xcodebuild reported build errors; they are listed in compiler format."
         case .testFailed: return "Tests failed, or no tests ran."
-        case .appCrashed: return "The app crashed or exited during the crash window after launch."
+        case .appCrashed: return "The app crashed or exited during the crash window after launch, or a UI action ended it."
         case .elementNotFound: return "No element on screen matched the target within the timeout."
         case .elementNotHittable: return "The element exists but is off screen, disabled, or covered by a system alert or the keyboard, so it wasn't acted on."
         case .waitTimeout: return "`xcd ui wait` gave up: the element didn't appear (or, with --gone, didn't go away)."

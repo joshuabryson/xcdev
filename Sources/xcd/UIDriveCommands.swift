@@ -23,6 +23,29 @@ extension UICommand {
         @Option(help: "Pick one of several matches: 0 is the first.") var index: Int?
     }
 
+    /// What every action takes besides its own arguments.
+    struct ActionOptions: ParsableArguments {
+        @Flag(help: "Also print the tree as it is after the action; its refs replace the earlier ones.") var tree = false
+        @Option(help: "How long to keep looking for the element, at most 120s (default: 2s).") var timeout: String?
+        @OptionGroup var driving: DrivingOptions
+
+        func options(_ match: MatchOptions? = nil) throws -> UIOptions {
+            var options = try driving.options(role: match?.role, index: match?.index, timeout: timeout, defaultTimeout: .seconds(2))
+            options.tree = tree
+            return options
+        }
+    }
+
+    /// Opens the worktree, stops an overdue recording, and runs one action.
+    static func act(_ command: String, _ options: GlobalOptions,
+                    _ body: @escaping (UIService, inout WorktreeContext) async throws -> UIActionReport) async throws {
+        try await Emit.run(command, options) { services in
+            var ctx = try await services.open(worktree: options.worktree)
+            await Recording.stopOverdue(services, ctx)
+            return try await body(services.ui, &ctx)
+        }
+    }
+
     struct Tree: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "List the elements on screen, each with a ref (e1, e2, …) to act on.",
@@ -49,22 +72,17 @@ extension UICommand {
             can be tapped too. While a system alert is up nothing in the app is tapped, and neither is an element under \
             the keyboard. When several elements match, the failure \
             lists them as e1, e2, …: those become the refs, so `ref:e<N>` (or --index) picks one. \
-            A tap that succeeds says where it landed, not what it did: check with `xcd ui wait` or `xcd ui tree`.
+            A tap that succeeds says where it landed, not what it did: check with --tree, `xcd ui wait`, or `xcd ui tree`.
             """
         )
         @Argument(help: "What to tap, e.g. id:signInButton, \"label:Sign In\", ref:e4, or @120,300.") var target: String
         @OptionGroup var match: MatchOptions
-        @Option(help: "How long to keep looking for the element, at most 120s (default: 2s).") var timeout: String?
-        @OptionGroup var driving: DrivingOptions
+        @OptionGroup var action: ActionOptions
         @OptionGroup var options: GlobalOptions
 
         func run() async throws {
-            try await Emit.run("ui tap", options) { services in
-                var ctx = try await services.open(worktree: options.worktree)
-                await Recording.stopOverdue(services, ctx)
-                let ui = try driving.options(role: match.role, index: match.index, timeout: timeout, defaultTimeout: .seconds(2))
-                return try await services.ui.tap(target, ui, in: &ctx)
-            }
+            let (target, ui) = (target, try action.options(match))
+            try await UICommand.act("ui tap", options) { service, ctx in try await service.tap(target, ui, in: &ctx) }
         }
     }
 

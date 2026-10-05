@@ -11,6 +11,8 @@ public struct UIOptions: Sendable {
     public var index: Int?
     /// How long to keep looking for an element. The runner clamps it to 0...120 s, and so does xcd.
     public var timeout: Duration
+    /// For an action: print the tree as it is afterwards.
+    public var tree = false
 
     public init(device: String?, bundle: String?, system: Bool, role: String?, index: Int?, timeout: Duration) {
         self.device = device
@@ -33,16 +35,24 @@ struct RunnerExchange<Request: Encodable> {
     let what: String
     /// A read can be sent again after a restart; an action may already have happened.
     let resend: Bool
+    /// How long the runner may take beyond the element timeout: to snapshot, act, and reply.
+    var slack: Duration = .seconds(30)
 }
 
-/// `xcd ui tree`, `tap`, `wait`, and `stop`.
+/// `xcd ui tree`, `tap`, `wait`, and `stop`. The other actions are in UIActions.swift.
 public struct UIService: Sendable {
     public let supervisor: RunnerSupervisor
     public let client: RunnerClient
+    /// Finds the crash report of an app that an action ended.
+    public let crashes: CrashReportLocator
+    let now: @Sendable () -> Date
 
-    public init(supervisor: RunnerSupervisor, client: RunnerClient) {
+    public init(supervisor: RunnerSupervisor, client: RunnerClient, crashes: CrashReportLocator = CrashReportLocator(),
+                now: @escaping @Sendable () -> Date = { Date() }) {
         self.supervisor = supervisor
         self.client = client
+        self.crashes = crashes
+        self.now = now
     }
 
     public func tree(all: Bool, _ options: UIOptions, in ctx: inout WorktreeContext) async throws -> UITreeReport {
@@ -54,12 +64,10 @@ public struct UIService: Sendable {
     }
 
     public func tap(_ target: String, _ options: UIOptions, in ctx: inout WorktreeContext) async throws -> UIActionReport {
-        let request = try targetRequest(target, gone: false, options, in: ctx)
-        let (session, result) = try await send(RunnerExchange(path: RunnerProtocol.tapPath, request: request, what: "tap", resend: false),
-                                               as: ActionResult.self, options, in: &ctx)
-        let action = try result.mapError { UIRunnerErrors.error($0, target: target, timeout: options.effectiveTimeout) }.get()
-        return UIActionReport(action: "tapped", target: target, element: action.element, x: action.x, y: action.y, ms: action.ms,
-                              restarted: session.restarted, device: session.device, udid: session.udid, worktree: ctx.state.name)
+        var request = try targetRequest(target, gone: false, options, in: ctx)
+        request.tree = options.tree
+        let call = ActionCall(path: RunnerProtocol.tapPath, request: request, what: "tap", target: target)
+        return try await act(call, options, in: &ctx).report("tapped", target: target)
     }
 
     public func wait(_ target: String, gone: Bool, _ options: UIOptions, in ctx: inout WorktreeContext) async throws -> UIWaitReport {
@@ -85,14 +93,20 @@ public struct UIService: Sendable {
     }
 
     func targetRequest(_ target: String, gone: Bool, _ options: UIOptions, in ctx: WorktreeContext) throws -> TargetRequest {
+        let query = try self.query(target, options)
+        return TargetRequest(bundleId: try bundleId(options, in: ctx), system: options.system, target: query.target, role: query.role,
+                             index: query.index, timeout: DurationText.seconds(options.effectiveTimeout), gone: gone)
+    }
+
+    /// The element a target string and `--role`/`--index` name; a `usage` error when either can't be read.
+    func query(_ target: String, _ options: UIOptions) throws -> ElementQuery {
         guard case .success(let spec) = TargetParser.parse(target) else {
             throw XcdError(.usage, "'\(target)' is not a target", next: "use " + TargetParser.forms)
         }
         if let role = options.role, !ElementRole.all.contains(role) {
             throw XcdError(.usage, "'\(role)' is not a role", next: "use one of: " + ElementRole.all.joined(separator: ", "))
         }
-        return TargetRequest(bundleId: try bundleId(options, in: ctx), system: options.system, target: spec, role: options.role,
-                             index: options.index, timeout: DurationText.seconds(options.effectiveTimeout), gone: gone)
+        return ElementQuery(target: spec, role: options.role, index: options.index)
     }
 
     /// `--system` means no app; else `--bundle`; else the app of the last build for the device.
@@ -111,8 +125,8 @@ public struct UIService: Sendable {
     /// not, because it may already have happened. A live runner's refusal (an `XcdError`) is not a restart.
     func send<Request: Encodable, Payload: Codable>(_ exchange: RunnerExchange<Request>, as payload: Payload.Type, _ options: UIOptions,
                                                     in ctx: inout WorktreeContext) async throws -> (RunnerSession, Result<Payload, RunnerFailure>) {
-        // The runner keeps looking for `timeout`; give the HTTP request that long plus time to snapshot and reply.
-        let httpTimeout = options.effectiveTimeout + .seconds(30)
+        // The runner keeps looking for `timeout`; give the HTTP request that long plus time to snapshot, act, and reply.
+        let httpTimeout = options.effectiveTimeout + exchange.slack
         func call(_ session: RunnerSession) async throws -> Result<Payload, RunnerFailure> {
             try await client.call(exchange.path, exchange.request, to: session.endpoint, timeout: httpTimeout)
         }

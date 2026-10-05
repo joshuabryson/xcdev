@@ -12,6 +12,7 @@ enum UIRunnerErrors {
         RunnerFailure.Code.staleRef: staleRef,
         RunnerFailure.Code.waitTimeout: waitTimeout,
         RunnerFailure.Code.appNotForeground: appNotForeground,
+        RunnerFailure.Code.appCrashed: appCrashed,
         RunnerFailure.Code.badRequest: badRequest,
         RunnerFailure.Code.internal: internalFailure,
     ]
@@ -83,6 +84,11 @@ enum UIRunnerErrors {
     static func appNotForeground(_ failure: RunnerFailure, target: String, _: Duration) -> XcdError {
         XcdError(.elementNotFound, "\(target): the app isn't in the foreground (\(failure.message))",
                  next: "bring the app to the foreground with `xcd launch` or `xcd run`, then retry")
+    }
+
+    /// `UIService` adds the crash report when it can find one; this is the error without it.
+    static func appCrashed(_ failure: RunnerFailure, target _: String, _: Duration) -> XcdError {
+        XcdError(.appCrashed, failure.message, next: "see its last output with `xcd logs --app`, then start it again with `xcd run`")
     }
 
     static func badRequest(_ failure: RunnerFailure, target _: String, _: Duration) -> XcdError {
