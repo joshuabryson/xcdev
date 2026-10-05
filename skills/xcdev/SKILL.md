@@ -26,8 +26,8 @@ it gives each git worktree its own simulator clones and DerivedData, so parallel
 | Install, launch, stop | `xcd install`, `xcd launch`, `xcd terminate` |
 | Simulator | `xcd sim boot`, `xcd sim open`, `xcd sim erase` |
 | Screenshot or video | `xcd ui screenshot`, `xcd ui record start` … `xcd ui record stop` (each prints the file's path; read it) |
-| Read and drive the UI (iPhone/iPad) | Launch the app first (`xcd run` or `xcd launch`; not needed with `--system`). `xcd ui tree` lists what is on screen with refs; `xcd ui tap <target>`; `xcd ui wait <target> [--gone]`. A target is `id:<identifier>`, `"label:<text>"`, `"label~<part>"`, `ref:e<N>`, or `@x,y` (tap only) |
-| Device state | `xcd sim open-url <url>`, `xcd sim push --alert <text>`, `xcd sim privacy grant photos`, `xcd sim status-bar --time 9:41`, `xcd sim appearance dark`, `xcd sim location <lat>,<lon>`, `xcd sim pasteboard set --text <s>`, `xcd sim addmedia <file>` |
+| Read and drive the UI (iPhone/iPad) | Launch the app first (`xcd run` or `xcd launch`; not needed with `--system`). `xcd ui tree` lists what is on screen with refs; `xcd ui tap <target>`; `xcd ui type <text> --into <target> [--clear] [--submit]`; `xcd ui swipe up\|down\|left\|right [--on <target>]`; `xcd ui long-press <target>`; `xcd ui wait <target> [--gone]`; `xcd ui button home`; `xcd ui rotate landscape-left`. A target is `id:<identifier>`, `"label:<text>"`, `"label~<part>"`, `ref:e<N>`, or `@x,y` (tap and long-press only). Read `xcd guide ui` before the first time |
+| Device state | `xcd sim open-url <url>`, `xcd sim push --alert <text>`, `xcd sim privacy grant photos`, `xcd sim status-bar --time 9:41`, `xcd sim appearance dark`, `xcd sim location <lat>,<lon>`, `xcd sim pasteboard set --text <s>` (or `--image <file>`), `xcd sim addmedia <file>` |
 | Context for scripts | `xcd context` (prints XCD_* variables) |
 | Explain a config key | `xcd config explain <key>` |
 | Fix simulators or worktrees | `xcd doctor`, then `xcd doctor --fix` (read the problems first: it may restart CoreSimulator, which shuts down every agent's simulators) |
@@ -36,13 +36,16 @@ it gives each git worktree its own simulator clones and DerivedData, so parallel
 
 - Captures go to the media folder (`ui.media.dir`, default `.xcdev-media/<worktree>/<branch>` in the main checkout;
   `$XCD_MEDIA_DIR` in scripts). Screenshot sizes are pixels; divide by the reported scale for points.
-- Driving loop: `xcd ui tree` (see), `xcd ui tap …` (act), `xcd ui wait …` or `xcd ui tree` again (verify). A tap that
-  reports success can still have done nothing, so always verify. Refs are only good until the next `xcd ui tree`
-  (or the next "ambiguous" failure, whose numbered candidates become the refs).
-- `xcd ui tap` and `xcd ui wait` act on the app in front and any system alert over it; when the app
-  isn't in front they fail, saying so (`xcd launch` or `xcd run` fixes that). While a system alert is up
-  nothing in the app can be tapped, and neither can an element under the keyboard: deal with the alert or keyboard
-  first.
+- Driving loop: `xcd ui tree` (see), an action such as `xcd ui tap …` or `xcd ui type …` (act), then verify: add
+  `--tree` to the action, or run `xcd ui wait …`. An action that reports success can still have done nothing, so
+  always verify. Refs are only good until the next tree (`xcd ui tree`, an action with `--tree`, or an "ambiguous"
+  failure, whose numbered candidates become the refs).
+- Actions and `xcd ui wait` act on the app in front and any system alert over it; when the app isn't in front they
+  fail, saying so (`xcd launch` or `xcd run` fixes that). While a system alert is up nothing in the app can be acted
+  on, and neither can an element under the keyboard: deal with the alert or keyboard first.
+- `xcd ui swipe up` moves the finger up, which scrolls a list towards its end. Off-screen elements are only in
+  `xcd ui tree --all`.
+- `xcd test` stops the UI runner when the run includes UI tests; the next `xcd ui` command starts it again.
 - Output is compact text by default; add `--json` (or set `XCD_OUTPUT=json`) for one JSON object per command.
 - Every failure ends with `next:`. Do what it says before trying anything else.
 - Exit codes: 1 = the task failed (fix the code), 2 = fix the command line or config, 3 = fix the environment

@@ -32,12 +32,14 @@ xcd wt create login-flow  # a worktree with its own branch, simulators, and Deri
 cd ../MyApp.worktrees/login-flow
 xcd build && xcd test && xcd run
 xcd ui screenshot         # a PNG of the simulator in .xcdev-media/<worktree>/<branch>/
+xcd ui tree               # what is on screen; then xcd ui tap, type, swipe, and wait drive it
 xcd help                  # every command, project command, and plugin
 ```
 
 ## For agents
 
 - `xcd guide setup` walks an agent through configuring a project with the user.
+- `xcd guide ui` teaches the see, act, verify loop for driving the app in the simulator.
 - `skills/xcdev/SKILL.md` is an agent skill, and `docs/agents/AGENTS-snippet.md` is a snippet for a project's
   `AGENTS.md`, that teach agents to use `xcd`.
 - Every failure ends with a `next:` line, and `--json` prints one JSON object per command.

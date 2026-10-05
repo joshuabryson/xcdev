@@ -7,7 +7,8 @@ import Testing
         .deletingLastPathComponent().path
 
     /// Every `xcd <command>` the agent-facing docs mention is a real command, so they can't drift from the CLI.
-    @Test(arguments: ["docs/agents/AGENTS-snippet.md", "skills/xcdev/SKILL.md", "README.md", "docs/agents/guides/setup.md"])
+    @Test(arguments: ["docs/agents/AGENTS-snippet.md", "skills/xcdev/SKILL.md", "README.md", "docs/agents/guides/setup.md",
+                      "docs/agents/guides/ui.md"])
     func docsOnlyNameRealCommands(_ file: String) throws {
         let text = try String(contentsOfFile: Self.repo + "/" + file, encoding: .utf8)
         let regex = try NSRegularExpression(pattern: "`xcd ([a-z-]+)")

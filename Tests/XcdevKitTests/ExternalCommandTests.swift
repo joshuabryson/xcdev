@@ -107,7 +107,7 @@ import XcdevTestSupport
         #expect(report.text.contains("\n  worktree    (alias: wt) Manage worktrees.\n"))
         #expect(report.text.contains("\n  seed        Load fixture data  needs=device\n"))
         #expect(report.text.contains("\n  lint        Lint the project  \(bin)/xcd-lint\n"))
-        #expect(report.text.hasSuffix("guides: setup"))
+        #expect(report.text.hasSuffix("guides: setup, ui"))
     }
 
     @Test func helpDetailForAProjectCommandAndAnUnknownName() async throws {

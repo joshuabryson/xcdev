@@ -31,8 +31,28 @@ import Testing
         }
     }
 
+    /// The guide names every `xcd ui` driving command, every target form, and every error an agent can get from them.
+    @Test func uiGuideCoversTheCommandsTargetsAndErrors() throws {
+        let guide = try Guides.guide("ui")
+        #expect(guide.summary == "See and drive the app's UI")
+        for command in ["tree", "tap", "long-press", "type", "swipe", "button", "rotate", "wait", "screenshot", "stop"] {
+            #expect(guide.markdown.contains("`xcd ui \(command)"), "the ui guide doesn't mention xcd ui \(command)")
+        }
+        for form in ["`id:<identifier>`", "`label:<text>`", "`label~<text>`", "`ref:e<N>`", "`@x,y`", "--tree", "--system", "--bundle"] {
+            #expect(guide.markdown.contains(form), "the ui guide doesn't mention \(form)")
+        }
+        let codes: [ErrorCode] = [.elementNotFound, .elementNotHittable, .elementAmbiguous, .staleRef, .waitTimeout, .appCrashed, .runnerFailed]
+        for code in codes {
+            #expect(guide.markdown.contains("| `\(code.rawValue)` |"), "the ui guide has no row for \(code.rawValue)")
+        }
+    }
+
     @Test func listingAndUnknownTopic() throws {
-        #expect(try GuideReport(topic: nil).text == "setup  Set up xcd in a project\nread one: xcd guide <topic>")
+        #expect(try GuideReport(topic: nil).text == """
+        setup  Set up xcd in a project
+        ui     See and drive the app's UI
+        read one: xcd guide <topic>
+        """)
         #expect(try GuideReport(topic: "setup").text.hasPrefix("# Set up xcd in a project\n"))
         let error = #expect(throws: XcdError.self) { try Guides.guide("setpu") }
         #expect(error?.code == .usage)
