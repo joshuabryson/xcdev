@@ -1,18 +1,21 @@
 import Foundation
 
-/// What identifies an element between two snapshots: its role, identifier, label, and its position among same-role
-/// siblings at each level. Computed over the whole snapshot, so the default filter can't shift it.
-public struct RefSignature: Codable, Sendable, Equatable {
+/// What identifies an element between two snapshots: its role, identifier, label, source, and its path of
+/// (elementType, position) pairs from the root. The path identifies the element even when unrelated siblings appear.
+/// Computed over the whole snapshot, so the default filter can't shift it.
+public struct RefSignature: Codable, Sendable, Equatable, Hashable {
     public var role: String
     public var identifier: String
     public var label: String
     public var path: [Int]
+    public var source: ElementSource
 
-    public init(role: String, identifier: String, label: String, path: [Int]) {
+    public init(role: String, identifier: String, label: String, path: [Int], source: ElementSource) {
         self.role = role
         self.identifier = identifier
         self.label = label
         self.path = path
+        self.source = source
     }
 }
 
@@ -42,7 +45,7 @@ public enum TreeBuilder {
     /// Appends `root` and its descendants to `nodes`, depth first.
     public static func flatten(_ root: SnapshotNode, source: ElementSource, into nodes: inout [FlatNode]) {
         var windows = -1
-        visit(root, depth: 0, parent: nil, path: [0], inKeyboard: false, window: 0, windows: &windows, source: source, into: &nodes)
+        visit(root, depth: 0, parent: nil, path: [root.elementType, 0], inKeyboard: false, window: 0, windows: &windows, source: source, into: &nodes)
     }
 
     private static func visit(_ node: SnapshotNode, depth: Int, parent: Int?, path: [Int], inKeyboard: Bool, window: Int,
@@ -58,13 +61,13 @@ public enum TreeBuilder {
         let index = nodes.count
         nodes.append(FlatNode(role: role, identifier: node.identifier, label: node.label, value: value, placeholder: node.placeholder,
                               frame: node.frame, enabled: node.enabled, selected: node.selected, depth: depth, source: source,
-                              parent: parent, signature: RefSignature(role: role, identifier: node.identifier, label: node.label, path: path),
+                              parent: parent, signature: RefSignature(role: role, identifier: node.identifier, label: node.label, path: path, source: source),
                               inKeyboard: inKeyboard, window: window))
         var seen: [Int: Int] = [:]
         for child in node.children {
             let position = seen[child.elementType, default: 0]
             seen[child.elementType] = position + 1
-            visit(child, depth: depth + 1, parent: index, path: path + [position], inKeyboard: inKeyboard || role == "keyboard",
+            visit(child, depth: depth + 1, parent: index, path: path + [child.elementType, position], inKeyboard: inKeyboard || role == "keyboard",
                   window: window, windows: &windows, source: source, into: &nodes)
         }
     }

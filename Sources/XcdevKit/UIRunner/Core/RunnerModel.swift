@@ -28,7 +28,8 @@ public struct ScreenRect: Codable, Sendable, Equatable {
     public var text: String { "\(Self.number(x)),\(Self.number(y)) \(Self.number(w))x\(Self.number(h))" }
 
     static func number(_ value: Double) -> String {
-        value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
+        guard value.isFinite && value.magnitude < 1e15 else { return "?" }
+        return value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
     }
 }
 
