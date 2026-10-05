@@ -53,7 +53,12 @@ public enum RunnerSource {
         return try? (deflated as NSData).decompressed(using: .zlib) as Data
     }
 
-    private static func parse(_ container: Data) throws -> [(path: String, contents: Data)] {
+    /// A relative path that stays inside the directory it is written to.
+    private static func isSafe(_ path: String) -> Bool {
+        !path.isEmpty && !path.hasPrefix("/") && !path.split(separator: "/", omittingEmptySubsequences: false).contains("..")
+    }
+
+    static func parse(_ container: Data) throws -> [(path: String, contents: Data)] {
         let bytes = [UInt8](container)
         var files: [(path: String, contents: Data)] = []
         var position = 0
@@ -63,7 +68,7 @@ public enum RunnerSource {
             return String(bytes: bytes[position..<end], encoding: .utf8)
         }
         while position < bytes.count {
-            guard let path = field(), let count = field().flatMap({ Int($0) }), count >= 0, bytes.count - position >= count else {
+            guard let path = field(), isSafe(path), let count = field().flatMap({ Int($0) }), count >= 0, bytes.count - position >= count else {
                 throw unreadable
             }
             files.append((path, Data(bytes[position..<(position + count)])))

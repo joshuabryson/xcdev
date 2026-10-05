@@ -77,4 +77,47 @@ import Testing
             _ = HTTPRequestParser.parse(data)
         }
     }
+
+    @Test func contentLengthRules() {
+        #expect(parse("POST /x HTTP/1.1\r\nContent-Length: 99999999999999999999\r\n\r\n") == .tooLarge)
+        for value in ["+5", "5abc", "1.5"] {
+            guard case .malformed = parse("POST /x HTTP/1.1\r\nContent-Length: \(value)\r\n\r\n") else {
+                Issue.record("Content-Length '\(value)' was not malformed"); continue
+            }
+        }
+        guard case .request(let request) = parse("POST /x HTTP/1.1\r\nContent-Length:  5 \r\n\r\nabcde") else {
+            Issue.record("expected a request"); return
+        }
+        #expect(request.body == Data("abcde".utf8))
+    }
+
+    /// A request head (everything before the blank line) larger than `maxHeaderBytes` is `.tooLarge` however it is chunked.
+    @Test func theHeaderLimitDoesNotDependOnChunking() {
+        func head(size: Int) -> Data {
+            let line = "GET /x HTTP/1.1\r\nX: "
+            return Data((line + String(repeating: "a", count: size - line.utf8.count)).utf8)
+        }
+        let terminator = Data("\r\n\r\n".utf8)
+        let max = HTTPRequestParser.maxHeaderBytes
+        let atLimit = head(size: max)
+        let over = head(size: max + 1)
+        guard case .request = HTTPRequestParser.parse(atLimit + terminator) else { Issue.record("at the limit is accepted"); return }
+        #expect(HTTPRequestParser.parse(over + terminator) == .tooLarge)
+        // The terminator arrives in a later buffer, even split part-way.
+        for cut in 0..<terminator.count {
+            guard case .request = HTTPRequestParser.parse(atLimit + terminator.prefix(cut)) .asNeedMoreThenFull(atLimit + terminator) else {
+                Issue.record("at the limit, cut \(cut)"); return
+            }
+        }
+        #expect(HTTPRequestParser.parse(over) == .needMore || HTTPRequestParser.parse(over) == .tooLarge)
+        #expect(HTTPRequestParser.parse(over + terminator) == .tooLarge)
+        #expect(HTTPRequestParser.parse(Data(repeating: 0x61, count: max + 4)) == .tooLarge)
+    }
+}
+
+private extension HTTPParse {
+    /// A partial buffer must ask for more; the result is then that of the full buffer.
+    func asNeedMoreThenFull(_ full: Data) -> HTTPParse {
+        self == .needMore ? HTTPRequestParser.parse(full) : self
+    }
 }

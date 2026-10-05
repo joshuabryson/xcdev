@@ -69,4 +69,33 @@ import Testing
         let plan = try String(contentsOfFile: dir + "/XcdRunner.xctestplan", encoding: .utf8)
         #expect(plan.contains(#""testTimeoutsEnabled" : false"#))
     }
+
+    private func container(_ parts: [Data]) -> Data { parts.reduce(Data(), +) }
+    private func entry(_ path: String, count: String, bytes: Data) -> Data {
+        Data(path.utf8) + Data([0]) + Data(count.utf8) + Data([0]) + bytes
+    }
+
+    @Test func aWellFormedContainerParsesToItsFiles() throws {
+        let data = container([entry("a/b.txt", count: "3", bytes: Data("abc".utf8)), entry("c", count: "0", bytes: Data())])
+        let files = try RunnerSource.parse(data)
+        #expect(files.map(\.path) == ["a/b.txt", "c"])
+        #expect(files.map(\.contents) == [Data("abc".utf8), Data()])
+    }
+
+    @Test func aBadContainerIsAnInternalErrorNotATrap() {
+        let bad: [Data] = [
+            entry("a", count: "x", bytes: Data("abc".utf8)),
+            entry("a", count: "-1", bytes: Data("abc".utf8)),
+            entry("a", count: "9", bytes: Data("abc".utf8)),
+            Data("a".utf8) + Data([0]) + Data("3".utf8),
+            Data("a".utf8),
+            entry("../evil", count: "1", bytes: Data("x".utf8)),
+            entry("a/../b", count: "1", bytes: Data("x".utf8)),
+            entry("/abs", count: "1", bytes: Data("x".utf8)),
+            entry("", count: "1", bytes: Data("x".utf8)),
+        ]
+        for data in bad {
+            #expect(throws: XcdError.self) { try RunnerSource.parse(data) }
+        }
+    }
 }

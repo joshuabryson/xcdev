@@ -38,7 +38,7 @@ final class XcdRunnerTests: XCTestCase {
         let health = engine.handle(path: RunnerProtocol.healthPath, body: Data())
 
         let token = environment["XCD_TOKEN"]
-        if token?.isEmpty ?? true { NSLog("XCD_TOKEN is not set; refusing all requests") }
+        if token?.isEmpty ?? true { NSLog("%@", "XCD_TOKEN is not set; refusing all requests") }
         let server = RunnerServer(token: token) { health }
         // The overridden `record` swallows issues, so a start-up error is logged here before it ends the test.
         do {
@@ -47,9 +47,9 @@ final class XcdRunnerTests: XCTestCase {
                 try FileManager.default.createDirectory(atPath: (ready as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
                 try Data("{\"port\": \(port)}\n".utf8).write(to: URL(fileURLWithPath: ready), options: .atomic)
             }
-            NSLog("XCD_READY port=\(port)")
+            NSLog("%@", "XCD_READY port=\(port)")
         } catch {
-            NSLog("XCD_RUNNER_FAILED: \(error)")
+            NSLog("%@", "XCD_RUNNER_FAILED: \(error)")
             throw error
         }
 
