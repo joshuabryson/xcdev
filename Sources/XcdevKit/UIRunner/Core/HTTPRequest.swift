@@ -31,7 +31,8 @@ public enum HTTPParse: Equatable {
 /// Int is `.tooLarge`.
 public enum HTTPRequestParser {
     public static let maxHeaderBytes = 64 * 1024
-    public static let maxBodyBytes = 1024 * 1024
+    /// Room for an image for the pasteboard, base64-encoded in JSON.
+    public static let maxBodyBytes = 24 * 1024 * 1024
 
     public static func parse(_ buffer: Data) -> HTTPParse {
         let terminator = Data("\r\n\r\n".utf8)

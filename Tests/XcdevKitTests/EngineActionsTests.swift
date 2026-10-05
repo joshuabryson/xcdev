@@ -365,4 +365,16 @@ import XcdevTestSupport
         }
         #expect(device.events == ["button home", "rotate portrait-upside-down"])
     }
+
+    @Test func anImageGoesOnThePasteboard() throws {
+        let (engine, device) = base.make()
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3])
+        #expect(try engine.pasteboard(PasteboardRequest(image: png)).get().hasImages)
+        #expect(device.events == ["pasteboard image 11 bytes"])
+        guard case .failure(let bad) = engine.pasteboard(PasteboardRequest(image: Data("not an image".utf8))) else { Issue.record("set"); return }
+        #expect(bad.code == RunnerFailure.Code.badRequest && bad.message == "the data is not an image iOS can read")
+        let body = try JSONEncoder().encode(PasteboardRequest(image: png))
+        let reply = try JSONDecoder().decode(RunnerReply<PasteboardResult>.self, from: engine.handle(path: "/pasteboard", body: body))
+        #expect(reply.ok && reply.result?.hasImages == true && device.events.count == 2)
+    }
 }

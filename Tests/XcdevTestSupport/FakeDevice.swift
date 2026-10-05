@@ -85,6 +85,12 @@ public final class FakeDevice: DeviceDriving {
         events.append("pasteboard \(text.debugDescription)")
     }
 
+    public func setPasteboard(image: Data) -> Bool {
+        guard image.starts(with: [0x89, 0x50, 0x4E, 0x47]) else { return false }       // a PNG's first bytes
+        events.append("pasteboard image \(image.count) bytes")
+        return true
+    }
+
     public func pressButton(_ button: HardwareButton) throws -> Bool {
         guard buttons.contains(button) else { return false }
         try gesture("button \(button.rawValue)")

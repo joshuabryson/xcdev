@@ -44,4 +44,11 @@ extension RunnerEngine {
             return ActionResult(element: nil, x: nil, y: nil, ms: 0)
         }
     }
+
+    public func pasteboard(_ request: PasteboardRequest) -> Result<PasteboardResult, RunnerFailure> {
+        guard device.setPasteboard(image: request.image) else {
+            return .failure(RunnerFailure(code: RunnerFailure.Code.badRequest, message: "the data is not an image iOS can read"))
+        }
+        return .success(PasteboardResult(hasImages: true))
+    }
 }

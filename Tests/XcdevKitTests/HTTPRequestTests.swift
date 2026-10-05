@@ -32,7 +32,9 @@ import Testing
     }
 
     @Test func limits() {
-        #expect(parse("POST /x HTTP/1.1\r\nContent-Length: 2097152\r\n\r\n") == .tooLarge)
+        #expect(parse("POST /x HTTP/1.1\r\nContent-Length: \(HTTPRequestParser.maxBodyBytes + 1)\r\n\r\n") == .tooLarge)
+        // A 16 MB image for the pasteboard, as base64 inside JSON, fits.
+        #expect(parse("POST /x HTTP/1.1\r\nContent-Length: \(16 * 1024 * 1024 / 3 * 4 + 64)\r\n\r\n") == .needMore)
         #expect(HTTPRequestParser.parse(Data(repeating: 0x61, count: 70 * 1024)) == .tooLarge)
         #expect(HTTPRequestParser.parse(Data()) == .needMore)
     }

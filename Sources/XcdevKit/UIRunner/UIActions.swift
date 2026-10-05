@@ -208,4 +208,32 @@ extension UIService {
         let done = try await act(ActionCall(path: RunnerProtocol.rotatePath, request: request, what: "rotation", target: orientation), options, in: &ctx)
         return done.report("rotated to", target: orientation)
     }
+
+    /// The largest image file `xcd sim pasteboard set --image` takes: it travels to the runner inside one request.
+    static let maxImageBytes = 16 * 1024 * 1024
+    /// The runner's words for data that is not an image.
+    static let notAnImage = "the data is not an image iOS can read"
+
+    /// Puts an image file on the device's pasteboard through the runner: simctl can only copy text.
+    public func setPasteboardImage(file: String, device: String?, in ctx: inout WorktreeContext) async throws -> DeviceStateReport {
+        guard let image = FileManager.default.contents(atPath: file), !image.isEmpty else {
+            throw XcdError(.usage, "\(file) doesn't exist or is empty", next: "pass a PNG or JPEG file")
+        }
+        guard image.count <= Self.maxImageBytes else {
+            throw XcdError(.usage, "\(file) is larger than 16 MB, the most xcd can copy", next: "pass a smaller image")
+        }
+        let options = UIOptions(device: device, bundle: nil, system: true, role: nil, index: nil, timeout: .zero)
+        let exchange = RunnerExchange(path: RunnerProtocol.pasteboardPath, request: PasteboardRequest(image: image), what: "copy", resend: true)
+        let (session, result) = try await send(exchange, as: PasteboardResult.self, options, in: &ctx)
+        switch result {
+        case .success(let set) where set.hasImages:
+            break
+        case .success, .failure(RunnerFailure(code: RunnerFailure.Code.badRequest, message: Self.notAnImage)):
+            throw XcdError(.usage, "\(file) is not an image iOS can read", next: "pass a PNG or JPEG file")
+        case .failure(let failure):
+            throw UIRunnerErrors.error(failure, target: file, timeout: .zero)
+        }
+        return DeviceStateReport(action: "set the pasteboard to the image \((file as NSString).lastPathComponent) (\(image.count) bytes)",
+                                 device: session.device, udid: session.udid, worktree: ctx.state.name)
+    }
 }

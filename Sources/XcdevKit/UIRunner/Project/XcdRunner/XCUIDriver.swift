@@ -87,6 +87,12 @@ final class XCUIDriver: DeviceDriving {
     /// Setting the pasteboard shows no prompt; only reading what another process wrote does.
     func setPasteboard(text: String) { UIPasteboard.general.string = text }
 
+    func setPasteboard(image: Data) -> Bool {
+        guard let image = UIImage(data: image) else { return false }
+        UIPasteboard.general.image = image
+        return UIPasteboard.general.hasImages
+    }
+
     func pressButton(_ button: HardwareButton) throws -> Bool {
         let key: XCUIDevice.Button
         switch button {

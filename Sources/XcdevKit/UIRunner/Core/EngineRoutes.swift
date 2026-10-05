@@ -43,6 +43,7 @@ extension RunnerEngine {
         case RunnerProtocol.typePath: return answering(TypeRequest.self, enterText)
         case RunnerProtocol.buttonPath: return answering(DeviceRequest.self, button)
         case RunnerProtocol.rotatePath: return answering(DeviceRequest.self, rotate)
+        case RunnerProtocol.pasteboardPath: return answering(PasteboardRequest.self, pasteboard)
         default: return nil
         }
     }

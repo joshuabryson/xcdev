@@ -189,39 +189,6 @@ struct SimCommand: AsyncParsableCommand {
         }
     }
 
-    struct Pasteboard: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Set or read the device's pasteboard (text).", subcommands: [SetText.self, GetText.self])
-
-        struct SetText: AsyncParsableCommand {
-            static let configuration = CommandConfiguration(commandName: "set", abstract: "Put text on the device's pasteboard.")
-            @Option(help: "The text. A value starting with `-` is written `--text=-n`.") var text: String
-            @OptionGroup var target: DeviceOption
-            @OptionGroup var options: GlobalOptions
-
-            func run() async throws {
-                try await Emit.run("sim pasteboard set", options) { services in
-                    var ctx = try await services.open(worktree: options.worktree)
-                    await Recording.stopOverdue(services, ctx)
-                    return try await services.deviceState.setPasteboard(text: text, device: target.device, in: &ctx)
-                }
-            }
-        }
-
-        struct GetText: AsyncParsableCommand {
-            static let configuration = CommandConfiguration(commandName: "get", abstract: "Print the device's pasteboard text, and nothing else.")
-            @OptionGroup var target: DeviceOption
-            @OptionGroup var options: GlobalOptions
-
-            func run() async throws {
-                try await Emit.run("sim pasteboard get", options) { services in
-                    var ctx = try await services.open(worktree: options.worktree)
-                    await Recording.stopOverdue(services, ctx)
-                    return try await services.deviceState.pasteboard(device: target.device, in: &ctx)
-                }
-            }
-        }
-    }
-
     struct AddMedia: AsyncParsableCommand {
         static let configuration = CommandConfiguration(commandName: "addmedia", abstract: "Add photos or videos to the device's Photos library.")
         @Argument(help: "Image or video files.", completion: .file()) var files: [String]
