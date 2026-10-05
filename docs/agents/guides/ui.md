@@ -51,7 +51,7 @@ An action on an element waits up to `--timeout` (default 2s; 10s for `wait`) for
 - **System alerts** (permission prompts) are listed at the end of the tree, marked `system`. While one is up, nothing in the app can be acted on: tap one of the alert's buttons first.
 - **The keyboard** covers the lower part of the screen, and an element under it is refused. Scroll the element up with `xcd ui swipe up`, or dismiss the keyboard first: `xcd ui type "" --submit` presses Return, which closes it in most single-line fields (and submits the field), or tap the keyboard's own Return or Done key (`xcd ui tree --all` lists the keys).
 - **Off-screen elements** are not in the default tree. `xcd ui tree --all` lists them, marked `offscreen`. Swipe, then read the tree again.
-- **Typing** uses the software keyboard. If none comes up, the text is pasted instead, which replaces the device's pasteboard; the report says `by keyboard` or `by paste`. Check the field's value in the tree afterwards.
+- **Typing** uses the software keyboard. If none comes up, the text is pasted instead, which replaces the device's pasteboard; the report says `by keyboard` or `by paste`. Check the field's value in the tree afterwards. With nothing focused there is nowhere to type, and the command fails: pass `--into <target>`.
 - **A crash** during an action is reported as `app_crashed`, with the crash report when one was written.
 - **The first `xcd ui` command** builds a small runner once per Xcode (about 30 seconds) and starts it on your simulator. On a brand-new simulator the start can take minutes. Later commands take about a second.
 - **`xcd test`** stops the runner when the test run includes UI tests, since both would drive the same device. The next `xcd ui` command starts it again.

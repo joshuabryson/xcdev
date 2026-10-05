@@ -126,6 +126,7 @@ extension UIRunnerIntegrationTests {
             let simulatorWasRunning = try await simulatorAppIsRunning()
             let front = try await frontmostMacApp()
 
+            try await typingWithNothingFocusedSaysSo(&ctx, svc)
             try await typesIntoTheEmailField(&ctx, svc)
             try await swipesTheList(&ctx, svc)
             try await longPresses(&ctx, svc)
@@ -133,6 +134,21 @@ extension UIRunnerIntegrationTests {
             #expect(try await frontmostMacApp() == front, "driving the simulator changed the frontmost Mac app")
             #expect(try await simulatorAppIsRunning() == simulatorWasRunning, "a ui command started Simulator.app")
         }
+    }
+
+    /// Before any field is tapped nothing has keyboard focus, so text has nowhere to go: that is an error, not a success.
+    func typingWithNothingFocusedSaysSo(_ ctx: inout WorktreeContext, _ svc: Services) async throws {
+        let before = try await svc.ui.tree(all: false, options, in: &ctx).tree
+        try #require(!before.keyboard, "a keyboard is up before anything was focused")
+        let error = await #expect(throws: XcdError.self) {
+            let typed = try await svc.ui.type("nowhere", TypeOptions(into: nil, clear: false, submit: false), options, in: &ctx)
+            Issue.record("typing with nothing focused was reported as done: \(typed.text)")
+        }
+        let said = "\(error?.code.rawValue ?? "no error"): \(error?.message ?? "") | next: \(error?.next ?? "") | details: \(error?.details ?? [])"
+        #expect(error?.code == .elementNotFound && error?.message.contains("nothing has keyboard focus") == true, "\(said)")
+        #expect(error?.next?.contains("--into") == true, "\(said)")
+        let after = try await svc.ui.tree(all: false, options, in: &ctx).tree
+        #expect(after.elements.first { $0.identifier == "emailField" }?.value != "nowhere", "the text went into a field nobody focused")
     }
 
     func typesIntoTheEmailField(_ ctx: inout WorktreeContext, _ svc: Services) async throws {

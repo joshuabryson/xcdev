@@ -43,10 +43,13 @@ public struct SnapshotNode: Codable, Sendable, Equatable {
     public var frame: ScreenRect
     public var enabled: Bool
     public var selected: Bool
+    /// Whether it has keyboard focus; nil when the device can't say.
+    public var focused: Bool?
     public var children: [SnapshotNode]
 
     public init(elementType: Int, identifier: String, label: String, value: String?, placeholder: String?, frame: ScreenRect,
-                enabled: Bool, selected: Bool, children: [SnapshotNode]) {
+                enabled: Bool, selected: Bool, children: [SnapshotNode], focused: Bool? = nil) {
+        self.focused = focused
         self.elementType = elementType
         self.identifier = identifier
         self.label = label

@@ -236,6 +236,21 @@ final class SentRequests: Sendable {
         #expect(error?.next == "focus a field first: pass `--into <target>`, or tap it")
     }
 
+    /// With no keyboard up XCTest reports nothing, so the runner says it itself.
+    @Test func theRunnersOwnWordThatNothingHasFocusReadsTheSame() async throws {
+        defer { base.worktree.remove() }
+        var (service, ctx, _, _) = try base.setup { _, _ in
+            FakeRunnerTransport.reply(Result<ActionResult, RunnerFailure>.failure(
+                RunnerFailure(code: RunnerFailure.Code.nothingFocused, message: "nothing has keyboard focus")))
+        }
+        let error = await #expect(throws: XcdError.self) {
+            _ = try await service.type("a", TypeOptions(into: nil, clear: false, submit: false), options, in: &ctx)
+        }
+        #expect(error?.code == .elementNotFound && error?.code.exitCode == 1)
+        #expect(error?.message == "nothing has keyboard focus, so there was nowhere to type")
+        #expect(error?.next == "focus a field first: pass `--into <target>`, or tap it")
+    }
+
     @Test func buttonsAndRotationNeedNoApp() async throws {
         defer { base.worktree.remove() }
         var (service, ctx, sent) = try setup(ActionResult(element: nil, x: nil, y: nil, ms: 310))

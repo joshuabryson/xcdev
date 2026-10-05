@@ -36,6 +36,8 @@ public struct FlatNode: Sendable, Equatable {
     public var signature: RefSignature
     public var inKeyboard: Bool
     public var window: Int
+    /// Whether it has keyboard focus; nil when the device can't say.
+    public var focused: Bool?
 
     public var isInteractive: Bool { ElementRole.interactive.contains(role) }
     public var hasText: Bool { !label.isEmpty || !(value ?? "").isEmpty }
@@ -71,7 +73,8 @@ private struct TreeWalk {
         let signature = RefSignature(role: role, identifier: node.identifier, label: node.label, path: position.path, source: source)
         nodes.append(FlatNode(role: role, identifier: node.identifier, label: node.label, value: value, placeholder: node.placeholder,
                               frame: TreeBuilder.finite(node.frame), enabled: node.enabled, selected: node.selected, depth: position.depth,
-                              source: source, parent: position.parent, signature: signature, inKeyboard: position.inKeyboard, window: window))
+                              source: source, parent: position.parent, signature: signature, inKeyboard: position.inKeyboard, window: window,
+                              focused: node.focused))
         var seen: [Int: Int] = [:]
         for child in node.children {
             let place = seen[child.elementType, default: 0]

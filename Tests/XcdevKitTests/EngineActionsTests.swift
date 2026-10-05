@@ -261,6 +261,46 @@ import XcdevTestSupport
         #expect(!device.events.contains { $0.hasPrefix("type") })
     }
 
+    /// `node` and everything under it as a device that can tell reports them: only the element `id` has keyboard focus.
+    static func reportingFocus(on id: String?, _ node: SnapshotNode) -> SnapshotNode {
+        var node = node
+        node.focused = id != nil && node.identifier == id
+        node.children = node.children.map { reportingFocus(on: id, $0) }
+        return node
+    }
+
+    /// Seen on iOS 27.0: a paste with nothing focused goes nowhere and XCTest reports no problem, so it would
+    /// pass for typing that worked. The device's pasteboard is left alone too.
+    @Test func withNoKeyboardAndNothingFocusedThereIsNowhereToType() throws {
+        let (engine, device) = base.make(Self.reportingFocus(on: nil, EngineActionsTests.app))
+        for request in [type("hi", into: nil), type("", into: nil, clear: true), type("", into: nil, submit: true)] {
+            guard case .failure(let failure) = engine.enterText(request) else { Issue.record("typed"); return }
+            #expect(failure.code == RunnerFailure.Code.nothingFocused && failure.message == "nothing has keyboard focus")
+        }
+        #expect(device.events.isEmpty && device.pasteboardText == nil && device.pauses >= 14)      // it looked for 1.5 s first
+        // A tap that gives nothing focus (the target is not a field) ends the same way, after the tap.
+        guard case .failure(let failure) = engine.enterText(type("hi", into: .id("signIn"))) else { Issue.record("typed"); return }
+        #expect(failure.code == RunnerFailure.Code.nothingFocused && device.events == ["tap 201,314"])
+    }
+
+    @Test func withNoKeyboardTheTextIsPastedIntoTheFieldThatHasFocus() throws {
+        let (engine, device) = base.make(Self.reportingFocus(on: nil, EngineActionsTests.app))
+        device.onGesture = { device in                                      // the tap gives the field focus; no keyboard comes up
+            if device.events.last == "tap 201,175" { device.app = Self.reportingFocus(on: "email", EngineActionsTests.app) }
+        }
+        let result = try engine.enterText(type("hi")).get()
+        #expect(device.events == ["tap 201,175", "pasteboard \"hi\"", "key cmd-\"v\""] && result.method == "paste")
+        // Focus that came from an earlier tap counts too.
+        #expect(try engine.enterText(type("more", into: nil)).get().method == "paste")
+        #expect(device.events.suffix(2) == ["pasteboard \"more\"", "key cmd-\"v\""])
+    }
+
+    /// The keyboard is proof enough: what it types into is not looked for.
+    @Test func withAKeyboardUpFocusIsNotAsked() throws {
+        let (engine, device) = base.make(Self.reportingFocus(on: nil, EngineActionsTests.appWithKeyboard))
+        #expect(try engine.enterText(type("hi", into: nil)).get().method == "keyboard" && device.events == ["type \"hi\""])
+    }
+
     @Test func theKeyboardTipCardIsDismissedFirst() throws {
         let card = EngineActionsTests.node(1, ScreenRect(x: 0, y: 546, w: 402, h: 328), [
             EngineActionsTests.node(48, label: "Speed up your typing by sliding your finger across the letters to compose a word.",

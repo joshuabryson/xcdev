@@ -14,6 +14,7 @@ enum UIRunnerErrors {
         RunnerFailure.Code.appNotForeground: appNotForeground,
         RunnerFailure.Code.appCrashed: appCrashed,
         RunnerFailure.Code.unsupported: unsupported,
+        RunnerFailure.Code.nothingFocused: nothingFocused,
         RunnerFailure.Code.badRequest: badRequest,
         RunnerFailure.Code.internal: internalFailure,
     ]
@@ -101,11 +102,16 @@ enum UIRunnerErrors {
                  next: "this is likely an xcd bug; run `xcd ui stop`, then retry", details: failure.issues)
     }
 
-    static func internalFailure(_ failure: RunnerFailure, target _: String, _: Duration) -> XcdError {
+    /// Text was typed with no field focused. With no keyboard up the runner says so itself; with one up XCTest does.
+    static func nothingFocused(_ failure: RunnerFailure, target _: String, _: Duration) -> XcdError {
+        XcdError(.elementNotFound, "nothing has keyboard focus, so there was nowhere to type",
+                 next: "focus a field first: pass `--into <target>`, or tap it", details: failure.issues)
+    }
+
+    static func internalFailure(_ failure: RunnerFailure, target: String, timeout: Duration) -> XcdError {
         // XCTest's own words when text is typed with no field focused.
         if failure.issues.contains(where: { $0.localizedCaseInsensitiveContains("keyboard focus") }) {
-            return XcdError(.elementNotFound, "nothing has keyboard focus, so there was nowhere to type",
-                            next: "focus a field first: pass `--into <target>`, or tap it", details: failure.issues)
+            return nothingFocused(failure, target: target, timeout)
         }
         return XcdError(.runnerFailed, failure.message, next: "run `xcd ui stop`, then retry; `xcd doctor` if it keeps happening",
                         details: failure.issues)

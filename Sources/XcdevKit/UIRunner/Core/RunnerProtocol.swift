@@ -107,6 +107,8 @@ public struct RunnerFailure: Codable, Sendable, Equatable, Error {
         public static let appCrashed = "app_crashed"
         /// The device can't do what was asked: it has no such hardware button.
         public static let unsupported = "unsupported"
+        /// There is no keyboard on screen and no element has keyboard focus, so text has nowhere to go.
+        public static let nothingFocused = "nothing_focused"
         public static let badRequest = "bad_request"
         public static let `internal` = "internal"
     }

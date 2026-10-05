@@ -11,6 +11,13 @@ extension RunnerEngine {
     static let keyboardWait = 1.5
     /// Never sent to xcd: what a look for the keyboard says while there is none.
     static let noKeyboard = RunnerFailure(code: "no_keyboard", message: "no keyboard is on screen")
+    static let nothingFocused = RunnerFailure(code: RunnerFailure.Code.nothingFocused, message: "nothing has keyboard focus")
+
+    /// How text can be entered: through the keyboard on screen, by pasting into the element that has keyboard focus,
+    /// or not at all.
+    enum TextEntry {
+        case keyboard, paste, nowhere
+    }
 
     public func enterText(_ request: TypeRequest) -> Result<ActionResult, RunnerFailure> {
         let scope = request.scope
@@ -23,10 +30,13 @@ extension RunnerEngine {
             case .success(let result): focused = result
             }
         }
-        switch keyboardIsUp(scope) {
+        switch textEntry(scope) {
         case .failure(let failure):
             return .failure(failure)
-        case .success(let keyboard):
+        case .success(.nowhere):
+            return .failure(Self.nothingFocused)
+        case .success(let entry):
+            let keyboard = entry == .keyboard
             return performed("typing", { Int((self.device.now() - start) * 1000) }, { try self.entered(request, keyboard: keyboard, into: focused) })
                 .flatMap { finished($0, scope, what: "typing", appWasRunning: true) }
         }
@@ -42,13 +52,17 @@ extension RunnerEngine {
         }
     }
 
-    /// Whether a keyboard is on screen, looking for up to `keyboardWait` seconds. An app that isn't in front is a
-    /// failure. The one-time tip card over a new simulator's keyboard is dismissed on the way.
-    func keyboardIsUp(_ scope: ActionScope) -> Result<Bool, RunnerFailure> {
+    /// How text can be entered, looking for a keyboard for up to `keyboardWait` seconds. An app that isn't in front is
+    /// a failure. The one-time tip card over a new simulator's keyboard is dismissed on the way. With no keyboard, the
+    /// text is pasted, unless the last look says that nothing has keyboard focus: a paste then goes nowhere, and
+    /// XCTest reports no problem with it, so it would pass for typing that worked.
+    func textEntry(_ scope: ActionScope) -> Result<TextEntry, RunnerFailure> {
         var scope = scope
         scope.timeout = Self.keyboardWait
+        var focus: Bool?
         let found = poll(scope, what: "typing") { scene, elapsedMs in
             if scene.appAway { return .retry(self.appAwayFailure(scene)) }
+            focus = Self.keyboardFocus(in: scene)
             if let card = self.tipCardButton(in: scene) {
                 try? self.device.tap(x: card.frame.midX, y: card.frame.midY)
                 return .retry(Self.noKeyboard)
@@ -57,9 +71,16 @@ extension RunnerEngine {
             return .done(.success(ActionResult(element: nil, x: nil, y: nil, ms: elapsedMs())))
         }
         switch found {
-        case .success: return .success(true)
-        case .failure(let failure): return failure.code == Self.noKeyboard.code ? .success(false) : .failure(failure)
+        case .success: return .success(.keyboard)
+        case .failure(let failure) where failure.code != Self.noKeyboard.code: return .failure(failure)
+        case .failure: return .success(focus == false ? .nowhere : .paste)
         }
+    }
+
+    /// Whether an element on screen has keyboard focus; nil when the device doesn't say so for every element.
+    static func keyboardFocus(in scene: Scene) -> Bool? {
+        if scene.nodes.contains(where: { $0.focused == true }) { return true }
+        return scene.nodes.isEmpty || scene.nodes.contains(where: { $0.focused == nil }) ? nil : false
     }
 
     /// The Continue button of the tip card ("Speed up your typing…") a new simulator shows over its keyboard once.

@@ -133,7 +133,19 @@ final class XCUIDriver: DeviceDriving {
                      value: snapshot.value.map { "\($0)" }, placeholder: snapshot.placeholderValue,
                      frame: ScreenRect(x: Double(snapshot.frame.minX), y: Double(snapshot.frame.minY),
                                        w: Double(snapshot.frame.width), h: Double(snapshot.frame.height)),
-                     enabled: snapshot.isEnabled, selected: snapshot.isSelected, children: snapshot.children.map(node))
+                     enabled: snapshot.isEnabled, selected: snapshot.isSelected, children: snapshot.children.map(node),
+                     focused: keyboardFocus(snapshot))
+    }
+
+    /// The attribute XCTest's own typing check reads. It is not in the public headers, so it is asked for by name.
+    private static let keyboardFocusKey = "hasKeyboardFocus"
+
+    /// Whether the element has keyboard focus. The public `hasFocus` is no use here: it stays false on a text field
+    /// that is being typed into (seen on iOS 27.0, where this attribute was true on exactly that field). Nil when
+    /// this Xcode's snapshots don't answer to the name, and the engine then acts as if it had never asked.
+    static func keyboardFocus(_ snapshot: XCUIElementSnapshot) -> Bool? {
+        guard let object = snapshot as? NSObject, object.responds(to: NSSelectorFromString(keyboardFocusKey)) else { return nil }
+        return object.value(forKey: keyboardFocusKey) as? Bool
     }
 
     /// Whether `ElementRole`'s numbers match this Xcode's element types.

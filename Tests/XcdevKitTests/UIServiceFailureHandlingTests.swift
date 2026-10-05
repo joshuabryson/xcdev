@@ -18,7 +18,8 @@ import XcdevTestSupport
     @Test func everyRunnerFailureCodeMapsToAnErrorWithANext() {
         let codes = [RunnerFailure.Code.notFound, RunnerFailure.Code.notHittable, RunnerFailure.Code.ambiguous, RunnerFailure.Code.staleRef,
                      RunnerFailure.Code.waitTimeout, RunnerFailure.Code.appNotForeground, RunnerFailure.Code.appCrashed,
-                     RunnerFailure.Code.unsupported, RunnerFailure.Code.badRequest, RunnerFailure.Code.internal, "something_new"]
+                     RunnerFailure.Code.unsupported, RunnerFailure.Code.nothingFocused, RunnerFailure.Code.badRequest,
+                     RunnerFailure.Code.internal, "something_new"]
         #expect(Set(codes.dropLast()) == Set(UIRunnerErrors.mappers.keys))
         for code in codes {
             let error = UIRunnerErrors.error(RunnerFailure(code: code, message: "m"), target: "id:x", timeout: .seconds(1))
