@@ -95,9 +95,13 @@ import Testing
         // Build tree with elements that could collide: button and cell both with text "Delete", plus unmapped types
         let tree = Self.node(2, frame: Self.screen, [
             Self.node(4, frame: Self.screen, [
-                Self.node(1, frame: Self.screen, [
-                    Self.node(9, label: "Delete"),          // button
-                    Self.node(75, label: "Delete"),         // cell
+                Self.node(3, frame: Self.screen, [  // group
+                    Self.node(9, label: "Delete", frame: ScreenRect(x: 0, y: 0, w: 100, h: 40), [  // button
+                        Self.node(48, label: "Delete", frame: ScreenRect(x: 0, y: 0, w: 100, h: 40)),  // text
+                    ]),
+                    Self.node(75, label: "Delete", frame: ScreenRect(x: 0, y: 50, w: 100, h: 40), [  // cell
+                        Self.node(48, label: "Delete", frame: ScreenRect(x: 0, y: 50, w: 100, h: 40)),  // text
+                    ]),
                     Self.node(1, label: ""),                // other (same type as parent's first child)
                     Self.node(9999, label: ""),             // unmapped type (will be "other")
                 ]),
@@ -106,6 +110,11 @@ import Testing
         let appNodes = flat(tree)
         let appSignatures = Set(appNodes.map { $0.signature })
         #expect(appSignatures.count == appNodes.count)  // All signatures unique for app source
+
+        // Verify the two "Delete" texts have different signatures despite same label
+        let deleteTexts = appNodes.filter { $0.label == "Delete" && $0.role == "text" }
+        #expect(deleteTexts.count == 2)
+        #expect(deleteTexts[0].signature != deleteTexts[1].signature)
 
         // Flatten same tree with system source; root signature should differ by source
         var systemNodes: [FlatNode] = []
@@ -125,9 +134,14 @@ import Testing
             ]),
         ])
         let nodes = flat(tree)
+        let scrollBarIndex = nodes.firstIndex { $0.role == "scrollBar" }
+        #expect(scrollBarIndex != nil)  // Ensure scrollBar exists
+        let scrollBarIdx = scrollBarIndex!
+
         let shown = TreeBuilder.displayed(nodes, screen: Self.screen, all: false)
-        #expect(!shown.contains(1))  // scrollBar not shown by default
+        #expect(!shown.contains(scrollBarIdx))  // scrollBar not shown by default (structural with value but no label)
+
         let allShown = TreeBuilder.displayed(nodes, screen: Self.screen, all: true)
-        #expect(allShown.contains(1))  // scrollBar shown with all: true
+        #expect(allShown.contains(scrollBarIdx))  // scrollBar shown with all: true
     }
 }
