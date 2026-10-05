@@ -21,7 +21,7 @@ extension FakeProcessRunner {
     func runnerRecord(_ device: String, pid: Int32, in ctx: WorktreeContext) throws -> ProcessIdentity {
         let id = ProcessIdentity(pid: pid, startTime: 1, arguments: ["xcodebuild", "test-without-building"])
         try Runners.save(RunnerRecord(device: device, udid: "U", process: id, token: "t", port: 40000 + Int(pid), runnerKey: "k",
-                                      log: "/l", readyFile: ctx.paths.runnerReadyFile(device: device), startedAt: Date(), restarts: [],
+                                      log: "/l", readyFile: "/r", startedAt: Date(), restarts: [],
                                       failed: false), to: ctx.paths.runnerFile(device: device))
         return id
     }

@@ -5,6 +5,7 @@ import XcdevTestSupport
 
 @Suite struct RunnerSupervisorTests {
     let worktree = FakeWorktree(prefix: "xcd supervisor")
+    static let now = Date(timeIntervalSince1970: 1_791_100_000)
     static let yaml = """
     version: 1
     project: App.xcodeproj
@@ -13,7 +14,8 @@ import XcdevTestSupport
       iphone: { type: "iPhone 18 Pro" }
     """
 
-    /// Writes the ready file as the real runner would, taking the path from the invocation's environment.
+    /// Writes the ready file as the real runner would, taking the path from the invocation's environment. It makes no
+    /// folder for it: the supervisor must have created that before the launch.
     static let writesReady: @Sendable (Invocation, String) throws -> Void = { invocation, log in
         try FileManager.default.createDirectory(atPath: (log as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         let ready = invocation.environment["TEST_RUNNER_XCD_READY_FILE"]!
@@ -21,9 +23,9 @@ import XcdevTestSupport
     }
 
     func setup(detached: FakeDetachedProcesses = FakeDetachedProcesses(onStart: writesReady),
-               transport: FakeRunnerTransport = FakeRunnerTransport(), now: Date = Date(timeIntervalSince1970: 1_791_100_000),
+               transport: FakeRunnerTransport = FakeRunnerTransport(), now: Date = now,
                sleep: @escaping @Sendable (Duration) async throws -> Void = { duration in _ = duration }) throws -> (RunnerSupervisor, WorktreeContext) {
-        _ = try FakeSimulators(runner: worktree.runner, catalogJSON: Fixture.string("simctl-list.json"))
+        _ = try FakeSimulators(runner: worktree.runner, catalogJSON: Fixture.string("simctl-list.json"), devicesDirectory: worktree.root + "/sims")
         worktree.runner.stub(["xcrun", "xcodebuild", "build-for-testing"]) { invocation in
             let derived = invocation.arguments[invocation.arguments.firstIndex(of: "-derivedDataPath")! + 1]
             try FileManager.default.createDirectory(atPath: derived + "/Build/Products", withIntermediateDirectories: true)
@@ -39,6 +41,24 @@ import XcdevTestSupport
         return (supervisor, try worktree.context(Self.yaml))
     }
 
+    /// Boots the clone before the command under test runs. `age` is how long ago its device folder was created; nil
+    /// leaves the clone without a readable folder.
+    func bootClone(age: TimeInterval?, in ctx: inout WorktreeContext) async throws {
+        let udid = try await worktree.provisioner.boot("iphone", in: &ctx).device.udid
+        guard let age else { return }
+        let folder = worktree.root + "/sims/" + udid
+        try FileManager.default.createDirectory(atPath: folder + "/data", withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.creationDate: Self.now.addingTimeInterval(-age)], ofItemAtPath: folder)
+    }
+
+    /// The timeout named by the error of a start that never becomes ready.
+    func startTimeoutText(_ supervisor: RunnerSupervisor, _ ctx: inout WorktreeContext) async -> String? {
+        var copy = ctx
+        let error = await #expect(throws: XcdError.self) { _ = try await supervisor.session(device: nil, in: &copy) }
+        ctx = copy
+        return error?.message.components(separatedBy: "did not start within ").last
+    }
+
     @Test func startsARunnerAndRecordsIt() async throws {
         defer { worktree.remove() }
         let detached = FakeDetachedProcesses(onStart: Self.writesReady)
@@ -51,9 +71,25 @@ import XcdevTestSupport
         #expect(start.invocation.environment["TEST_RUNNER_XCD_TOKEN"] == session.token)
         #expect(start.invocation.environment["DEVELOPER_DIR"] == "/Applications/Xcode.app/Contents/Developer")
         #expect(start.log == ctx.paths.logs + "/ui-runner-iphone.log")
+        // The simulator writes the ready file, so it lives in xcd's cache, never in the worktree (which may be under Documents).
+        let ready = worktree.root + "/home/cache/ui-runner/ready/\(session.udid).json"
+        #expect(start.invocation.environment["TEST_RUNNER_XCD_READY_FILE"] == ready && FileManager.default.fileExists(atPath: ready))
         let record = try #require(Runners.load(ctx.paths.runnerFile(device: "iphone")))
         #expect(record.port == 51234 && record.process == start.identity && record.udid == session.udid && !record.failed)
-        #expect(record.runnerKey == "27A266a-" + RunnerSource.hash)
+        #expect(record.runnerKey == "27A266a-" + RunnerSource.hash && record.readyFile == ready)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: ctx.paths.stateDirectory).filter { $0.contains("ready") }.isEmpty)
+    }
+
+    /// The record holds the bearer token.
+    @Test func theRecordIsReadableOnlyByItsOwner() async throws {
+        defer { worktree.remove() }
+        var (supervisor, ctx) = try setup()
+        _ = try await supervisor.session(device: nil, in: &ctx)
+        let file = ctx.paths.runnerFile(device: "iphone")
+        func mode() throws -> Int? { (try FileManager.default.attributesOfItem(atPath: file)[.posixPermissions] as? NSNumber)?.intValue }
+        #expect(try mode() == 0o600)
+        try Runners.save(try #require(Runners.load(file)), to: file)                    // saved over an existing record
+        #expect(try mode() == 0o600)
     }
 
     @Test func attachesToAHealthyRunner() async throws {
@@ -189,21 +225,33 @@ import XcdevTestSupport
     }
 
     @Test func aCloneThisCommandBootedGetsTheLongTimeout() async throws {
-        #expect(RunnerSupervisor.startTimeout(wasBooted: true) == .seconds(120))
-        #expect(RunnerSupervisor.startTimeout(wasBooted: false) == .seconds(600))
+        #expect(RunnerSupervisor.startTimeout(warm: true) == .seconds(120))
+        #expect(RunnerSupervisor.startTimeout(warm: false) == .seconds(600))
         defer { worktree.remove() }
         var (supervisor, ctx) = try setup(detached: FakeDetachedProcesses())            // never ready
-        let error = await #expect(throws: XcdError.self) { _ = try await supervisor.session(device: nil, in: &ctx) }
-        #expect(error?.message.contains("did not start within 10m00s") == true)
+        #expect(await startTimeoutText(supervisor, &ctx) == "10m00s")
     }
 
-    @Test func aCloneThatWasAlreadyBootedGetsTheShortTimeout() async throws {
+    @Test func aBootedCloneWithAnOldDeviceFolderGetsTheShortTimeout() async throws {
         defer { worktree.remove() }
-        let (supervisor, ctx) = try setup(detached: FakeDetachedProcesses())            // never ready
-        var booted = ctx
-        _ = try await worktree.provisioner.boot("iphone", in: &booted)
-        let error = await #expect(throws: XcdError.self) { _ = try await supervisor.session(device: nil, in: &booted) }
-        #expect(error?.message.contains("did not start within 2m00s") == true)
+        var (supervisor, ctx) = try setup(detached: FakeDetachedProcesses())            // never ready
+        try await bootClone(age: 16 * 60, in: &ctx)
+        #expect(await startTimeoutText(supervisor, &ctx) == "2m00s")
+    }
+
+    /// `xcd run` boots a new clone before the first `xcd ui`, so "already booted" alone doesn't mean it has settled.
+    @Test func aBootedCloneWithAFreshDeviceFolderGetsTheLongTimeout() async throws {
+        defer { worktree.remove() }
+        var (supervisor, ctx) = try setup(detached: FakeDetachedProcesses())            // never ready
+        try await bootClone(age: 14 * 60, in: &ctx)
+        #expect(await startTimeoutText(supervisor, &ctx) == "10m00s")
+    }
+
+    @Test func aBootedCloneWhoseCreationDateCannotBeReadGetsTheLongTimeout() async throws {
+        defer { worktree.remove() }
+        var (supervisor, ctx) = try setup(detached: FakeDetachedProcesses())            // never ready
+        try await bootClone(age: nil, in: &ctx)
+        #expect(await startTimeoutText(supervisor, &ctx) == "10m00s")
     }
 
     @Test func aWatchIsRejectedBeforeItIsBooted() async throws {
@@ -218,9 +266,9 @@ import XcdevTestSupport
     @Test func stoppingAnOldRecordLeavesANewerRunnersFilesAlone() async throws {
         defer { worktree.remove() }
         let detached = FakeDetachedProcesses(onStart: Self.writesReady)
-        let (_, ctx) = try setup(detached: detached)
+        let (supervisor, ctx) = try setup(detached: detached)
         let file = ctx.paths.runnerFile(device: "iphone")
-        let ready = ctx.paths.runnerReadyFile(device: "iphone")
+        let ready = supervisor.globalPaths.runnerReadyFile(udid: "U")
         func record(pid: Int32) -> RunnerRecord {
             RunnerRecord(device: "iphone", udid: "U", process: ProcessIdentity(pid: pid, startTime: 1, arguments: ["xcodebuild", Runners.marker]),
                          token: "t", port: 1, runnerKey: "k", log: "/l", readyFile: ready, startedAt: Date(timeIntervalSince1970: 0),
@@ -263,12 +311,14 @@ import XcdevTestSupport
         defer { worktree.remove() }
         let detached = FakeDetachedProcesses(onStart: Self.writesReady)
         var (supervisor, ctx) = try setup(detached: detached)
-        _ = try await supervisor.session(device: nil, in: &ctx)
+        let session = try await supervisor.session(device: nil, in: &ctx)
+        let ready = supervisor.globalPaths.runnerReadyFile(udid: session.udid)
+        #expect(FileManager.default.fileExists(atPath: ready))
         let notes = try await supervisor.stop(device: nil, in: ctx)
         #expect(notes == ["stopped the iphone UI runner"])
         #expect(detached.stops.map(\.signal) == [SIGTERM])
         #expect(Runners.load(ctx.paths.runnerFile(device: "iphone")) == nil)
-        #expect(!FileManager.default.fileExists(atPath: ctx.paths.runnerReadyFile(device: "iphone")))
+        #expect(!FileManager.default.fileExists(atPath: ready))
         #expect(try await supervisor.stop(device: nil, in: ctx).isEmpty)
     }
 }

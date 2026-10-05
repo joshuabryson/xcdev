@@ -22,7 +22,6 @@ public struct RunnerRecord: Codable, Sendable, Equatable {
 
 extension WorktreePaths {
     public func runnerFile(device: String) -> String { stateDirectory + "/ui-runner-\(device).json" }
-    public func runnerReadyFile(device: String) -> String { stateDirectory + "/ui-runner-\(device).ready" }
     public func runnerLog(device: String) -> String { logs + "/ui-runner-\(device).log" }
 
     /// Every runner record in this worktree, sorted.
@@ -30,6 +29,12 @@ extension WorktreePaths {
         ((try? FileManager.default.contentsOfDirectory(atPath: stateDirectory)) ?? [])
             .filter { $0.hasPrefix("ui-runner-") && $0.hasSuffix(".json") }.sorted().map { stateDirectory + "/" + $0 }
     }
+}
+
+extension GlobalPaths {
+    /// Where the runner of the clone `udid` writes its port once it is listening. It is under the cache, where a
+    /// simulator process can always write, and named by udid, which is unique across worktrees.
+    public func runnerReadyFile(udid: String) -> String { cacheDirectory + "/ui-runner/ready/\(udid).json" }
 }
 
 public enum Runners {
@@ -43,9 +48,11 @@ public enum Runners {
         return try? JSONCoding.decoder.decode(RunnerRecord.self, from: data)
     }
 
+    /// Writes the record for its owner only: it holds the token that lets a local process drive the simulator.
     public static func save(_ record: RunnerRecord, to file: String) throws {
         try FileManager.default.createDirectory(atPath: (file as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         try JSONCoding.encoder(pretty: true).encode(record).write(to: URL(fileURLWithPath: file), options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file)
     }
 
     /// Stops the runner with SIGTERM (never SIGINT: xcodebuild lingers for minutes), then removes its record and ready

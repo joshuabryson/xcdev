@@ -33,23 +33,34 @@ public struct RunnerSupervisor: Sendable {
         self.sleep = sleep
     }
 
-    /// How long a start may take: a clone that was already booted answers in seconds; one this command had to boot
-    /// may be doing its first boot, which took over six minutes on a loaded Mac.
-    public static func startTimeout(wasBooted: Bool) -> Duration { wasBooted ? .seconds(120) : .seconds(600) }
+    /// How long a start may take: a warm clone answers in seconds; a cold one may be doing its first boot, which took
+    /// over six minutes on a loaded Mac.
+    public static func startTimeout(warm: Bool) -> Duration { warm ? .seconds(120) : .seconds(600) }
+
+    /// How long after it was created a clone may still be finishing its first boot.
+    static let settlingTime: TimeInterval = 15 * 60
+
+    /// Whether `clone` (as it was before this command) will start a runner quickly: it was already booted, and it was
+    /// created long enough ago to have settled. `xcd run` boots a new clone before the first `xcd ui`, so being booted
+    /// is not enough. No clone yet, or a creation date that can't be read, counts as cold.
+    func isWarm(_ clone: SimDevice?) -> Bool {
+        guard let clone, clone.state == "Booted", let created = clone.created else { return false }
+        return now().timeIntervalSince(created) >= Self.settlingTime
+    }
 
     /// A healthy runner for the device: the one already running, or a new one. `restart` replaces it regardless.
     public func session(device requested: String?, in ctx: inout WorktreeContext, restart: Bool = false) async throws -> RunnerSession {
         let name = try provisioner.deviceName(requested, config: ctx.config)
-        // Whether the clone was already booted decides how long the start may take.
+        // The clone as it is before this command touches it decides how long the start may take.
         let catalog = try? await provisioner.simctl(for: ctx).catalog()
-        let bootedAlready = ctx.state.devices[name].flatMap { catalog?.device(udid: $0.udid)?.state } == "Booted"
+        let warm = isWarm(ctx.state.devices[name].flatMap { catalog?.device(udid: $0.udid) })
         // Clone first and check the platform, so a watch or TV device is rejected without being booted.
         let device = try await provisioner.ensure(name, in: &ctx)
         try Runners.requireIOS(device, name: name)
         _ = try await provisioner.simctl(for: ctx).boot(udid: device.udid)
         let xcode = try await provisioner.ensureXcode(&ctx)
         let target = Target(name: name, udid: device.udid, key: builder.key(for: xcode), developerDir: xcode.developerDir,
-                            paths: ctx.paths, timeout: Self.startTimeout(wasBooted: bootedAlready))
+                            paths: ctx.paths, timeout: Self.startTimeout(warm: warm))
         let lock = Runners.lockPath(globalPaths: globalPaths, worktreeRoot: ctx.location.worktreeRoot, device: name)
         return try await FileLock.withLock(at: lock) { try await attachOrStart(target, xcode: xcode, restart: restart) }
     }
@@ -140,9 +151,12 @@ public struct RunnerSupervisor: Sendable {
 
     func launch(_ target: Target, build: RunnerBuild, restarts: [Date]) throws -> RunnerRecord {
         let token = UUID().uuidString
-        let ready = target.paths.runnerReadyFile(device: target.name)
+        // The runner, a process inside the simulator, writes this file. It goes in xcd's cache, not the worktree: macOS
+        // can deny or prompt for a write into a project under Documents, Desktop, Downloads, or iCloud Drive.
+        let ready = globalPaths.runnerReadyFile(udid: target.udid)
         let log = target.paths.runnerLog(device: target.name)
         try? FileManager.default.removeItem(atPath: ready)
+        try FileManager.default.createDirectory(atPath: (ready as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         // xcodebuild writes a result bundle per run; keep only this clone's latest.
         let results = build.directory + "/results"
         try? FileManager.default.removeItem(atPath: results + "/\(target.udid).xcresult")

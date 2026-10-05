@@ -51,6 +51,12 @@ public struct SimDevice: Codable, Sendable, Equatable {
 
     /// The device's folder, whose creation date is when the device was created or cloned.
     public var deviceDirectory: String? { dataPath.map { ($0 as NSString).deletingLastPathComponent } }
+
+    /// When the device was created or cloned; nil when its folder is unknown or can't be read.
+    public var created: Date? {
+        guard let deviceDirectory else { return nil }
+        return (try? FileManager.default.attributesOfItem(atPath: deviceDirectory))?[.creationDate] as? Date
+    }
 }
 
 public struct SimCatalog: Sendable, Equatable {

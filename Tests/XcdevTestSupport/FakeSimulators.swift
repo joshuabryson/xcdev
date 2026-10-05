@@ -12,7 +12,7 @@ public final class FakeSimulators: Sendable {
         public var runtimeIdentifier: String
         public var state: String
         public var isAvailable = true
-        /// Reported as `dataPath`; defaults to a path that doesn't exist (`/sims/<udid>/data`).
+        /// Reported as `dataPath`; defaults to `<devicesDirectory>/<udid>/data`, which doesn't exist unless a test makes it.
         public var dataPath: String?
         /// Reported as `dataPathSize`.
         public var dataPathSize: Int64 = 1_048_576
@@ -27,8 +27,11 @@ public final class FakeSimulators: Sendable {
 
     private let state: Mutex<State>
     private let baseCatalog: Data
+    /// Where devices without a `dataPath` of their own report their folders.
+    private let devicesDirectory: String
 
-    public init(runner: FakeProcessRunner, catalogJSON: String) throws {
+    public init(runner: FakeProcessRunner, catalogJSON: String, devicesDirectory: String = "/sims") throws {
+        self.devicesDirectory = devicesDirectory
         var object = try JSONSerialization.jsonObject(with: Data(catalogJSON.utf8)) as? [String: Any] ?? [:]
         var initial: [Device] = []
         for (runtime, list) in object["devices"] as? [String: [[String: Any]]] ?? [:] {
@@ -154,7 +157,7 @@ public final class FakeSimulators: Sendable {
         for d in devices {
             grouped[d.runtimeIdentifier, default: []].append([
                 "udid": d.udid, "name": d.name, "state": d.state, "isAvailable": d.isAvailable,
-                "deviceTypeIdentifier": d.typeIdentifier, "dataPath": d.dataPath ?? "/sims/\(d.udid)/data",
+                "deviceTypeIdentifier": d.typeIdentifier, "dataPath": d.dataPath ?? "\(devicesDirectory)/\(d.udid)/data",
                 "dataPathSize": d.dataPathSize,
             ])
         }

@@ -127,9 +127,7 @@ public struct DoctorEnvironment: Sendable {
 
     /// Seconds since `device` was created or cloned (its folder's creation date); nil when unknown.
     public func age(of device: SimDevice) -> TimeInterval? {
-        guard let directory = device.deviceDirectory,
-              let created = (try? FileManager.default.attributesOfItem(atPath: directory))?[.creationDate] as? Date else { return nil }
-        return now.timeIntervalSince(created)
+        device.created.map { now.timeIntervalSince($0) }
     }
 
     /// Whether a `wt create` or `wt remove` of this worktree was running when the snapshot was taken.
