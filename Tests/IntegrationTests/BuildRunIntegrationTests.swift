@@ -10,12 +10,7 @@ struct BuildRunIntegrationTests {
     let runner = SystemProcessRunner()
 
     func iPhoneType() async throws -> String {
-        let catalog = try await SimctlClient(runner: runner, developerDir: nil).catalog()
-        let phone = try #require(catalog.deviceTypes.first { type in
-            type.productFamily == "iPhone"
-                && catalog.runtimes.contains { $0.isAvailable && $0.platform == "iOS" && $0.supports(type) }
-        }, "no iPhone simulator runtime installed")
-        return phone.name
+        try await firstIPhoneType(runner).name
     }
 
     func appProject() async throws -> TempProject {

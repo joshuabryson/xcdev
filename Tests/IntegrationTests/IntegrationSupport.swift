@@ -1,4 +1,5 @@
 import Foundation
+import Testing
 import XcdevTestSupport
 @testable import XcdevKit
 
@@ -29,4 +30,12 @@ func withCleanup(_ project: TempProject, _ body: (Services) async throws -> Void
     }
     project.remove()
     if let failure { throw failure }
+}
+
+/// The first iPhone type an installed iOS runtime supports.
+func firstIPhoneType(_ runner: any ProcessRunning) async throws -> SimDeviceType {
+    let catalog = try await SimctlClient(runner: runner, developerDir: nil).catalog()
+    return try #require(catalog.deviceTypes.first { type in
+        type.productFamily == "iPhone" && catalog.runtimes.contains { $0.isAvailable && $0.platform == "iOS" && $0.supports(type) }
+    }, "no iPhone simulator runtime installed")
 }
