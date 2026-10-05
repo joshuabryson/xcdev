@@ -86,6 +86,7 @@ public struct RunnerFailure: Codable, Sendable, Equatable, Error {
         public static let ambiguous = "element_ambiguous"
         public static let staleRef = "stale_ref"
         public static let waitTimeout = "wait_timeout"
+        public static let appNotForeground = "app_not_foreground"
         public static let badRequest = "bad_request"
         public static let `internal` = "internal"
     }

@@ -12,6 +12,16 @@ import XcdevTestSupport
         TreeBuilderTests.node(9, label: "Allow", frame: ScreenRect(x: 57, y: 457, w: 288, h: 48)),
     ])
 
+    /// The sample app without its keyboard, so taps on the lower half are not covered.
+    static let appWithoutKeyboard = TreeBuilderTests.node(2, label: "SampleApp", frame: screen, [
+        TreeBuilderTests.node(4, frame: screen, [
+            TreeBuilderTests.node(1, frame: screen, [
+                TreeBuilderTests.node(9, id: "signIn", label: "Sign In", frame: ScreenRect(x: 24, y: 700, w: 354, h: 50)),
+                TreeBuilderTests.node(9, id: "far", label: "Far away", frame: ScreenRect(x: 24, y: 3574, w: 100, h: 44)),
+            ]),
+        ]),
+    ])
+
     func make(_ device: FakeDevice = FakeDevice(app: TreeBuilderTests.app, system: home)) -> (RunnerEngine, FakeDevice) {
         (RunnerEngine(device: device), device)
     }
@@ -47,7 +57,7 @@ import XcdevTestSupport
     }
 
     @Test func tapsTheCentreOfTheMatchedElement() throws {
-        let (engine, device) = make()
+        let (engine, device) = make(FakeDevice(app: Self.appWithoutKeyboard, system: Self.home))
         let result = try engine.tap(request(.id("signIn"))).get()
         #expect(device.taps.count == 1 && device.taps[0].x == 201 && device.taps[0].y == 725)
         #expect(result.element?.identifier == "signIn" && result.x == 201 && result.y == 725)
@@ -94,13 +104,134 @@ import XcdevTestSupport
         #expect(disabled.code == RunnerFailure.Code.notHittable && disabled.message.contains("disabled") && device.taps.isEmpty)
     }
 
-    @Test func anAmbiguousTargetListsItsCandidatesWithRefs() {
+    @Test func anAmbiguousTargetListsItsCandidatesWithRefs() throws {
         let row = { (y: Double) in TreeBuilderTests.node(9, label: "Delete", frame: ScreenRect(x: 0, y: y, w: 100, h: 40)) }
-        let (engine, device) = make(FakeDevice(app: TreeBuilderTests.node(2, frame: Self.screen, [row(100), row(200)]), system: Self.home))
+        let (engine, device) = make(FakeDevice(app: TreeBuilderTests.node(2, frame: Self.screen, [row(100), row(200), row(5000)]), system: Self.home))
         guard case .failure(let failure) = engine.tap(request(.label("Delete"))) else { Issue.record("tapped"); return }
-        #expect(failure.code == RunnerFailure.Code.ambiguous && failure.candidates.map(\.ref) == ["e1", "e2"])
+        #expect(failure.code == RunnerFailure.Code.ambiguous && failure.candidates.map(\.ref) == ["e1", "e2", "e3"])
         #expect(device.taps.isEmpty && device.pauses == 0)                 // no polling: waiting won't make it unique
-        #expect((try? engine.tap(request(.ref("e2"))).get()) != nil)       // the candidates' refs work
+        #expect(engine.refs.count == 3)                                    // exactly the candidates, off-screen one included
+        _ = try engine.tap(request(.ref("e2"))).get()
+        #expect(device.taps.count == 1 && device.taps[0].x == 50 && device.taps[0].y == 220)
+    }
+
+    @Test func identicalCandidatesGetTheirOwnRefs() throws {
+        let row = TreeBuilderTests.node(9, label: "Delete", frame: ScreenRect(x: 0, y: 100, w: 100, h: 40))
+        let (engine, _) = make(FakeDevice(app: TreeBuilderTests.node(2, frame: Self.screen, [row, row]), system: Self.home))
+        guard case .failure(let failure) = engine.tap(request(.label("Delete"))) else { Issue.record("tapped"); return }
+        #expect(failure.candidates.map(\.ref) == ["e1", "e2"] && engine.refs.count == 2 && Set(engine.refs.values).count == 2)
+    }
+
+    @Test func tapAndWaitIgnoreSpringboardWhenTheAppIsNotInFront() {
+        let (engine, device) = make()
+        device.state = .notRunning
+        guard case .failure(let crashed) = engine.tap(request(.label("Settings"), timeout: 0.5)) else { Issue.record("tapped"); return }
+        #expect(crashed.code == RunnerFailure.Code.appNotForeground && crashed.message.contains("not running") && device.taps.isEmpty)
+        #expect(device.pauses >= 4)                                         // kept polling: the app may be coming forward
+        device.state = .background
+        guard case .failure(let away) = engine.wait(request(.id("signIn"), timeout: 0.3, gone: true)) else { Issue.record("met"); return }
+        #expect(away.code == RunnerFailure.Code.appNotForeground && away.message.contains("background"))
+        guard case .failure(let never) = engine.wait(request(.id("signIn"), timeout: 0.3)) else { Issue.record("met"); return }
+        #expect(never.code == RunnerFailure.Code.appNotForeground)
+        // The app comes forward on the second poll.
+        device.pauses = 0
+        device.state = .background
+        device.onPause = { $0.state = .foreground }
+        #expect((try? engine.wait(request(.id("signIn"), timeout: 1)).get())?.element?.identifier == "signIn")
+        // A system target still reads Springboard.
+        device.state = .notRunning
+        let home = TargetRequest(bundleId: nil, system: true, target: .label("Settings"), role: nil, index: nil, timeout: 1, gone: false)
+        #expect((try? engine.tap(home).get())?.element?.label == "Settings")
+    }
+
+    @Test func anElementUnderTheKeyboardOrAnAlertIsNotTapped() throws {
+        let (engine, device) = make()                                       // signIn's centre is inside the keyboard
+        guard case .failure(let keyboard) = engine.tap(request(.id("signIn"), timeout: 0.3)) else { Issue.record("tapped"); return }
+        #expect(keyboard.code == RunnerFailure.Code.notHittable && keyboard.message.contains("keyboard") && keyboard.frame?.y == 700)
+        #expect(device.taps.isEmpty)
+        let under = TreeBuilderTests.node(9, id: "under", label: "Under", frame: ScreenRect(x: 100, y: 400, w: 100, h: 40))
+        device.app = TreeBuilderTests.node(2, frame: Self.screen, [under])
+        device.alert = Self.alert
+        guard case .failure(let covered) = engine.tap(request(.id("under"), timeout: 0.3)) else { Issue.record("tapped"); return }
+        #expect(covered.code == RunnerFailure.Code.notHittable && covered.message.contains("system alert") && device.taps.isEmpty)
+        _ = try engine.tap(request(.label("Allow"))).get()                  // the alert's own button
+        #expect(device.taps.count == 1 && device.taps[0].y == 481)
+        // wait is about presence: a covered element is still there.
+        #expect(try engine.wait(request(.id("under"))).get().element?.identifier == "under")
+    }
+
+    @Test func anElementWithNoSizeIsReportedAsSuch() {
+        let (engine, device) = make()
+        device.app = TreeBuilderTests.node(2, frame: Self.screen, [
+            TreeBuilderTests.node(9, id: "flat", label: "Flat", frame: ScreenRect(x: 10, y: 10, w: 0, h: 0))])
+        guard case .failure(let failure) = engine.tap(request(.id("flat"), timeout: 0.2)) else { Issue.record("tapped"); return }
+        #expect(failure.code == RunnerFailure.Code.notHittable && failure.message.contains("no size"))
+    }
+
+    @Test func aNonFiniteFrameBecomesAnEmptyOne() throws {
+        let bad = TreeBuilderTests.node(9, id: "bad", label: "Bad", frame: ScreenRect(x: .infinity, y: .nan, w: -.infinity, h: 40))
+        var nodes: [FlatNode] = []
+        TreeBuilder.flatten(TreeBuilderTests.node(2, frame: Self.screen, [bad]), source: .app, into: &nodes)
+        #expect(nodes[1].frame == ScreenRect(x: 0, y: 0, w: 0, h: 40) && nodes[1].frame.isEmpty)
+        let (engine, _) = make(FakeDevice(app: TreeBuilderTests.node(2, frame: Self.screen, [bad]), system: Self.home))
+        let tree = try engine.tree(TreeRequest(bundleId: "b", system: false, all: true)).get()
+        #expect(tree.elements.count == 2)
+        let reply = engine.handle(path: "/tree", body: Data(#"{"bundleId":"b","system":false,"all":true}"#.utf8))
+        #expect(try JSONDecoder().decode(RunnerReply<TreeResult>.self, from: reply).ok)
+    }
+
+    @Test func theTimeoutIsClamped() {
+        let (engine, device) = make()
+        _ = engine.tap(request(.id("never"), timeout: 1e9))
+        #expect(device.pauses >= 1100 && device.pauses <= 1200)             // 120 s at 0.1 s
+        device.pauses = 0
+        _ = engine.tap(request(.id("never"), timeout: .nan))
+        #expect(device.pauses == 0)
+        _ = engine.wait(request(.id("never"), timeout: -5))
+        #expect(device.pauses == 0)
+    }
+
+    @Test func waitingForAGoneRefAndForAPoint() throws {
+        let (engine, _) = make()
+        guard case .failure(let unknown) = engine.wait(request(.ref("e9"), timeout: 0.2, gone: true)) else { Issue.record("met"); return }
+        #expect(unknown.code == RunnerFailure.Code.staleRef)                // never issued: unknown, not gone
+        guard case .failure(let point) = engine.wait(request(.point(x: 1, y: 2))) else { Issue.record("met"); return }
+        #expect(point.code == RunnerFailure.Code.badRequest && point.message.contains("point"))
+    }
+
+    @Test func aKnownRefWhoseElementWentIsGone() throws {
+        let (engine, device) = make()
+        _ = try engine.tree(TreeRequest(bundleId: "b", system: false, all: false)).get()
+        device.app = TreeBuilderTests.node(2, frame: Self.screen, [])
+        #expect(try engine.wait(request(.ref("e1"), gone: true)).get().element == nil)
+    }
+
+    @Test func requestsSentThroughHandleRoundTrip() throws {
+        let (engine, device) = make(FakeDevice(app: Self.appWithoutKeyboard, system: Self.home))
+        func send(_ path: String, _ target: TargetSpec, gone: Bool = false) throws -> Data {
+            let body = try JSONEncoder().encode(request(target, timeout: 0.2, gone: gone))
+            return engine.handle(path: path, body: body)
+        }
+        for target in [TargetSpec.id("signIn"), .label("Sign In"), .labelContains("sign")] {
+            let reply = try JSONDecoder().decode(RunnerReply<ActionResult>.self, from: send("/tap", target))
+            #expect(reply.ok && reply.result?.x == 201 && reply.result?.y == 725)
+        }
+        let point = try JSONDecoder().decode(RunnerReply<ActionResult>.self, from: send("/tap", .point(x: 5, y: 6)))
+        #expect(point.ok && point.result?.x == 5 && device.taps.count == 4)
+        _ = try JSONDecoder().decode(RunnerReply<TreeResult>.self, from: engine.handle(path: "/tree", body: Data(#"{"bundleId":"b","system":false,"all":false}"#.utf8)))
+        let ref = try JSONDecoder().decode(RunnerReply<ActionResult>.self, from: send("/tap", .ref("e1")))
+        #expect(ref.ok)
+        let waited = try JSONDecoder().decode(RunnerReply<ActionResult>.self, from: send("/wait", .id("signIn")))
+        #expect(waited.ok && waited.result?.element?.identifier == "signIn")
+        let missing = try JSONDecoder().decode(RunnerReply<ActionResult>.self, from: send("/wait", .id("nope")))
+        #expect(!missing.ok && missing.failure?.code == RunnerFailure.Code.waitTimeout && missing.result == nil)
+        let notPoint = try JSONDecoder().decode(RunnerReply<ActionResult>.self, from: send("/wait", .point(x: 1, y: 1)))
+        #expect(notPoint.failure?.code == RunnerFailure.Code.badRequest)
+    }
+
+    @Test func theEncodeFallbackIsAValidFailureEnvelope() throws {
+        let reply = try JSONDecoder().decode(RunnerReply<TreeResult>.self, from: Data(RunnerEngine.encodeFallback.utf8))
+        #expect(!reply.ok && reply.failure?.code == RunnerFailure.Code.internal && reply.failure?.message.isEmpty == false)
     }
 
     @Test func waitReturnsWhenTheElementAppearsOrGoes() throws {

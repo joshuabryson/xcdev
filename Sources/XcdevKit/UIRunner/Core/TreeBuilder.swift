@@ -60,7 +60,7 @@ public enum TreeBuilder {
         let value = node.placeholder != nil && node.value == node.placeholder ? "" : node.value
         let index = nodes.count
         nodes.append(FlatNode(role: role, identifier: node.identifier, label: node.label, value: value, placeholder: node.placeholder,
-                              frame: node.frame, enabled: node.enabled, selected: node.selected, depth: depth, source: source,
+                              frame: finite(node.frame), enabled: node.enabled, selected: node.selected, depth: depth, source: source,
                               parent: parent, signature: RefSignature(role: role, identifier: node.identifier, label: node.label, path: path, source: source),
                               inKeyboard: inKeyboard, window: window))
         var seen: [Int: Int] = [:]
@@ -70,6 +70,12 @@ public enum TreeBuilder {
             visit(child, depth: depth + 1, parent: index, path: path + [child.elementType, position], inKeyboard: inKeyboard || role == "keyboard",
                   window: window, windows: &windows, source: source, into: &nodes)
         }
+    }
+
+    /// A frame with every non-finite component replaced by 0, so it is empty or off screen and can be encoded.
+    static func finite(_ frame: ScreenRect) -> ScreenRect {
+        func clean(_ value: Double) -> Double { value.isFinite ? value : 0 }
+        return ScreenRect(x: clean(frame.x), y: clean(frame.y), w: clean(frame.w), h: clean(frame.h))
     }
 
     /// The frame isn't empty and its centre is on the screen.
