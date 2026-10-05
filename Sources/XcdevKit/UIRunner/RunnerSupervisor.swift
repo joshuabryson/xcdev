@@ -9,6 +9,8 @@ public struct RunnerSession: Sendable, Equatable {
     public let token: String
     /// True when this command had to replace a runner that had stopped working.
     public let restarted: Bool
+
+    public var endpoint: RunnerEndpoint { RunnerEndpoint(port: port, token: token) }
 }
 
 /// Starts, finds, checks, restarts, and stops the UI runner of a worktree's clone.
@@ -117,9 +119,9 @@ public struct RunnerSupervisor: Sendable {
     /// The record's process still runs, it is this clone's and this Xcode's runner, and it answers `/health`. A live
     /// xcodebuild whose runner doesn't answer is not healthy: xcodebuild can outlive its runner by minutes.
     func healthy(_ record: RunnerRecord, udid: String, key: String) async -> Bool {
-        guard let port = record.port, record.udid == udid, record.runnerKey == key,
+        guard let endpoint = record.endpoint, record.udid == udid, record.runnerKey == key,
               detached.inspector.isRunning(record.process, marker: Runners.marker) else { return false }
-        return await client.health(port: port, token: record.token) != nil
+        return await client.health(endpoint) != nil
     }
 
     func start(_ target: Target, build: RunnerBuild, restarts: [Date]) async throws -> RunnerRecord {
@@ -176,7 +178,7 @@ public struct RunnerSupervisor: Sendable {
     func waitUntilReady(_ record: RunnerRecord, timeout: Duration) async throws -> RunnerRecord? {
         let attempts = max(1, Int((DurationText.seconds(timeout) * 5).rounded()))
         for _ in 0..<attempts {
-            if let port = Self.port(in: record.readyFile), await client.health(port: port, token: record.token) != nil {
+            if let port = Self.port(in: record.readyFile), await client.health(RunnerEndpoint(port: port, token: record.token)) != nil {
                 var ready = record
                 ready.port = port
                 return ready

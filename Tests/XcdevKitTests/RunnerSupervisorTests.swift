@@ -92,6 +92,24 @@ import XcdevTestSupport
         #expect(try mode() == 0o600)
     }
 
+    /// The record is created with its final mode and moved into place, so no other user can ever read the token.
+    @Test func aRecordSavedOverAReadableFileIsPrivateAndLeavesNothingBehind() throws {
+        defer { worktree.remove() }
+        let folder = worktree.root + "/state"
+        let file = folder + "/ui-runner-iphone.json"
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        #expect(FileManager.default.createFile(atPath: file, contents: Data("old".utf8), attributes: [.posixPermissions: 0o644]))
+        let record = RunnerRecord(device: "iphone", udid: "U", process: ProcessIdentity(pid: 7, startTime: 1, arguments: ["xcodebuild"]),
+                                  token: "secret", port: 40000, runnerKey: "k", log: "/l", readyFile: "/r",
+                                  startedAt: Date(timeIntervalSince1970: 0), restarts: [], failed: false)
+        try Runners.save(record, to: file)
+        #expect((try FileManager.default.attributesOfItem(atPath: file)[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+        #expect(Runners.load(file) == record && record.endpoint == RunnerEndpoint(port: 40000, token: "secret"))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: folder) == ["ui-runner-iphone.json"])
+        // A folder that can't be written to is an error, not a silent loss.
+        #expect(throws: (any Error).self) { try Runners.save(record, to: "/dev/null/nope/ui-runner-iphone.json") }
+    }
+
     @Test func attachesToAHealthyRunner() async throws {
         defer { worktree.remove() }
         let detached = FakeDetachedProcesses(onStart: Self.writesReady)

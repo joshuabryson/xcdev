@@ -114,7 +114,7 @@ public struct UIService: Sendable {
         // The runner keeps looking for `timeout`; give the HTTP request that long plus time to snapshot and reply.
         let httpTimeout = options.effectiveTimeout + .seconds(30)
         func call(_ session: RunnerSession) async throws -> Result<Payload, RunnerFailure> {
-            try await client.call(exchange.path, exchange.request, port: session.port, token: session.token, timeout: httpTimeout, as: payload)
+            try await client.call(exchange.path, exchange.request, to: session.endpoint, timeout: httpTimeout)
         }
         let session = try await supervisor.session(device: options.device, in: &ctx)
         do {

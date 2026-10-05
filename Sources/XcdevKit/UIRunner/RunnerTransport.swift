@@ -9,9 +9,20 @@ public struct RunnerUnreachable: Error, Sendable, Equatable {
     }
 }
 
+/// Where a clone's runner listens on 127.0.0.1, and the token it expects.
+public struct RunnerEndpoint: Sendable, Equatable {
+    public let port: Int
+    public let token: String
+
+    public init(port: Int, token: String) {
+        self.port = port
+        self.token = token
+    }
+}
+
 public protocol RunnerTransport: Sendable {
     /// One HTTP request to the runner on 127.0.0.1. GET when `body` is nil, else POST. Throws `RunnerUnreachable`.
-    func send(port: Int, token: String, path: String, body: Data?, timeout: Duration) async throws -> (status: Int, body: Data)
+    func send(to endpoint: RunnerEndpoint, path: String, body: Data?, timeout: Duration) async throws -> (status: Int, body: Data)
 }
 
 public struct URLSessionRunnerTransport: RunnerTransport {
@@ -19,13 +30,13 @@ public struct URLSessionRunnerTransport: RunnerTransport {
         // Stateless: each request makes its own session.
     }
 
-    public func send(port: Int, token: String, path: String, body: Data?, timeout: Duration) async throws -> (status: Int, body: Data) {
-        guard let url = URL(string: "http://127.0.0.1:\(port)\(path)") else { throw RunnerUnreachable(reason: "bad address") }
+    public func send(to endpoint: RunnerEndpoint, path: String, body: Data?, timeout: Duration) async throws -> (status: Int, body: Data) {
+        guard let url = URL(string: "http://127.0.0.1:\(endpoint.port)\(path)") else { throw RunnerUnreachable(reason: "bad address") }
         var request = URLRequest(url: url)
         request.httpMethod = body == nil ? "GET" : "POST"
         request.httpBody = body
         request.timeoutInterval = DurationText.seconds(timeout)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(endpoint.token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let configuration = URLSessionConfiguration.ephemeral
         configuration.connectionProxyDictionary = [:]            // loopback: never through a proxy
@@ -48,20 +59,20 @@ public struct RunnerClient: Sendable {
     }
 
     /// The runner's health, or nil when it doesn't answer, rejects the token, or speaks another protocol version.
-    public func health(port: Int, token: String) async -> HealthInfo? {
-        guard let (status, body) = try? await transport.send(port: port, token: token, path: RunnerProtocol.healthPath, body: nil,
-                                                             timeout: .seconds(3)), status == 200,
+    public func health(_ endpoint: RunnerEndpoint) async -> HealthInfo? {
+        guard let (status, body) = try? await transport.send(to: endpoint, path: RunnerProtocol.healthPath, body: nil, timeout: .seconds(3)),
+              status == 200,
               let reply = try? JSONDecoder().decode(RunnerReply<HealthInfo>.self, from: body),
               let info = reply.result, info.protocolVersion == RunnerProtocol.version else { return nil }
         return info
     }
 
-    /// Sends `request` and decodes the runner's reply. Throws `RunnerUnreachable` when the runner doesn't answer, and
-    /// `runner_failed` when it answers with something xcd can't use (a refusal, or a body it can't read).
-    public func call<Request: Encodable, Payload: Codable>(_ path: String, _ request: Request, port: Int, token: String,
-                                                           timeout: Duration, as payload: Payload.Type) async throws -> Result<Payload, RunnerFailure> {
-        let (status, body) = try await transport.send(port: port, token: token, path: path, body: try JSONEncoder().encode(request),
-                                                      timeout: timeout)
+    /// Sends `request` and decodes the runner's reply as the payload the caller expects. Throws `RunnerUnreachable`
+    /// when the runner doesn't answer, and `runner_failed` when it answers with something xcd can't use (a refusal,
+    /// or a body it can't read).
+    public func call<Request: Encodable, Payload: Codable>(_ path: String, _ request: Request, to endpoint: RunnerEndpoint,
+                                                           timeout: Duration) async throws -> Result<Payload, RunnerFailure> {
+        let (status, body) = try await transport.send(to: endpoint, path: path, body: try JSONEncoder().encode(request), timeout: timeout)
         switch status {
         case 200:
             guard let reply = try? JSONDecoder().decode(RunnerReply<Payload>.self, from: body) else {

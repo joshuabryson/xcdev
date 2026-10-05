@@ -7,15 +7,19 @@ public final class FakeRunnerTransport: RunnerTransport {
     public typealias Handler = @Sendable (_ path: String, _ body: Data?) throws -> (status: Int, body: Data)
 
     private let state: Mutex<(handler: Handler, calls: [String])>
+    private let allowed = Mutex<[Duration]>([])
 
     public init(_ handler: @escaping Handler = FakeRunnerTransport.healthy) {
         state = Mutex((handler, []))
     }
 
     public var calls: [String] { state.withLock { $0.calls } }
+    /// The timeout of each request, in order.
+    public var timeouts: [Duration] { allowed.withLock { $0 } }
     public func setHandler(_ handler: @escaping Handler) { state.withLock { $0.handler = handler } }
 
-    public func send(port: Int, token: String, path: String, body: Data?, timeout: Duration) async throws -> (status: Int, body: Data) {
+    public func send(to endpoint: RunnerEndpoint, path: String, body: Data?, timeout: Duration) async throws -> (status: Int, body: Data) {
+        allowed.withLock { $0.append(timeout) }
         let handler = state.withLock { state -> Handler in
             state.calls.append(path)
             return state.handler

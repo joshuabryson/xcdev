@@ -18,6 +18,9 @@ public struct RunnerRecord: Codable, Sendable, Equatable {
     public var restarts: [Date]
     /// Set when it restarted twice within a minute; cleared by `xcd ui stop`.
     public var failed: Bool
+
+    /// Where to reach it; nil until it has a port.
+    public var endpoint: RunnerEndpoint? { port.map { RunnerEndpoint(port: $0, token: token) } }
 }
 
 extension WorktreePaths {
@@ -48,11 +51,18 @@ public enum Runners {
         return try? JSONCoding.decoder.decode(RunnerRecord.self, from: data)
     }
 
-    /// Writes the record for its owner only: it holds the token that lets a local process drive the simulator.
+    /// Writes the record for its owner only: it holds the token that lets a local process drive the simulator. The
+    /// file is created with that mode and then moved into place, so it is never readable by anyone else.
     public static func save(_ record: RunnerRecord, to file: String) throws {
-        try FileManager.default.createDirectory(atPath: (file as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        try JSONCoding.encoder(pretty: true).encode(record).write(to: URL(fileURLWithPath: file), options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file)
+        let files = FileManager.default
+        try files.createDirectory(atPath: (file as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        let data = try JSONCoding.encoder(pretty: true).encode(record)
+        let temporary = file + ".\(UUID().uuidString).tmp"
+        guard files.createFile(atPath: temporary, contents: data, attributes: [.posixPermissions: 0o600]), rename(temporary, file) == 0 else {
+            let reason = String(cString: strerror(errno))
+            try? files.removeItem(atPath: temporary)
+            throw XcdError(.internalError, "could not write \(file): \(reason)")
+        }
     }
 
     /// Stops the runner with SIGTERM (never SIGINT: xcodebuild lingers for minutes), then removes its record and ready

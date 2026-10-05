@@ -70,11 +70,11 @@ struct UIRunnerIntegrationTests {
             let session = try await svc.runners.session(device: nil, in: &ctx)
             let transport = URLSessionRunnerTransport()
             for (path, body) in [("/nope", "{}"), ("/tap", "not json"), ("/tap", "{}"), ("/tree", "[1,2,3]")] {
-                let reply = try await transport.send(port: session.port, token: session.token, path: path, body: Data(body.utf8), timeout: .seconds(20))
+                let reply = try await transport.send(to: session.endpoint, path: path, body: Data(body.utf8), timeout: .seconds(20))
                 let text = String(decoding: reply.body, as: UTF8.self)
                 #expect(reply.status == 200 && text.contains(#""ok":false"#), "\(path) \(body): HTTP \(reply.status) \(text)")
             }
-            let rejected = try await transport.send(port: session.port, token: "wrong", path: "/health", body: nil, timeout: .seconds(20))
+            let rejected = try await transport.send(to: RunnerEndpoint(port: session.port, token: "wrong"), path: "/health", body: nil, timeout: .seconds(20))
             #expect(rejected.status == 401)
             var other = options
             other.bundle = "com.example.notinstalled"
@@ -82,7 +82,7 @@ struct UIRunnerIntegrationTests {
             // A well-formed request that matches nothing is an ordinary failure, not a runner problem.
             let unmatched = await #expect(throws: XcdError.self) { _ = try await svc.ui.tap("id:nope", options, in: &ctx) }
             #expect(unmatched?.code == .elementNotFound, "\(String(describing: unmatched))")
-            #expect(await svc.runners.client.health(port: session.port, token: session.token)?.rolesVerified == true)
+            #expect(await svc.runners.client.health(session.endpoint)?.rolesVerified == true)
             let again = try await svc.runners.session(device: nil, in: &ctx)
             #expect(again.token == session.token && again.port == session.port && !again.restarted)   // same runner, never restarted
             #expect(try await svc.ui.tree(all: false, options, in: &ctx).tree.state == "foreground")

@@ -26,8 +26,8 @@ public struct StaleUIRunnersCheck: DoctorCheck {
     }
 
     func answers(_ record: RunnerRecord, _ env: DoctorEnvironment) async -> Bool {
-        guard let port = record.port else { return false }
-        return await env.runnerClient.health(port: port, token: record.token) != nil
+        guard let endpoint = record.endpoint else { return false }
+        return await env.runnerClient.health(endpoint) != nil
     }
 
     public func detect(_ env: DoctorEnvironment) async -> [DoctorProblem] {

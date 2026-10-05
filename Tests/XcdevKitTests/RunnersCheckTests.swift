@@ -52,9 +52,9 @@ extension FakeProcessRunner {
     struct PortTransport: RunnerTransport {
         let healthyPort: Int
         let healthy: FakeRunnerTransport
-        func send(port: Int, token: String, path: String, body: Data?, timeout: Duration) async throws -> (status: Int, body: Data) {
-            guard port == healthyPort else { throw RunnerUnreachable(reason: "refused") }
-            return try await healthy.send(port: port, token: token, path: path, body: body, timeout: timeout)
+        func send(to endpoint: RunnerEndpoint, path: String, body: Data?, timeout: Duration) async throws -> (status: Int, body: Data) {
+            guard endpoint.port == healthyPort else { throw RunnerUnreachable(reason: "refused") }
+            return try await healthy.send(to: endpoint, path: path, body: body, timeout: timeout)
         }
     }
 
