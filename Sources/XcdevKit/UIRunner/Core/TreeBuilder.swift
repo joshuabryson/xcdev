@@ -112,13 +112,37 @@ public enum TreeBuilder {
         return false
     }
 
-    /// Indices of the elements `xcd ui tree` shows. With `all`, every element. By default: on screen, not in the
-    /// keyboard, and either interactive or a non-container with something to aim at (`isWorthShowing`).
+    /// The identifier UIKit gives the view that holds the place of the keyboard in the app's own window.
+    static let inputViewIdentifier = "inputView"
+
+    /// Index of the keyboard's outermost container that is shorter than the screen: the keyboard together with the
+    /// bars above and below its keys. The keyboard itself when it has no such container; nil when no keyboard is on screen.
+    public static func keyboardContainer(in nodes: [FlatNode], screen: ScreenRect) -> Int? {
+        guard var container = nodes.firstIndex(where: { $0.role == "keyboard" && isOnScreen($0, screen: screen) }) else { return nil }
+        while let parent = nodes[container].parent, nodes[parent].frame.h < screen.h { container = parent }
+        return container
+    }
+
+    /// Whether `nodes[index]` is `ancestor` or inside it.
+    static func isInside(_ index: Int, _ ancestor: Int, in nodes: [FlatNode]) -> Bool {
+        var current: Int? = index
+        while let i = current {
+            if i == ancestor { return true }
+            current = nodes[i].parent
+        }
+        return false
+    }
+
+    /// Indices of the elements `xcd ui tree` shows. With `all`, every element. By default: on screen, not part of the
+    /// keyboard or its bars, and either interactive or a non-container with something to aim at (`isWorthShowing`).
     public static func displayed(_ nodes: [FlatNode], screen: ScreenRect, all: Bool) -> [Int] {
         if all { return Array(nodes.indices) }
+        let keyboard = keyboardContainer(in: nodes, screen: screen)
         return nodes.indices.filter { index in
             let node = nodes[index]
             guard isOnScreen(node, screen: screen), !node.inKeyboard, node.role != "keyboard" else { return false }
+            if node.identifier == inputViewIdentifier && !node.hasText { return false }
+            if let keyboard, isInside(index, keyboard, in: nodes) { return false }
             if node.isInteractive { return true }
             return !ElementRole.structural.contains(node.role) && isWorthShowing(index, in: nodes)
         }

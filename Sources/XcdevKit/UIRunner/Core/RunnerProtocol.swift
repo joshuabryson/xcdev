@@ -2,11 +2,17 @@ import Foundation
 
 public enum RunnerProtocol {
     /// Bumped when a request or result changes shape; xcd restarts a runner that reports another version.
-    public static let version = 1
+    public static let version = 2
     public static let healthPath = "/health"
     public static let treePath = "/tree"
     public static let tapPath = "/tap"
     public static let waitPath = "/wait"
+    public static let longPressPath = "/longpress"
+    public static let swipePath = "/swipe"
+    public static let typePath = "/type"
+    public static let buttonPath = "/button"
+    public static let rotatePath = "/rotate"
+    public static let pasteboardPath = "/pasteboard"
 }
 
 public struct HealthInfo: Codable, Sendable, Equatable {
@@ -37,7 +43,7 @@ public struct TreeRequest: Codable, Sendable, Equatable {
     }
 }
 
-/// A tap or a wait.
+/// A tap, a long-press, or a wait.
 public struct TargetRequest: Codable, Sendable, Equatable {
     public var bundleId: String?
     public var system: Bool
@@ -48,6 +54,10 @@ public struct TargetRequest: Codable, Sendable, Equatable {
     public var timeout: Double
     /// For a wait: wait for the element to be gone.
     public var gone: Bool
+    /// For a long-press: seconds to hold. Nil is one second.
+    public var duration: Double?
+    /// For a tap or a long-press: include the tree as it is afterwards. Nil is false.
+    public var tree: Bool?
 
     public init(bundleId: String?, system: Bool, target: TargetSpec, role: String?, index: Int?, timeout: Double, gone: Bool) {
         self.bundleId = bundleId
@@ -77,6 +87,13 @@ public struct ActionResult: Codable, Sendable, Equatable {
     public var x: Double?
     public var y: Double?
     public var ms: Int
+    /// Where a swipe ended.
+    public var toX: Double?
+    public var toY: Double?
+    /// How text was entered: "keyboard" or "paste".
+    public var method: String?
+    /// The tree after the action, when the request asked for it and it could be read.
+    public var tree: TreeResult?
 }
 
 public struct RunnerFailure: Codable, Sendable, Equatable, Error {
@@ -87,6 +104,9 @@ public struct RunnerFailure: Codable, Sendable, Equatable, Error {
         public static let staleRef = "stale_ref"
         public static let waitTimeout = "wait_timeout"
         public static let appNotForeground = "app_not_foreground"
+        public static let appCrashed = "app_crashed"
+        /// The device can't do what was asked: it has no such hardware button.
+        public static let unsupported = "unsupported"
         public static let badRequest = "bad_request"
         public static let `internal` = "internal"
     }

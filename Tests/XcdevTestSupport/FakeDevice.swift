@@ -1,7 +1,7 @@
 import Foundation
 import XcdevKit
 
-/// A `DeviceDriving` for unit tests: fixed snapshots, a clock that advances only when the engine pauses, recorded taps.
+/// A `DeviceDriving` for unit tests: fixed snapshots, a clock that advances only when the engine pauses, recorded gestures.
 public final class FakeDevice: DeviceDriving {
     public var state: AppRunState = .foreground
     public var app: SnapshotNode?
@@ -15,6 +15,17 @@ public final class FakeDevice: DeviceDriving {
     public var failSnapshots = false
     /// How many of the next snapshots throw before they succeed again.
     public var snapshotsToFail = 0
+
+    /// Every gesture, in order, e.g. "tap 201,725".
+    public var events: [String] = []
+    /// Makes every gesture throw.
+    public var failGestures = false
+    /// Runs after each gesture (e.g. to make the app quit, or the keyboard appear).
+    public var onGesture: ((FakeDevice) -> Void)?
+
+    public struct GestureFailure: Error, CustomStringConvertible {
+        public var description: String { "gesture failed" }
+    }
 
     public init(app: SnapshotNode?, system: SnapshotNode) {
         self.app = app
@@ -49,7 +60,21 @@ public final class FakeDevice: DeviceDriving {
     public func systemAlert() -> SnapshotNode? { alert }
     public var scale: Double { 3 }
     public var orientation: String { "portrait" }
-    public func tap(x: Double, y: Double) throws { taps.append((x, y)) }
+    public func tap(x: Double, y: Double) throws {
+        try gesture("tap \(Self.number(x)),\(Self.number(y))")
+        taps.append((x, y))
+    }
+
+    /// "201" for a whole number, else one decimal.
+    static func number(_ value: Double) -> String {
+        value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
+    }
+
+    private func gesture(_ event: String) throws {
+        if failGestures { throw GestureFailure() }
+        events.append(event)
+        onGesture?(self)
+    }
 
     public func pause(_ seconds: Double) {
         clock += seconds

@@ -66,7 +66,16 @@ final class XCUIDriver: DeviceDriving {
         base.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x - Double(origin.x), dy: y - Double(origin.y))).tap()
     }
 
-    func pause(_ seconds: Double) { Thread.sleep(forTimeInterval: seconds) }
+    /// Waits by running the main run loop, not by sleeping. XCUITest learns that an app changed state through the run
+    /// loop, so a sleeping thread keeps seeing the old state for the whole request (seen: an app sent to the
+    /// background by Home stayed "in front" through two seconds of sleeping, and its snapshot then hung).
+    func pause(_ seconds: Double) {
+        let end = now() + seconds
+        while now() < end {
+            // With nothing to wait on, the run loop returns at once: sleep a little so this doesn't spin.
+            if CFRunLoopRunInMode(.defaultMode, end - now(), false) == .finished { Thread.sleep(forTimeInterval: 0.01) }
+        }
+    }
 
     /// Monotonic, so a clock change can't stretch or cut a wait.
     func now() -> Double { ProcessInfo.processInfo.systemUptime }

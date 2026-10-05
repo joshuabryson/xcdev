@@ -75,9 +75,9 @@ public final class RunnerEngine {
         return RunnerFailure(code: RunnerFailure.Code.appNotForeground, message: what)
     }
 
-    /// The keyboard, when one is on screen.
-    func keyboard(in scene: Scene) -> FlatNode? {
-        scene.nodes.first { $0.role == "keyboard" && TreeBuilder.isOnScreen($0, screen: scene.screen) }
+    /// The part of the screen the keyboard covers, with the bars above and below its keys; nil when no keyboard is up.
+    func keyboardArea(in scene: Scene) -> ScreenRect? {
+        TreeBuilder.keyboardContainer(in: scene.nodes, screen: scene.screen).map { scene.nodes[$0].frame }
     }
 
     /// Why a tap on `node` would not reach it: a system alert is up, or the keyboard is over it. Only app elements can be
@@ -85,8 +85,8 @@ public final class RunnerEngine {
     func coveredBy(_ node: FlatNode, in scene: Scene) -> String? {
         guard node.source == .app else { return nil }
         if scene.alert != nil { return "the element is covered by a system alert" }
-        if !node.inKeyboard, node.role != "keyboard", let keyboard = keyboard(in: scene),
-           keyboard.frame.contains(x: node.frame.midX, y: node.frame.midY) {
+        if !node.inKeyboard, node.role != "keyboard", let keyboard = keyboardArea(in: scene),
+           keyboard.contains(x: node.frame.midX, y: node.frame.midY) {
             return "the element is covered by the keyboard"
         }
         return nil
@@ -131,7 +131,7 @@ public final class RunnerEngine {
         do {
             let scene = try readScene(bundleId: request.bundleId, system: request.system)
             return .success(TreeResult(bundleId: request.bundleId, state: scene.state, screen: scene.screen, scale: device.scale,
-                                       orientation: device.orientation, keyboard: keyboard(in: scene) != nil,
+                                       orientation: device.orientation, keyboard: keyboardArea(in: scene) != nil,
                                        elements: elements(of: scene, all: request.all)))
         } catch {
             return .failure(RunnerFailure(code: RunnerFailure.Code.internal, message: "could not read the screen: \(error)"))
@@ -145,70 +145,29 @@ public final class RunnerEngine {
         case retry(RunnerFailure)
     }
 
-    /// A tap or a wait must say where to look: an app, or the system. Without either it would read the Home Screen.
-    func refusal(_ request: TargetRequest) -> RunnerFailure? {
-        guard !request.system, request.bundleId == nil else { return nil }
-        return RunnerFailure(code: RunnerFailure.Code.badRequest, message: "the request names no app and is not for the system")
-    }
-
-    /// Looks at the screen every `pollInterval` until `attempt` settles or the request's timeout passes; the last look's
-    /// failure is then the answer. A snapshot that throws is one failed look, not the end: the screen may be changing.
-    func poll(_ request: TargetRequest, what: String, attempt: (Scene, _ elapsedMs: () -> Int) -> Attempt) -> Result<ActionResult, RunnerFailure> {
+    /// Looks at the screen every `pollInterval` until `attempt` settles or the scope's timeout passes; the last look's
+    /// failure is then the answer. A snapshot that throws is one failed look, not the end: the screen may be changing,
+    /// and what the last look that worked said is a better answer than the snapshot's error.
+    func poll(_ scope: ActionScope, what: String, attempt: (Scene, _ elapsedMs: () -> Int) -> Attempt) -> Result<ActionResult, RunnerFailure> {
         let start = device.now()
-        let timeout = Self.clamped(request.timeout)
+        let timeout = Self.clamped(scope.timeout)
         let elapsedMs = { Int((self.device.now() - start) * 1000) }
+        var answer: RunnerFailure?
         while true {
             let outcome: Attempt
             do {
-                outcome = attempt(try readScene(bundleId: request.bundleId, system: request.system, forAction: true), elapsedMs)
+                outcome = attempt(try readScene(bundleId: scope.bundleId, system: scope.system, forAction: true), elapsedMs)
             } catch {
-                outcome = .retry(RunnerFailure(code: RunnerFailure.Code.internal, message: "the \(what) failed: \(error)"))
+                outcome = .retry(answer ?? RunnerFailure(code: RunnerFailure.Code.internal, message: "the \(what) failed: \(error)"))
             }
             switch outcome {
             case .done(let result):
                 return result
             case .retry(let failure):
+                answer = failure
                 guard device.now() - start + Self.pollInterval <= timeout else { return .failure(failure) }
             }
             device.pause(Self.pollInterval)
-        }
-    }
-
-    public func tap(_ request: TargetRequest) -> Result<ActionResult, RunnerFailure> {
-        if let refusal = refusal(request) { return .failure(refusal) }
-        if case .point(let x, let y) = request.target {
-            let start = device.now()
-            return tapped(nil, x: x, y: y) { Int((self.device.now() - start) * 1000) }
-        }
-        return poll(request, what: "tap") { scene, elapsedMs in self.tapAttempt(request, in: scene, elapsedMs: elapsedMs) }
-    }
-
-    /// Taps the point and reports it. A tap that throws is never tried again: it may have landed.
-    func tapped(_ element: TreeElement?, x: Double, y: Double, elapsedMs: () -> Int) -> Result<ActionResult, RunnerFailure> {
-        do {
-            try device.tap(x: x, y: y)
-            return .success(ActionResult(element: element, x: x, y: y, ms: elapsedMs()))
-        } catch {
-            return .failure(RunnerFailure(code: RunnerFailure.Code.internal, message: "the tap failed: \(error)"))
-        }
-    }
-
-    func tapAttempt(_ request: TargetRequest, in scene: Scene, elapsedMs: () -> Int) -> Attempt {
-        if scene.appAway { return .retry(appAwayFailure(scene)) }
-        switch TargetMatcher.match(request.target, role: request.role, index: request.index, in: scene.nodes, refs: refs) {
-        case .staleRef:
-            return .done(.failure(Self.staleRef))
-        case .ambiguous(let found):
-            return .done(.failure(ambiguous(found, in: scene)))
-        case .none:
-            return .retry(RunnerFailure(code: RunnerFailure.Code.notFound, message: "no element matches", seen: seen(scene)))
-        case .one(let index):
-            let node = scene.nodes[index]
-            if let problem = unhittable(node, in: scene) {
-                return .retry(RunnerFailure(code: RunnerFailure.Code.notHittable, message: problem, frame: node.frame))
-            }
-            return .done(tapped(TreeBuilder.element(node, ref: nil, screen: scene.screen), x: node.frame.midX, y: node.frame.midY,
-                                elapsedMs: elapsedMs))
         }
     }
 
@@ -228,11 +187,11 @@ public final class RunnerEngine {
     }
 
     public func wait(_ request: TargetRequest) -> Result<ActionResult, RunnerFailure> {
-        if let refusal = refusal(request) { return .failure(refusal) }
+        if let refusal = refusal(request.scope) { return .failure(refusal) }
         if case .point = request.target {
             return .failure(RunnerFailure(code: RunnerFailure.Code.badRequest, message: "a point can't be waited for"))
         }
-        return poll(request, what: "wait") { scene, elapsedMs in self.waitAttempt(request, in: scene, elapsedMs: elapsedMs) }
+        return poll(request.scope, what: "wait") { scene, elapsedMs in self.waitAttempt(request, in: scene, elapsedMs: elapsedMs) }
     }
 
     func waitAttempt(_ request: TargetRequest, in scene: Scene, elapsedMs: () -> Int) -> Attempt {
@@ -264,43 +223,6 @@ public final class RunnerEngine {
             return .success(nil)
         case .none:
             return .success(nil)
-        }
-    }
-
-    /// The last-resort reply when even a plain failure can't be encoded.
-    static let encodeFallback = #"{"ok":false,"failure":{"code":"internal","message":"could not encode the reply","candidates":[],"seen":[],"issues":[]}}"#
-
-    /// One HTTP request in, one JSON reply out. Never throws: a request the engine can't read is a `bad_request` reply.
-    public func handle(path: String, body: Data) -> Data {
-        func reply<Payload: Codable>(_ outcome: Result<Payload, RunnerFailure>) -> Data {
-            do {
-                return try JSONEncoder().encode(RunnerReply(outcome))
-            } catch {
-                // A plain failure carries no frames or numbers, so it cannot fail the same way.
-                let failure = RunnerFailure(code: RunnerFailure.Code.internal, message: "could not encode the reply: \(error)")
-                return (try? JSONEncoder().encode(RunnerReply<HealthInfo>(.failure(failure)))) ?? Data(Self.encodeFallback.utf8)
-            }
-        }
-        func decoded<Request: Decodable>(_ type: Request.Type) -> Result<Request, RunnerFailure> {
-            do {
-                return .success(try JSONDecoder().decode(type, from: body))
-            } catch {
-                return .failure(RunnerFailure(code: RunnerFailure.Code.badRequest, message: "the request body is not a valid \(type): \(error)"))
-            }
-        }
-        switch path {
-        case RunnerProtocol.healthPath:
-            return reply(Result<HealthInfo, RunnerFailure>.success(
-                HealthInfo(protocolVersion: RunnerProtocol.version, runner: runnerBundleId, rolesVerified: rolesVerified)))
-        case RunnerProtocol.treePath:
-            return reply(decoded(TreeRequest.self).flatMap(tree))
-        case RunnerProtocol.tapPath:
-            return reply(decoded(TargetRequest.self).flatMap(tap))
-        case RunnerProtocol.waitPath:
-            return reply(decoded(TargetRequest.self).flatMap(wait))
-        default:
-            return reply(Result<HealthInfo, RunnerFailure>.failure(
-                RunnerFailure(code: RunnerFailure.Code.badRequest, message: "unknown path \(path)")))
         }
     }
 }
