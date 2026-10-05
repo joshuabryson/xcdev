@@ -40,8 +40,9 @@ it gives each git worktree its own simulator clones and DerivedData, so parallel
   reports success can still have done nothing, so always verify. Refs are only good until the next `xcd ui tree`
   (or the next "ambiguous" failure, whose numbered candidates become the refs).
 - `xcd ui tap` and `xcd ui wait` act on the app in front and any system alert over it; when the app
-  isn't in front they fail, saying so (`xcd launch` or `xcd run` fixes that). An element under an alert or the
-  keyboard can't be tapped: deal with the alert or keyboard first.
+  isn't in front they fail, saying so (`xcd launch` or `xcd run` fixes that). While a system alert is up
+  nothing in the app can be tapped, and neither can an element under the keyboard: deal with the alert or keyboard
+  first.
 - Output is compact text by default; add `--json` (or set `XCD_OUTPUT=json`) for one JSON object per command.
 - Every failure ends with `next:`. Do what it says before trying anything else.
 - Exit codes: 1 = the task failed (fix the code), 2 = fix the command line or config, 3 = fix the environment

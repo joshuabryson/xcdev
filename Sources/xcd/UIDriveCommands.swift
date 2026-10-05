@@ -46,8 +46,8 @@ extension UICommand {
             abstract: "Tap an element or a point.",
             discussion: """
             The app must be running in front (`xcd run` or `xcd launch`; not needed with --system); a system alert over it \
-            can be tapped too. \
-            An element covered by an alert or the keyboard is not tapped. When several elements match, the failure \
+            can be tapped too. While a system alert is up nothing in the app is tapped, and neither is an element under \
+            the keyboard. When several elements match, the failure \
             lists them as e1, e2, …: those become the refs, so `ref:e<N>` (or --index) picks one. \
             A tap that succeeds says where it landed, not what it did: check with `xcd ui wait` or `xcd ui tree`.
             """
