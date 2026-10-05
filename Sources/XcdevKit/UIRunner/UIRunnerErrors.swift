@@ -93,7 +93,7 @@ enum UIRunnerErrors {
     }
 
     static func unsupported(_ failure: RunnerFailure, target _: String, _: Duration) -> XcdError {
-        XcdError(.platformUnsupported, failure.message, next: "`xcd ui button home` works on every iPhone and iPad simulator")
+        XcdError(.platformUnsupported, failure.message, next: "pick a device from .xcdev.yml that can do this with `--device <name>`, or leave this step out")
     }
 
     static func badRequest(_ failure: RunnerFailure, target _: String, _: Duration) -> XcdError {
@@ -108,6 +108,6 @@ enum UIRunnerErrors {
                             next: "focus a field first: pass `--into <target>`, or tap it", details: failure.issues)
         }
         return XcdError(.runnerFailed, failure.message, next: "run `xcd ui stop`, then retry; `xcd doctor` if it keeps happening",
-                 details: failure.issues)
+                        details: failure.issues)
     }
 }

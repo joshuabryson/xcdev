@@ -168,6 +168,7 @@ extension UIService {
         return ScreenPoint(x: x, y: y)
     }
 
+    /// Types into the element `--into` names, or into whatever has keyboard focus; an empty text only clears or submits.
     public func type(_ text: String, _ typing: TypeOptions, _ options: UIOptions, in ctx: inout WorktreeContext) async throws -> UIActionReport {
         guard !text.isEmpty || typing.clear || typing.submit else {
             throw XcdError(.usage, "there is nothing to type", next: "pass some text, or --clear or --submit")
@@ -211,8 +212,6 @@ extension UIService {
 
     /// The largest image file `xcd sim pasteboard set --image` takes: it travels to the runner inside one request.
     static let maxImageBytes = 16 * 1024 * 1024
-    /// The runner's words for data that is not an image.
-    static let notAnImage = "the data is not an image iOS can read"
 
     /// Puts an image file on the device's pasteboard through the runner: simctl can only copy text.
     public func setPasteboardImage(file: String, device: String?, in ctx: inout WorktreeContext) async throws -> DeviceStateReport {
@@ -228,10 +227,10 @@ extension UIService {
         switch result {
         case .success(let set) where set.hasImages:
             break
-        case .success, .failure(RunnerFailure(code: RunnerFailure.Code.badRequest, message: Self.notAnImage)):
-            throw XcdError(.usage, "\(file) is not an image iOS can read", next: "pass a PNG or JPEG file")
-        case .failure(let failure):
+        case .failure(let failure) where failure.code != RunnerFailure.Code.badRequest || failure.message != PasteboardRequest.notAnImage:
             throw UIRunnerErrors.error(failure, target: file, timeout: .zero)
+        case .success, .failure:                // the runner says it is not an image, or the pasteboard holds none
+            throw XcdError(.usage, "\(file) is not an image iOS can read", next: "pass a PNG or JPEG file")
         }
         return DeviceStateReport(action: "set the pasteboard to the image \((file as NSString).lastPathComponent) (\(image.count) bytes)",
                                  device: session.device, udid: session.udid, worktree: ctx.state.name)

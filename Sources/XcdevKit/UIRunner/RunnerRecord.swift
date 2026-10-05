@@ -52,17 +52,43 @@ public enum Runners {
     }
 
     /// Writes the record for its owner only: it holds the token that lets a local process drive the simulator. The
-    /// file is created with that mode and then moved into place, so it is never readable by anyone else.
+    /// file is created with that mode, before anything is written to it, and then moved into place, so the token is
+    /// never in a file anyone else can read.
     public static func save(_ record: RunnerRecord, to file: String) throws {
-        let files = FileManager.default
-        try files.createDirectory(atPath: (file as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: (file as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         let data = try JSONCoding.encoder(pretty: true).encode(record)
         let temporary = file + ".\(UUID().uuidString).tmp"
-        guard files.createFile(atPath: temporary, contents: data, attributes: [.posixPermissions: 0o600]), rename(temporary, file) == 0 else {
-            let reason = String(cString: strerror(errno))
-            try? files.removeItem(atPath: temporary)
-            throw XcdError(.internalError, "could not write \(file): \(reason)")
+        do {
+            try writePrivate(data, to: temporary)
+            guard rename(temporary, file) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        } catch let error as POSIXError {
+            unlink(temporary)
+            throw XcdError(.internalError, "could not write \(file): \(String(cString: strerror(error.code.rawValue)))")
         }
+    }
+
+    /// Creates `file`, which must not exist yet, readable and writable by its owner only, and writes `data` to it.
+    /// A file that could not be written in full is removed.
+    static func writePrivate(_ data: Data, to file: String) throws {
+        let descriptor = open(file, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { close(descriptor) }
+        // The mode asked for is narrowed by the process's umask; this makes it exactly the owner's.
+        var failure = fchmod(descriptor, 0o600) == 0 ? nil : POSIXErrorCode(rawValue: errno) ?? .EIO
+        data.withUnsafeBytes { bytes in
+            var written = 0
+            while failure == nil, written < bytes.count, let base = bytes.baseAddress {
+                let count = write(descriptor, base + written, bytes.count - written)
+                if count >= 0 {
+                    written += count
+                } else if errno != EINTR {
+                    failure = POSIXErrorCode(rawValue: errno) ?? .EIO
+                }
+            }
+        }
+        guard let failure else { return }
+        unlink(file)
+        throw POSIXError(failure)
     }
 
     /// Stops the runner with SIGTERM (never SIGINT: xcodebuild lingers for minutes), then removes its record and ready

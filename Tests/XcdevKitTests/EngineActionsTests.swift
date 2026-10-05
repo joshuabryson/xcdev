@@ -326,6 +326,17 @@ import XcdevTestSupport
         #expect(device.events.last == "button camera")
     }
 
+    /// Nothing happened, so there is nothing to settle or read: the refs of the last tree stay as they were.
+    @Test func aButtonThisDeviceLacksEndsTheActionBeforeAnyTreeIsRead() throws {
+        let (engine, device) = base.make()
+        guard case .failure(let missing) = engine.button(request("action", tree: true)) else { Issue.record("pressed"); return }
+        #expect(missing.code == RunnerFailure.Code.unsupported && missing.message == "this device has no action button")
+        #expect(device.snapshots == 0 && device.pauses == 0 && device.events.isEmpty)
+        device.state = .notRunning                                          // nor is a missing app taken for a crash
+        guard case .failure(let still) = engine.button(request("camera", tree: true)) else { Issue.record("pressed"); return }
+        #expect(still.code == RunnerFailure.Code.unsupported && device.snapshots == 0)
+    }
+
     /// On a real device the app is still in front for a moment after Home is pressed.
     @Test func homeWaitsForTheAppToLeaveTheScreen() throws {
         let (engine, device) = base.make()

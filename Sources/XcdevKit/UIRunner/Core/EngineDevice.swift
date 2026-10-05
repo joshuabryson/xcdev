@@ -11,16 +11,14 @@ extension RunnerEngine {
         guard let button = HardwareButton(rawValue: request.name) else {
             return .failure(unknownName(request, "a button", HardwareButton.allCases.map(\.rawValue)))
         }
-        var present = true
-        let result = direct(request.scope, what: "button press") {
-            present = try self.device.pressButton(button)
-            if present, button == .home { self.waitForAppToLeave(request.scope) }
+        // A button the device lacks ends the action here: nothing was pressed, so no tree is read afterwards.
+        return direct(request.scope, what: "button press") {
+            guard try self.device.pressButton(button) else {
+                throw RunnerFailure(code: RunnerFailure.Code.unsupported, message: "this device has no \(button.rawValue) button")
+            }
+            if button == .home { self.waitForAppToLeave(request.scope) }
             return ActionResult(element: nil, x: nil, y: nil, ms: 0)
         }
-        guard present else {
-            return .failure(RunnerFailure(code: RunnerFailure.Code.unsupported, message: "this device has no \(button.rawValue) button"))
-        }
-        return result
     }
 
     /// Home sends the app in front to the background a moment after the press returns (seen: still in front
@@ -47,7 +45,7 @@ extension RunnerEngine {
 
     public func pasteboard(_ request: PasteboardRequest) -> Result<PasteboardResult, RunnerFailure> {
         guard device.setPasteboard(image: request.image) else {
-            return .failure(RunnerFailure(code: RunnerFailure.Code.badRequest, message: "the data is not an image iOS can read"))
+            return .failure(RunnerFailure(code: RunnerFailure.Code.badRequest, message: PasteboardRequest.notAnImage))
         }
         return .success(PasteboardResult(hasImages: true))
     }

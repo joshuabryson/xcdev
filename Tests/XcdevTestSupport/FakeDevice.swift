@@ -13,6 +13,8 @@ public final class FakeDevice: DeviceDriving {
     /// Runs after each pause (e.g. to make an element appear after a few polls).
     public var onPause: ((FakeDevice) -> Void)?
     public var failSnapshots = false
+    /// How many snapshots were asked for, of the app or the system, whether or not they threw.
+    public var snapshots = 0
     /// How many of the next snapshots throw before they succeed again.
     public var snapshotsToFail = 0
 
@@ -53,6 +55,7 @@ public final class FakeDevice: DeviceDriving {
     }
 
     private func failIfAsked() throws {
+        snapshots += 1
         if snapshotsToFail > 0 {
             snapshotsToFail -= 1
             throw Failure()

@@ -33,6 +33,7 @@ final class SentRequests: Sendable {
         }
         return (service, ctx, sent)
     }
+
     @Test func treeAfterATapIsPrintedUnderIt() async throws {
         defer { base.worktree.remove() }
         var result = ActionResult(element: UIServiceTests.element, x: 201, y: 725, ms: 812)
@@ -95,6 +96,7 @@ final class SentRequests: Sendable {
         #expect(unknown?.message == "the app stopped running during the tap (no crash report found)")
         #expect(detached.starts.count == 1)                                 // the runner itself was never restarted
     }
+
     @Test func aLongPressSendsItsDurationAndReportsIt() async throws {
         defer { base.worktree.remove() }
         var (service, ctx, sent) = try setup(ActionResult(element: UIServiceTests.element, x: 201, y: 725, ms: 2600))
@@ -260,7 +262,7 @@ final class SentRequests: Sendable {
         }
         let error = await #expect(throws: XcdError.self) { _ = try await service.button("action", options, in: &ctx) }
         #expect(error?.code == .platformUnsupported && error?.code.exitCode == 2 && error?.message == "this device has no action button")
-        #expect(error?.next == "`xcd ui button home` works on every iPhone and iPad simulator")
+        #expect(error?.next == "pick a device from .xcdev.yml that can do this with `--device <name>`, or leave this step out")
     }
 
     @Test func anImageIsSentToTheRunnersPasteboard() async throws {
@@ -268,7 +270,8 @@ final class SentRequests: Sendable {
         let sent = Mutex<[PasteboardRequest]>([])
         let answer = Mutex<Result<PasteboardResult, RunnerFailure>>(.success(PasteboardResult(hasImages: true)))
         var (service, ctx, transport, _) = try base.setup { _, body in
-            sent.withLock { $0.append(try! JSONDecoder().decode(PasteboardRequest.self, from: body ?? Data())) }
+            let request = try JSONDecoder().decode(PasteboardRequest.self, from: body ?? Data())
+            sent.withLock { $0.append(request) }
             return FakeRunnerTransport.reply(answer.withLock { $0 })
         }
         let file = base.worktree.root + "/logo.png"
@@ -281,6 +284,16 @@ final class SentRequests: Sendable {
         answer.withLock { $0 = .failure(RunnerFailure(code: RunnerFailure.Code.badRequest, message: "the data is not an image iOS can read")) }
         let notImage = await #expect(throws: XcdError.self) { _ = try await service.setPasteboardImage(file: file, device: nil, in: &ctx) }
         #expect(notImage?.code == .usage && notImage?.message == "\(file) is not an image iOS can read" && notImage?.next == "pass a PNG or JPEG file")
+        // The refusal is known by its code and message, whatever else XCTest noted while the runner handled it.
+        answer.withLock {
+            $0 = .failure(RunnerFailure(code: RunnerFailure.Code.badRequest, message: PasteboardRequest.notAnImage, issues: ["an unrelated issue"]))
+        }
+        let noted = await #expect(throws: XcdError.self) { _ = try await service.setPasteboardImage(file: file, device: nil, in: &ctx) }
+        #expect(noted?.code == .usage && noted?.message == "\(file) is not an image iOS can read")
+        // Another refusal is not taken for it.
+        answer.withLock { $0 = .failure(RunnerFailure(code: RunnerFailure.Code.badRequest, message: "the request has no image")) }
+        let refused = await #expect(throws: XcdError.self) { _ = try await service.setPasteboardImage(file: file, device: nil, in: &ctx) }
+        #expect(refused?.code == .runnerFailed && refused?.message == "the UI runner refused the request: the request has no image")
         answer.withLock { $0 = .failure(RunnerFailure(code: RunnerFailure.Code.internal, message: "boom")) }
         let broken = await #expect(throws: XcdError.self) { _ = try await service.setPasteboardImage(file: file, device: nil, in: &ctx) }
         #expect(broken?.code == .runnerFailed && broken?.message == "boom")
@@ -289,6 +302,6 @@ final class SentRequests: Sendable {
         // One byte over the limit is refused before anything is sent.
         try Data(count: 16 * 1024 * 1024 + 1).write(to: URL(fileURLWithPath: file))
         let huge = await #expect(throws: XcdError.self) { _ = try await service.setPasteboardImage(file: file, device: nil, in: &ctx) }
-        #expect(huge?.code == .usage && huge?.message == "\(file) is larger than 16 MB, the most xcd can copy" && sent.withLock { $0.count } == 3)
+        #expect(huge?.code == .usage && huge?.message == "\(file) is larger than 16 MB, the most xcd can copy" && sent.withLock { $0.count } == 5)
     }
 }

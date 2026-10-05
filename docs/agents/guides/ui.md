@@ -44,12 +44,12 @@ When several elements match, the error lists them as `e1`, `e2`, …. Those beco
 | `xcd ui rotate portrait\|landscape-left\|landscape-right\|portrait-upside-down` | Rotates the device. |
 | `xcd ui wait <target> [--gone] [--timeout 10s]` | Waits for an element to be on screen, or to be gone. |
 
-Every action waits up to `--timeout` (default 2s) for its element to exist and be reachable, and takes `--tree`. The app is the one from the last build; `--bundle <id>` picks another, and `--system` acts on the Home Screen.
+An action on an element waits up to `--timeout` (default 2s; 10s for `wait`) for it to exist and be reachable. Every action except `wait` takes `--tree`, which prints the tree as it is afterwards. The app is the one from the last build; `--bundle <id>` picks another, and `--system` acts on the Home Screen.
 
 ## Things to know
 
 - **System alerts** (permission prompts) are listed at the end of the tree, marked `system`. While one is up, nothing in the app can be acted on: tap one of the alert's buttons first.
-- **The keyboard** covers the lower part of the screen, and an element under it is refused. Scroll the element up with `xcd ui swipe up`, or dismiss the keyboard first.
+- **The keyboard** covers the lower part of the screen, and an element under it is refused. Scroll the element up with `xcd ui swipe up`, or dismiss the keyboard first: `xcd ui type "" --submit` presses Return, which closes it in most single-line fields (and submits the field), or tap the keyboard's own Return or Done key (`xcd ui tree --all` lists the keys).
 - **Off-screen elements** are not in the default tree. `xcd ui tree --all` lists them, marked `offscreen`. Swipe, then read the tree again.
 - **Typing** uses the software keyboard. If none comes up, the text is pasted instead, which replaces the device's pasteboard; the report says `by keyboard` or `by paste`. Check the field's value in the tree afterwards.
 - **A crash** during an action is reported as `app_crashed`, with the crash report when one was written.

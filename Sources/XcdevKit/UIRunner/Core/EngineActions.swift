@@ -68,12 +68,14 @@ extension RunnerEngine {
     }
 
     /// Runs a gesture once and stamps how long the action took. A gesture that throws is the action's failure and is
-    /// never tried again: it may have happened.
+    /// never tried again: it may have happened. One that throws a `RunnerFailure` did nothing, and says why.
     func performed(_ what: String, _ elapsedMs: () -> Int, _ gesture: () throws -> ActionResult) -> Result<ActionResult, RunnerFailure> {
         do {
             var result = try gesture()
             result.ms = elapsedMs()
             return .success(result)
+        } catch let refusal as RunnerFailure {
+            return .failure(refusal)
         } catch {
             return .failure(RunnerFailure(code: RunnerFailure.Code.internal, message: "the \(what) failed: \(error)"))
         }

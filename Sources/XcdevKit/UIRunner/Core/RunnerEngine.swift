@@ -30,6 +30,7 @@ public protocol DeviceDriving: AnyObject {
     func setPasteboard(image: Data) -> Bool
     /// Presses a hardware button. False when this device has no such button.
     func pressButton(_ button: HardwareButton) throws -> Bool
+    /// Turns the device to an orientation.
     func rotate(to orientation: DeviceOrientation) throws
     func pause(_ seconds: Double)
     /// Seconds from any fixed origin.

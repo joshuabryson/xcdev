@@ -113,6 +113,9 @@ public struct DeviceRequest: Codable, Sendable, Equatable {
 }
 
 public struct PasteboardRequest: Codable, Sendable, Equatable {
+    /// The message of the `bad_request` failure that says the bytes are not an image. xcd knows the refusal by it.
+    public static let notAnImage = "the data is not an image iOS can read"
+
     /// A PNG or JPEG file's bytes.
     public var image: Data
 

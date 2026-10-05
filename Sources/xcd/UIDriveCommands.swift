@@ -26,7 +26,7 @@ extension UICommand {
     /// What every action takes besides its own arguments.
     struct ActionOptions: ParsableArguments {
         @Flag(help: "Also print the tree as it is after the action; its refs replace the earlier ones.") var tree = false
-        @Option(help: "How long to keep looking for the element, at most 120s (default: 2s).") var timeout: String?
+        @Option(help: "How long to keep looking for the element, when the action names one, at most 120s (default: 2s).") var timeout: String?
         @OptionGroup var driving: DrivingOptions
 
         func options(_ match: MatchOptions? = nil) throws -> UIOptions {

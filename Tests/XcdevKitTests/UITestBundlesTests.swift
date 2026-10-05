@@ -61,6 +61,27 @@ import XcdevTestSupport
         #expect(included() == nil)                                              // nothing listed, as with a test plan
     }
 
+    /// Xcode often keeps a scheme's Testables after it is given a test plan; the plan then decides what runs.
+    @Test func aSchemeWithATestPlanIsUnknownEvenWhenItListsOnlyUnitTests() throws {
+        defer { worktree.remove() }
+        let container = try phone(testing: false)
+        let scheme = worktree.root + "/Phone.xcodeproj/xcshareddata/xcschemes/Phone.xcscheme"
+        let text = try String(contentsOfFile: scheme, encoding: .utf8)
+        let plans = """
+              <TestPlans>
+                 <TestPlanReference reference = "container:Phone.xctestplan" default = "YES">
+                 </TestPlanReference>
+              </TestPlans>
+              <Testables>
+        """
+        let edited = text.replacingOccurrences(of: "      <Testables>", with: plans)
+        #expect(edited != text)
+        #expect(UITestBundles.included(scheme: "Phone", container: container, only: [], skip: []) == false)
+        try edited.write(toFile: scheme, atomically: true, encoding: .utf8)
+        #expect(UITestBundles.included(scheme: "Phone", container: container, only: [], skip: []) == nil)
+        #expect(UITestBundles.included(scheme: "Phone", container: container, only: ["PhoneTests"], skip: []) == nil)
+    }
+
     @Test func aPackageHasNoneAndAWorkspaceLooksInItsProjects() throws {
         defer { worktree.remove() }
         #expect(UITestBundles.included(scheme: "Anything", container: .package(directory: worktree.root), only: [], skip: []) == false)

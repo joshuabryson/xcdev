@@ -108,6 +108,28 @@ import XcdevTestSupport
         #expect(try FileManager.default.contentsOfDirectory(atPath: folder) == ["ui-runner-iphone.json"])
         // A folder that can't be written to is an error, not a silent loss.
         #expect(throws: (any Error).self) { try Runners.save(record, to: "/dev/null/nope/ui-runner-iphone.json") }
+        // A record that can't be moved into place says why, and its temporary file is removed.
+        let taken = folder + "/taken"
+        try FileManager.default.createDirectory(atPath: taken + "/inside", withIntermediateDirectories: true)
+        let failure = #expect(throws: XcdError.self) { try Runners.save(record, to: taken) }
+        #expect(failure?.code == .internalError && failure?.message.hasPrefix("could not write \(taken): ") == true)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: folder).sorted() == ["taken", "ui-runner-iphone.json"])
+    }
+
+    /// The file is born with its final mode, and only if nothing is there already: no one else's file is written into.
+    @Test func aPrivateFileIsCreatedOwnerOnlyAndNeverOverAnExistingOne() throws {
+        defer { worktree.remove() }
+        try FileManager.default.createDirectory(atPath: worktree.root, withIntermediateDirectories: true)
+        let file = worktree.root + "/private.tmp"
+        let large = Data((0..<3_000_000).map { UInt8(truncatingIfNeeded: $0) })
+        try Runners.writePrivate(large, to: file)
+        #expect((try FileManager.default.attributesOfItem(atPath: file)[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+        #expect(FileManager.default.contents(atPath: file) == large)
+        #expect(throws: POSIXError(.EEXIST)) { try Runners.writePrivate(Data("new".utf8), to: file) }
+        #expect(FileManager.default.contents(atPath: file) == large)                     // what was there is untouched
+        try Runners.writePrivate(Data(), to: worktree.root + "/empty.tmp")
+        #expect(FileManager.default.contents(atPath: worktree.root + "/empty.tmp") == Data())
+        #expect(throws: POSIXError(.ENOTDIR)) { try Runners.writePrivate(Data("x".utf8), to: "/dev/null/nope.tmp") }
     }
 
     @Test func attachesToAHealthyRunner() async throws {
