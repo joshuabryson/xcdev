@@ -95,4 +95,69 @@ final class SentRequests: Sendable {
         #expect(unknown?.message == "the app stopped running during the tap (no crash report found)")
         #expect(detached.starts.count == 1)                                 // the runner itself was never restarted
     }
+    @Test func aLongPressSendsItsDurationAndReportsIt() async throws {
+        defer { base.worktree.remove() }
+        var (service, ctx, sent) = try setup(ActionResult(element: UIServiceTests.element, x: 201, y: 725, ms: 2600))
+        let report = try await service.longPress("id:signIn", duration: .milliseconds(2500), options, in: &ctx)
+        let (path, request) = try sent.last(as: TargetRequest.self)
+        #expect(path == "/longpress" && request.duration == 2.5 && request.target == .id("signIn") && request.tree == false)
+        #expect(report.text == #"long-pressed button "Sign In" id=signIn at 201,725 for 2.5s  2600ms"#)
+        for bad in [Duration.milliseconds(50), .seconds(21)] {
+            let error = await #expect(throws: XcdError.self) { _ = try await service.longPress("id:signIn", duration: bad, options, in: &ctx) }
+            #expect(error?.code == .usage && error?.next == "pass a duration like 1s or 2.5s")
+        }
+        #expect(sent.count == 1)
+    }
+
+    @Test func aDirectionSwipeNamesItsElementOrTheScreen() async throws {
+        defer { base.worktree.remove() }
+        var result = ActionResult(element: UIServiceTests.element, x: 201, y: 725, ms: 420)
+        result.toX = 201
+        result.toY = 705
+        var (service, ctx, sent) = try setup(result)
+        var withRole = options
+        withRole.role = "button"
+        let report = try await service.swipe(SwipeOptions(direction: "up", on: "id:signIn", from: nil, to: nil), withRole, in: &ctx)
+        let (path, request) = try sent.last(as: SwipeRequest.self)
+        #expect(path == "/swipe")
+        #expect(request == SwipeRequest(scope: Self.scope, direction: .up, on: ElementQuery(target: .id("signIn"), role: "button", index: nil),
+                                        from: nil, to: nil))
+        #expect(report.text == #"swiped up on button "Sign In" id=signIn at 201,725 to 201,705  420ms"#)
+        #expect(report.toX == 201 && report.toY == 705)
+    }
+
+    @Test func aSwipeAcrossTheScreenOrBetweenPointsSaysWhereItWent() async throws {
+        defer { base.worktree.remove() }
+        var result = ActionResult(element: nil, x: 201, y: 437, ms: 400)
+        result.toX = 201
+        result.toY = 87.4
+        var (service, ctx, sent) = try setup(result)
+        #expect(try await service.swipe(SwipeOptions(direction: "up", on: nil, from: nil, to: nil), options, in: &ctx).text
+                == "swiped up on the screen from 201,437 to 201,87.4  400ms")
+        #expect(try sent.last(as: SwipeRequest.self).request == SwipeRequest(scope: Self.scope, direction: .up, on: nil, from: nil, to: nil))
+        #expect(try await service.swipe(SwipeOptions(direction: nil, on: nil, from: "201,437", to: "@201,87.4"), options, in: &ctx).text
+                == "swiped from 201,437 to 201,87.4  400ms")
+        #expect(try sent.last(as: SwipeRequest.self).request == SwipeRequest(scope: Self.scope, direction: nil, on: nil,
+                                                                              from: ScreenPoint(x: 201, y: 437), to: ScreenPoint(x: 201, y: 87.4)))
+    }
+
+    @Test func aSwipeThatCannotBeReadIsAUsageError() async throws {
+        defer { base.worktree.remove() }
+        var (service, ctx, sent) = try setup(ActionResult(element: nil, x: 0, y: 0, ms: 0))
+        let cases: [(SwipeOptions, String)] = [
+            (SwipeOptions(direction: nil, on: nil, from: nil, to: nil), "a swipe needs a direction, or both --from and --to"),
+            (SwipeOptions(direction: nil, on: nil, from: "1,2", to: nil), "a swipe needs a direction, or both --from and --to"),
+            (SwipeOptions(direction: nil, on: "id:list", from: "1,2", to: "3,4"), "a swipe needs a direction, or both --from and --to"),
+            (SwipeOptions(direction: "sideways", on: nil, from: nil, to: nil), "'sideways' is not a direction"),
+            (SwipeOptions(direction: "up", on: nil, from: "1,2", to: "3,4"), "a direction and --from/--to can't be combined"),
+            (SwipeOptions(direction: "up", on: "@1,2", from: nil, to: nil), "--on takes an element, not a point"),
+            (SwipeOptions(direction: "up", on: "the list", from: nil, to: nil), "'the list' is not a target"),
+            (SwipeOptions(direction: nil, on: nil, from: "left", to: "3,4"), "--from left is not a point"),
+        ]
+        for (swipe, message) in cases {
+            let error = await #expect(throws: XcdError.self) { _ = try await service.swipe(swipe, options, in: &ctx) }
+            #expect(error?.code == .usage && error?.message == message && error?.next?.isEmpty == false, "\(message)")
+        }
+        #expect(sent.count == 0)
+    }
 }

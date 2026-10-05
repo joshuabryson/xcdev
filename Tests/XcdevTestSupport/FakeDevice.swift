@@ -65,6 +65,14 @@ public final class FakeDevice: DeviceDriving {
         taps.append((x, y))
     }
 
+    public func press(x: Double, y: Double, duration: Double) throws {
+        try gesture("press \(Self.number(x)),\(Self.number(y)) \(duration)s")
+    }
+
+    public func drag(from: ScreenPoint, to: ScreenPoint, duration: Double) throws {
+        try gesture("drag \(Self.number(from.x)),\(Self.number(from.y)) to \(Self.number(to.x)),\(Self.number(to.y)) \(duration)s")
+    }
+
     /// "201" for a whole number, else one decimal.
     static func number(_ value: Double) -> String {
         value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)

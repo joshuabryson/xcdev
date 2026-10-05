@@ -53,17 +53,30 @@ final class XCUIDriver: DeviceDriving {
         }
     }
 
+    /// The app last read while it is in front; else Springboard. Gestures and keys go to it.
+    private var front: XCUIApplication {
+        if let current, current.state == .runningForeground { return current }
+        return springboard
+    }
+
     /// Frames are screen points. A coordinate is relative to an element, so the offset is taken from that element's
     /// own origin: the app in front (which may not start at 0,0 in iPad split view), else Springboard.
-    func tap(x: Double, y: Double) throws {
-        let base: XCUIApplication
-        if let current, current.state == .runningForeground {
-            base = current
-        } else {
-            base = springboard
-        }
+    private func coordinate(x: Double, y: Double) -> XCUICoordinate {
+        let base = front
         let origin = base.frame.origin
-        base.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x - Double(origin.x), dy: y - Double(origin.y))).tap()
+        return base.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x - Double(origin.x), dy: y - Double(origin.y)))
+    }
+
+    func tap(x: Double, y: Double) throws { coordinate(x: x, y: y).tap() }
+
+    func press(x: Double, y: Double, duration: Double) throws { coordinate(x: x, y: y).press(forDuration: duration) }
+
+    /// A short press, then a drag at the speed that covers the distance in `duration`.
+    func drag(from: ScreenPoint, to: ScreenPoint, duration: Double) throws {
+        let distance = hypot(to.x - from.x, to.y - from.y)
+        let velocity = XCUIGestureVelocity(CGFloat(distance / max(duration, 0.05)))
+        coordinate(x: from.x, y: from.y).press(forDuration: 0.05, thenDragTo: coordinate(x: to.x, y: to.y), withVelocity: velocity,
+                                               thenHoldForDuration: 0)
     }
 
     /// Waits by running the main run loop, not by sleeping. XCUITest learns that an app changed state through the run

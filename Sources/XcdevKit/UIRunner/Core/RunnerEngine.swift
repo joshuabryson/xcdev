@@ -16,6 +16,10 @@ public protocol DeviceDriving: AnyObject {
     var orientation: String { get }
     /// Taps a point in screen points.
     func tap(x: Double, y: Double) throws
+    /// Presses a point for `duration` seconds.
+    func press(x: Double, y: Double, duration: Double) throws
+    /// Drags from one point to another over `duration` seconds.
+    func drag(from: ScreenPoint, to: ScreenPoint, duration: Double) throws
     func pause(_ seconds: Double)
     /// Seconds from any fixed origin.
     func now() -> Double

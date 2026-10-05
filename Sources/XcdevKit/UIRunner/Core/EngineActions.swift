@@ -120,4 +120,14 @@ extension RunnerEngine {
     public func tap(_ request: TargetRequest) -> Result<ActionResult, RunnerFailure> {
         press(request, what: "tap") { try self.device.tap(x: $0.x, y: $0.y) }
     }
+
+    /// Seconds a long-press holds when the request doesn't say.
+    static let defaultPress = 1.0
+
+    public func longPress(_ request: TargetRequest) -> Result<ActionResult, RunnerFailure> {
+        let seconds = request.duration ?? Self.defaultPress
+        // Held for at most a minute, so a runner can't be kept busy for hours.
+        let duration = seconds.isNaN ? Self.defaultPress : min(max(seconds, 0.1), 60)
+        return press(request, what: "long-press") { try self.device.press(x: $0.x, y: $0.y, duration: duration) }
+    }
 }

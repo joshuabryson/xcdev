@@ -122,3 +122,83 @@ import XcdevTestSupport
         #expect(failure.code == RunnerFailure.Code.internal && failure.message == "the tap failed: gesture failed" && device.pauses == 0)
     }
 }
+
+@Suite struct EngineGestureTests {
+    let base = EngineActionsTests()
+
+    func swipe(_ direction: SwipeDirection?, on: TargetSpec? = nil, from: ScreenPoint? = nil, to: ScreenPoint? = nil,
+               timeout: Double = 1) -> SwipeRequest {
+        SwipeRequest(scope: ActionScope(bundleId: EngineActionsTests.bundle, system: false, timeout: timeout, tree: false), direction: direction,
+                     on: on.map { ElementQuery(target: $0, role: nil, index: nil) }, from: from, to: to)
+    }
+
+    @Test func aLongPressHoldsTheElementsCentre() throws {
+        let (engine, device) = base.make()
+        var request = base.request(.id("signIn"))
+        let result = try engine.longPress(request).get()
+        #expect(device.events == ["press 201,314 1.0s"] && result.element?.identifier == "signIn" && result.x == 201 && result.y == 314)
+        request.duration = 2.5
+        _ = try engine.longPress(request).get()
+        for (asked, held) in [(0.0, "0.1"), (1e9, "60.0"), (Double.nan, "1.0")] {
+            request.duration = asked
+            _ = try engine.longPress(request).get()
+            #expect(device.events.last == "press 201,314 \(held)s")
+        }
+        #expect(device.events[1] == "press 201,314 2.5s")
+        _ = try engine.longPress(base.request(.point(x: 5, y: 6))).get()
+        #expect(device.events.last == "press 5,6 1.0s")
+        guard case .failure(let missing) = engine.longPress(base.request(.id("nope"), timeout: 0.2)) else { Issue.record("pressed"); return }
+        #expect(missing.code == RunnerFailure.Code.notFound && device.events.count == 6)
+    }
+
+    @Test func aDirectionSwipeGoesFromTheCentreAcrossTwoFifthsOfTheElement() throws {
+        let (engine, device) = base.make()
+        let result = try engine.swipe(swipe(.up, on: .id("signIn"))).get()         // 16,288 370x52
+        #expect(device.events == ["drag 201,314 to 201,293.2 0.3s"])
+        #expect(result.element?.identifier == "signIn" && result.x == 201 && result.y == 314 && result.toX == 201 && result.toY == 293.2)
+        _ = try engine.swipe(swipe(.right, on: .id("signIn"))).get()
+        #expect(device.events.last == "drag 201,314 to 349,314 0.3s")
+        // With no element: across the screen (402x874).
+        let across = try engine.swipe(swipe(.up)).get()
+        #expect(device.events.last == "drag 201,437 to 201,87.4 0.3s" && across.element == nil && abs((across.toY ?? 0) - 87.4) < 0.001)
+        _ = try engine.swipe(swipe(.down)).get()
+        #expect(device.events.last == "drag 201,437 to 201,786.6 0.3s")
+        _ = try engine.swipe(swipe(.left)).get()
+        #expect(device.events.last == "drag 201,437 to 40.2,437 0.3s")
+    }
+
+    @Test func aSwipeBetweenTwoPointsHappensWhateverIsOnScreen() throws {
+        let (engine, device) = base.make()
+        device.state = .background
+        let result = try engine.swipe(swipe(nil, from: ScreenPoint(x: 10, y: 600), to: ScreenPoint(x: 10, y: 100))).get()
+        #expect(device.events == ["drag 10,600 to 10,100 0.3s"] && result.x == 10 && result.y == 600 && result.toY == 100 && device.pauses == 0)
+        // A direction needs the app in front: its extent decides how far the swipe goes.
+        guard case .failure(let away) = engine.swipe(swipe(.up, timeout: 0.3)) else { Issue.record("swiped"); return }
+        #expect(away.code == RunnerFailure.Code.appNotForeground && device.events.count == 1 && device.pauses >= 2)
+    }
+
+    @Test func aSwipeNeedsADirectionOrBothPoints() {
+        let (engine, device) = base.make()
+        let point = ScreenPoint(x: 1, y: 2)
+        for bad in [swipe(nil), swipe(nil, from: point), swipe(.up, from: point, to: point), swipe(nil, on: .id("signIn"), from: point, to: point)] {
+            guard case .failure(let failure) = engine.swipe(bad) else { Issue.record("swiped"); continue }
+            #expect(failure.code == RunnerFailure.Code.badRequest)
+        }
+        guard case .failure(let off) = engine.swipe(swipe(.up, on: .id("far"), timeout: 0.2)) else { Issue.record("swiped"); return }
+        #expect(off.code == RunnerFailure.Code.notHittable && device.events.isEmpty)
+    }
+
+    @Test func gesturesAreServedOverHTTP() throws {
+        let (engine, device) = base.make()
+        var press = base.request(.id("signIn"))
+        press.duration = 2
+        let pressed = try JSONDecoder().decode(RunnerReply<ActionResult>.self,
+                                               from: engine.handle(path: "/longpress", body: try JSONEncoder().encode(press)))
+        #expect(pressed.ok && device.events == ["press 201,314 2.0s"])
+        let swiped = try JSONDecoder().decode(RunnerReply<ActionResult>.self,
+                                              from: engine.handle(path: "/swipe", body: try JSONEncoder().encode(swipe(.up))))
+        #expect(swiped.ok && abs((swiped.result?.toY ?? 0) - 87.4) < 0.001)
+        let bad = try JSONDecoder().decode(RunnerReply<ActionResult>.self, from: engine.handle(path: "/swipe", body: Data("{}".utf8)))
+        #expect(!bad.ok && bad.failure?.code == RunnerFailure.Code.badRequest)
+    }
+}

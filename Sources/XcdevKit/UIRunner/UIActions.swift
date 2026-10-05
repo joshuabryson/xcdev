@@ -31,6 +31,22 @@ struct ActionDone {
     }
 }
 
+/// What `xcd ui swipe` was given: a direction (and maybe an element), or two points.
+public struct SwipeOptions: Sendable {
+    public var direction: String?
+    public var on: String?
+    public var from: String?
+    public var to: String?
+
+    public init(direction: String?, on: String?, from: String?, to: String?) {
+        self.direction = direction
+        self.on = on
+        self.from = from
+        self.to = to
+    }
+}
+
+
 /// `xcd ui long-press`, `swipe`, `type`, `button`, and `rotate`, and what every action shares.
 extension UIService {
     /// Sends an action and returns what the runner did. An action is never sent twice. When the runner says the app is
@@ -75,5 +91,59 @@ extension UIService {
     func scope(_ options: UIOptions, in ctx: WorktreeContext) throws -> ActionScope {
         ActionScope(bundleId: try bundleId(options, in: ctx), system: options.system,
                     timeout: DurationText.seconds(options.effectiveTimeout), tree: options.tree)
+    }
+
+    public func longPress(_ target: String, duration: Duration, _ options: UIOptions,
+                          in ctx: inout WorktreeContext) async throws -> UIActionReport {
+        guard duration >= .milliseconds(100), duration <= .seconds(20) else {
+            throw XcdError(.usage, "--duration \(DurationText.format(duration)) is outside 0.1s to 20s", next: "pass a duration like 1s or 2.5s")
+        }
+        var request = try targetRequest(target, gone: false, options, in: ctx)
+        request.tree = options.tree
+        request.duration = DurationText.seconds(duration)
+        let call = ActionCall(path: RunnerProtocol.longPressPath, request: request, what: "long-press", target: target)
+        return try await act(call, options, in: &ctx).report("long-pressed", target: target, detail: "for \(DurationText.format(duration))")
+    }
+
+    public func swipe(_ swipe: SwipeOptions, _ options: UIOptions, in ctx: inout WorktreeContext) async throws -> UIActionReport {
+        let request = try swipeRequest(swipe, options, in: ctx)
+        let target = swipe.on ?? "the screen"
+        let done = try await act(ActionCall(path: RunnerProtocol.swipePath, request: request, what: "swipe", target: target), options, in: &ctx)
+        let from = "\(ScreenRect.number(done.result.x ?? 0)),\(ScreenRect.number(done.result.y ?? 0))"
+        let to = "\(ScreenRect.number(done.result.toX ?? 0)),\(ScreenRect.number(done.result.toY ?? 0))"
+        guard let direction = request.direction else { return done.report("swiped", target: "from \(from) to \(to)") }
+        // An element's line already says where the swipe began.
+        return done.report("swiped \(direction.rawValue) on", target: target, detail: done.result.element == nil ? "from \(from) to \(to)" : "to \(to)")
+    }
+
+    static let swipeForms = "`xcd ui swipe up|down|left|right [--on <target>]`, or `xcd ui swipe --from x,y --to x,y`"
+
+    func swipeRequest(_ swipe: SwipeOptions, _ options: UIOptions, in ctx: WorktreeContext) throws -> SwipeRequest {
+        let scope = try self.scope(options, in: ctx)
+        guard let name = swipe.direction else {
+            guard swipe.on == nil, let from = swipe.from, let to = swipe.to else {
+                throw XcdError(.usage, "a swipe needs a direction, or both --from and --to", next: "use " + Self.swipeForms)
+            }
+            return SwipeRequest(scope: scope, direction: nil, on: nil, from: try point(from, flag: "--from"), to: try point(to, flag: "--to"))
+        }
+        guard let direction = SwipeDirection(rawValue: name) else {
+            throw XcdError(.usage, "'\(name)' is not a direction", next: "use one of: up, down, left, right")
+        }
+        guard swipe.from == nil, swipe.to == nil else {
+            throw XcdError(.usage, "a direction and --from/--to can't be combined", next: "use " + Self.swipeForms)
+        }
+        let on = try swipe.on.map { try query($0, options) }
+        if case .point? = on?.target {
+            throw XcdError(.usage, "--on takes an element, not a point", next: "swipe between points with `xcd ui swipe --from x,y --to x,y`")
+        }
+        return SwipeRequest(scope: scope, direction: direction, on: on, from: nil, to: nil)
+    }
+
+    /// "x,y" (or "@x,y") in points.
+    func point(_ text: String, flag: String) throws -> ScreenPoint {
+        guard case .success(.point(let x, let y)) = TargetParser.parse(text.hasPrefix("@") ? text : "@" + text) else {
+            throw XcdError(.usage, "\(flag) \(text) is not a point", next: "pass points as x,y, e.g. \(flag) 200,600")
+        }
+        return ScreenPoint(x: x, y: y)
     }
 }
