@@ -33,6 +33,7 @@ struct UIRunnerIntegrationTests {
 
             let nowFront = try await frontmostMacApp()
             #expect(nowFront == front, "driving the simulator changed the frontmost Mac app from \(front) to \(nowFront)")
+            #expect(!nowFront.contains("Simulator"), "Simulator.app is in front: \(nowFront)")
             #expect(try await simulatorAppIsRunning() == simulatorWasRunning, "a ui command started Simulator.app")
         }
     }
@@ -78,6 +79,9 @@ struct UIRunnerIntegrationTests {
             var other = options
             other.bundle = "com.example.notinstalled"
             #expect(try await svc.ui.tree(all: false, other, in: &ctx).tree.state == "not_running")
+            // A well-formed request that matches nothing is an ordinary failure, not a runner problem.
+            let unmatched = await #expect(throws: XcdError.self) { _ = try await svc.ui.tap("id:nope", options, in: &ctx) }
+            #expect(unmatched?.code == .elementNotFound, "\(String(describing: unmatched))")
             #expect(await svc.runners.client.health(port: session.port, token: session.token)?.rolesVerified == true)
             let again = try await svc.runners.session(device: nil, in: &ctx)
             #expect(again.token == session.token && again.port == session.port && !again.restarted)   // same runner, never restarted
@@ -90,6 +94,10 @@ struct UIRunnerIntegrationTests {
             let before = try await svc.ui.tree(all: false, options, in: &ctx)
             #expect(!before.restarted)
             let record = try #require(Runners.load(ctx.paths.runnerFile(device: "iphone")))
+            // The simulator's runner wrote its ready file into xcd's cache, not into the worktree.
+            #expect(record.readyFile == svc.runners.globalPaths.runnerReadyFile(udid: before.udid))
+            #expect(FileManager.default.fileExists(atPath: record.readyFile))
+            try #require(record.process.pid > 1)                            // a group id of 0 or 1 would signal far more than the runner
             kill(-record.process.pid, SIGKILL)
             try await Task.sleep(for: .seconds(2))
             let after = try await svc.ui.tree(all: false, options, in: &ctx)
@@ -98,7 +106,7 @@ struct UIRunnerIntegrationTests {
             #expect(replacement.process.pid != record.process.pid && replacement.token != record.token)
             let stopped = try await svc.ui.stop(device: nil, rebuild: false, in: &ctx)
             #expect(stopped.stopped == ["stopped the iphone UI runner"])
-            #expect(ctx.paths.runnerFiles.isEmpty)
+            #expect(ctx.paths.runnerFiles.isEmpty && !FileManager.default.fileExists(atPath: replacement.readyFile))
             let left = try await runner.run(Invocation("/usr/bin/pgrep", ["-f", "test-without-building.*\(after.udid)"]))
             #expect(!left.succeeded, "an xcodebuild for this clone is still running: \(left.stdoutString)")
         }
@@ -138,7 +146,7 @@ extension UIRunnerIntegrationTests {
             var ctx = try await svc.open(worktree: nil)
             do {
                 let run = try await svc.apps.run(BuildOptions(), noBuild: false, launch: LaunchOptions(environment: [:]), in: &ctx)
-                #expect(run.status == .running, "\(run.text)")
+                try #require(run.status == .running, "\(run.text)")
                 try await body(&ctx, svc)
             } catch {
                 _ = await Runners.stopAll(in: ctx.paths, detached: svc.detached)
@@ -198,8 +206,8 @@ extension UIRunnerIntegrationTests {
         #expect(try await element("tapCount", &ctx, svc).label == "taps: 2", "a refused tap changed the screen")
     }
 
-    /// Waits for the Photos prompt. On a new clone its first appearance waits for the photo library to be set up,
-    /// which took over 25 s; later ones take under a second.
+    /// Waits for the Photos prompt. On a brand-new clone its first appearance waits for the photo library to be set
+    /// up, which can take longer than a default wait; later ones take under a second.
     func waitForThePhotosAlert(_ ctx: inout WorktreeContext, _ svc: Services) async throws {
         var long = options
         long.timeout = .seconds(120)

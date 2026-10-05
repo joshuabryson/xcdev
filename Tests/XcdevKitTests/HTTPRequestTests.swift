@@ -97,27 +97,31 @@ import Testing
             let line = "GET /x HTTP/1.1\r\nX: "
             return Data((line + String(repeating: "a", count: size - line.utf8.count)).utf8)
         }
+        func isRequest(_ parse: HTTPParse) -> Bool {
+            if case .request = parse { return true }
+            return false
+        }
         let terminator = Data("\r\n\r\n".utf8)
         let max = HTTPRequestParser.maxHeaderBytes
         let atLimit = head(size: max)
         let over = head(size: max + 1)
-        guard case .request = HTTPRequestParser.parse(atLimit + terminator) else { Issue.record("at the limit is accepted"); return }
-        #expect(HTTPRequestParser.parse(over + terminator) == .tooLarge)
-        // The terminator arrives in a later buffer, even split part-way.
+        // A head of exactly the limit is accepted, wherever its terminator is cut.
+        #expect(isRequest(HTTPRequestParser.parse(atLimit + terminator)))
         for cut in 0..<terminator.count {
-            guard case .request = HTTPRequestParser.parse(atLimit + terminator.prefix(cut)) .asNeedMoreThenFull(atLimit + terminator) else {
-                Issue.record("at the limit, cut \(cut)"); return
+            #expect(HTTPRequestParser.parse(atLimit + terminator.prefix(cut)) == .needMore, "at the limit, \(cut) terminator bytes so far")
+        }
+        // One byte over is refused: at the latest when the terminator is complete, and never read as a request on the way.
+        #expect(HTTPRequestParser.parse(over) == .needMore)                 // it could still be a head of `max` plus "\r"
+        for pending in 1...3 {
+            let partial = HTTPRequestParser.parse(over + terminator.prefix(pending))
+            #expect(partial == (pending < 3 ? .needMore : .tooLarge), "one over, \(pending) terminator bytes so far")
+            for arrived in pending...terminator.count {
+                #expect(!isRequest(HTTPRequestParser.parse(over + terminator.prefix(arrived))), "one over, \(arrived) terminator bytes")
             }
         }
-        #expect(HTTPRequestParser.parse(over) == .needMore || HTTPRequestParser.parse(over) == .tooLarge)
         #expect(HTTPRequestParser.parse(over + terminator) == .tooLarge)
+        // With no terminator at all, the buffer is too large once it can't be a head of `max` plus a partial terminator.
+        #expect(HTTPRequestParser.parse(Data(repeating: 0x61, count: max + 3)) == .needMore)
         #expect(HTTPRequestParser.parse(Data(repeating: 0x61, count: max + 4)) == .tooLarge)
-    }
-}
-
-private extension HTTPParse {
-    /// A partial buffer must ask for more; the result is then that of the full buffer.
-    func asNeedMoreThenFull(_ full: Data) -> HTTPParse {
-        self == .needMore ? HTTPRequestParser.parse(full) : self
     }
 }

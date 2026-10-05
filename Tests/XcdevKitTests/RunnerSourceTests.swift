@@ -94,8 +94,9 @@ import Testing
             entry("/abs", count: "1", bytes: Data("x".utf8)),
             entry("", count: "1", bytes: Data("x".utf8)),
         ]
-        for data in bad {
-            #expect(throws: XcdError.self) { try RunnerSource.parse(data) }
+        for (index, data) in bad.enumerated() {
+            #expect(throws: RunnerSource.unreadable, "container \(index)") { try RunnerSource.parse(data) }
         }
+        #expect(RunnerSource.unreadable.code == .internalError && RunnerSource.unreadable.next == "this is a bug in xcd; please report it")
     }
 }
