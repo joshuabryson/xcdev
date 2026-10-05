@@ -46,9 +46,24 @@ public struct SwipeOptions: Sendable {
     }
 }
 
+/// What `xcd ui type` was given besides the text.
+public struct TypeOptions: Sendable {
+    public var into: String?
+    public var clear: Bool
+    public var submit: Bool
+
+    public init(into: String?, clear: Bool, submit: Bool) {
+        self.into = into
+        self.clear = clear
+        self.submit = submit
+    }
+}
 
 /// `xcd ui long-press`, `swipe`, `type`, `button`, and `rotate`, and what every action shares.
 extension UIService {
+    /// The longest text one `xcd ui type` takes: typing is slow, and the runner serves one request at a time.
+    static let maxTypedCharacters = 2000
+
     /// Sends an action and returns what the runner did. An action is never sent twice. When the runner says the app is
     /// gone, the error carries the app's crash report if one was written.
     func act<Request: Encodable>(_ call: ActionCall<Request>, _ options: UIOptions, in ctx: inout WorktreeContext) async throws -> ActionDone {
@@ -145,5 +160,27 @@ extension UIService {
             throw XcdError(.usage, "\(flag) \(text) is not a point", next: "pass points as x,y, e.g. \(flag) 200,600")
         }
         return ScreenPoint(x: x, y: y)
+    }
+
+    public func type(_ text: String, _ typing: TypeOptions, _ options: UIOptions, in ctx: inout WorktreeContext) async throws -> UIActionReport {
+        guard !text.isEmpty || typing.clear || typing.submit else {
+            throw XcdError(.usage, "there is nothing to type", next: "pass some text, or --clear or --submit")
+        }
+        guard text.count <= Self.maxTypedCharacters else {
+            throw XcdError(.usage, "the text is \(text.count) characters; one `xcd ui type` takes at most \(Self.maxTypedCharacters)",
+                           next: "type it in parts")
+        }
+        let into = try typing.into.map { try query($0, options) }
+        if case .point? = into?.target {
+            throw XcdError(.usage, "--into takes an element, not a point", next: "tap the point with `xcd ui tap`, then type without --into")
+        }
+        let request = TypeRequest(scope: try scope(options, in: ctx), text: text, into: into, clear: typing.clear, submit: typing.submit)
+        // About four characters a second, at the slowest.
+        let call = ActionCall(path: RunnerProtocol.typePath, request: request, what: "typing", target: typing.into ?? "the focused element",
+                              slack: .seconds(30) + .milliseconds(250 * text.count))
+        let done = try await act(call, options, in: &ctx)
+        let count = "\(text.count) character\(text.count == 1 ? "" : "s")"
+        let how = ["by \(done.result.method ?? "keyboard")", typing.clear ? "after clearing" : nil, typing.submit ? "then Return" : nil]
+        return done.report("typed \(count) into", target: typing.into ?? "the focused element", detail: how.compactMap { $0 }.joined(separator: ", "))
     }
 }

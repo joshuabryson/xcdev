@@ -16,8 +16,9 @@ public final class FakeDevice: DeviceDriving {
     /// How many of the next snapshots throw before they succeed again.
     public var snapshotsToFail = 0
 
-    /// Every gesture, in order, e.g. "tap 201,725".
+    /// Every gesture and pasteboard write, in order, e.g. "tap 201,725", "type \"hi\"", "key cmd-\"a\"".
     public var events: [String] = []
+    public var pasteboardText: String?
     /// Makes every gesture throw.
     public var failGestures = false
     /// Runs after each gesture (e.g. to make the app quit, or the keyboard appear).
@@ -71,6 +72,15 @@ public final class FakeDevice: DeviceDriving {
 
     public func drag(from: ScreenPoint, to: ScreenPoint, duration: Double) throws {
         try gesture("drag \(Self.number(from.x)),\(Self.number(from.y)) to \(Self.number(to.x)),\(Self.number(to.y)) \(duration)s")
+    }
+
+    public func typeText(_ text: String) throws { try gesture("type \(text.debugDescription)") }
+
+    public func pressKey(_ key: String, command: Bool) throws { try gesture("key \(command ? "cmd-" : "")\(key.debugDescription)") }
+
+    public func setPasteboard(text: String) {
+        pasteboardText = text
+        events.append("pasteboard \(text.debugDescription)")
     }
 
     /// "201" for a whole number, else one decimal.

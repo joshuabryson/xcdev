@@ -24,6 +24,32 @@ extension UICommand {
         }
     }
 
+    struct TypeText: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "type",
+            abstract: "Type text into a field.",
+            discussion: """
+            With --into the field is tapped first; without it the text goes to whatever has keyboard focus. \
+            When no software keyboard comes up, the text is pasted instead, which replaces the device's pasteboard; the \
+            report says which (`by keyboard` or `by paste`). Typing that succeeds is not proof the field took the text: \
+            check its value with --tree or `xcd ui tree`. Text starting with `-` goes after `--`.
+            """
+        )
+        @Argument(help: "The text to type, at most 2000 characters. May be empty with --clear or --submit.") var text: String
+        @Option(help: "The field to tap first, e.g. id:email or \"label:Search\".") var into: String?
+        @Flag(help: "Select everything in the field and replace it.") var clear = false
+        @Flag(help: "Press Return afterwards.") var submit = false
+        @OptionGroup var match: MatchOptions
+        @OptionGroup var action: ActionOptions
+        @OptionGroup var options: GlobalOptions
+
+        func run() async throws {
+            let (text, ui) = (text, try action.options(match))
+            let typing = TypeOptions(into: into, clear: clear, submit: submit)
+            try await UICommand.act("ui type", options) { service, ctx in try await service.type(text, typing, ui, in: &ctx) }
+        }
+    }
+
     struct Swipe: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Swipe in a direction, or from one point to another.",

@@ -40,6 +40,7 @@ extension RunnerEngine {
         case RunnerProtocol.waitPath: return answering(TargetRequest.self, wait)
         case RunnerProtocol.longPressPath: return answering(TargetRequest.self, longPress)
         case RunnerProtocol.swipePath: return answering(SwipeRequest.self, swipe)
+        case RunnerProtocol.typePath: return answering(TypeRequest.self, enterText)
         default: return nil
         }
     }

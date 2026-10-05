@@ -202,3 +202,103 @@ import XcdevTestSupport
         #expect(!bad.ok && bad.failure?.code == RunnerFailure.Code.badRequest)
     }
 }
+
+@Suite struct EngineTypingTests {
+    let base = EngineActionsTests()
+
+    func type(_ text: String, into: TargetSpec? = .id("email"), clear: Bool = false, submit: Bool = false, tree: Bool = false) -> TypeRequest {
+        TypeRequest(scope: ActionScope(bundleId: EngineActionsTests.bundle, system: false, timeout: 1, tree: tree), text: text,
+                    into: into.map { ElementQuery(target: $0, role: nil, index: nil) }, clear: clear, submit: submit)
+    }
+
+    /// A device whose keyboard comes up when something is tapped.
+    func make() -> (RunnerEngine, FakeDevice) {
+        let (engine, device) = base.make()
+        device.onGesture = { device in
+            if device.events.last?.hasPrefix("tap") == true { device.app = EngineActionsTests.appWithKeyboard }
+        }
+        return (engine, device)
+    }
+
+    @Test func typingIntoAFieldTapsItThenTypes() throws {
+        let (engine, device) = make()
+        let result = try engine.enterText(type("me@example.com")).get()
+        #expect(device.events == ["tap 201,175", "type \"me@example.com\""])
+        #expect(result.method == "keyboard" && result.element?.identifier == "email" && result.x == 201 && result.y == 175)
+        #expect(device.pauses == 0 && device.pasteboardText == nil)
+    }
+
+    @Test func clearSelectsEverythingAndSubmitPressesReturn() throws {
+        let (engine, device) = make()
+        _ = try engine.enterText(type("new", clear: true, submit: true)).get()
+        #expect(device.events == ["tap 201,175", "key cmd-\"a\"", "type " + "\u{8}new\n".debugDescription])
+        // Clearing alone deletes the selection.
+        _ = try engine.enterText(type("", clear: true)).get()
+        #expect(device.events.suffix(2) == ["key cmd-\"a\"", "type " + "\u{8}".debugDescription])
+        // Nothing to type is nothing typed.
+        let before = device.events.count
+        _ = try engine.enterText(type("", into: nil)).get()
+        #expect(device.events.count == before)
+    }
+
+    @Test func withoutATargetItTypesIntoWhateverHasFocus() throws {
+        let (engine, device) = base.make(EngineActionsTests.appWithKeyboard)
+        let result = try engine.enterText(type("hi", into: nil)).get()
+        #expect(device.events == ["type \"hi\""] && result.element == nil && result.x == nil && result.method == "keyboard")
+    }
+
+    @Test func withNoKeyboardTheTextIsPastedAndTypeTextIsNeverCalled() throws {
+        let (engine, device) = base.make()                                  // tapping brings up no keyboard
+        let result = try engine.enterText(type("hi")).get()
+        #expect(device.events == ["tap 201,175", "pasteboard \"hi\"", "key cmd-\"v\""])
+        #expect(result.method == "paste" && device.pauses >= 14)            // waited 1.5 s for a keyboard first
+        device.events = []
+        _ = try engine.enterText(type("", clear: true, submit: true)).get()
+        #expect(device.events == ["tap 201,175", "key cmd-\"a\"", "key " + "\u{8}".debugDescription, "key " + "\r".debugDescription])
+        device.events = []
+        _ = try engine.enterText(type("x", clear: true, submit: true)).get()
+        #expect(device.events == ["tap 201,175", "key cmd-\"a\"", "pasteboard \"x\"", "key cmd-\"v\"", "key " + "\r".debugDescription])
+        #expect(!device.events.contains { $0.hasPrefix("type") })
+    }
+
+    @Test func theKeyboardTipCardIsDismissedFirst() throws {
+        let card = EngineActionsTests.node(1, ScreenRect(x: 0, y: 546, w: 402, h: 328), [
+            EngineActionsTests.node(48, label: "Speed up your typing by sliding your finger across the letters to compose a word.",
+                                    ScreenRect(x: 20, y: 600, w: 362, h: 60)),
+            EngineActionsTests.node(9, label: "Continue", ScreenRect(x: 101, y: 780, w: 200, h: 44)),
+        ])
+        let withCard = EngineActionsTests.node(2, label: "SampleApp", EngineActionsTests.screen,
+                                               [EngineActionsTests.form] + EngineActionsTests.keyboardWindows + [EngineActionsTests.node(4, EngineActionsTests.screen, [card])])
+        let (engine, device) = base.make(withCard)
+        device.onGesture = { device in
+            if device.events.last == "tap 201,802" { device.app = EngineActionsTests.appWithKeyboard }
+        }
+        _ = try engine.enterText(type("hi", into: nil)).get()
+        #expect(device.events == ["tap 201,802", "type \"hi\""])
+    }
+
+    @Test func typingNeedsTheAppInFrontAndItsField() {
+        let (engine, device) = make()
+        guard case .failure(let missing) = engine.enterText(type("x", into: .id("nope"))) else { Issue.record("typed"); return }
+        #expect(missing.code == RunnerFailure.Code.notFound && device.events.isEmpty)
+        device.state = .background
+        guard case .failure(let away) = engine.enterText(type("x", into: nil)) else { Issue.record("typed"); return }
+        #expect(away.code == RunnerFailure.Code.appNotForeground && device.events.isEmpty)
+        let nowhere = TypeRequest(scope: ActionScope(bundleId: nil, system: false, timeout: 1, tree: false), text: "x", into: nil, clear: false, submit: false)
+        guard case .failure(let refused) = engine.enterText(nowhere) else { Issue.record("typed"); return }
+        #expect(refused.code == RunnerFailure.Code.badRequest)
+    }
+
+    @Test func aTypingFailureIsReportedAndTheTreeComesBackWhenAsked() throws {
+        let (engine, device) = base.make(EngineActionsTests.appWithKeyboard)
+        let result = try engine.enterText(type("hi", into: nil, tree: true)).get()
+        #expect(result.tree?.keyboard == true && result.tree?.elements.map(\.identifier) == ["email", "signIn", "low"])
+        device.failGestures = true
+        guard case .failure(let failure) = engine.enterText(type("hi", into: nil)) else { Issue.record("typed"); return }
+        #expect(failure.code == RunnerFailure.Code.internal && failure.message == "the typing failed: gesture failed")
+        device.failGestures = false
+        let body = try JSONEncoder().encode(type("via http", into: nil))
+        let reply = try JSONDecoder().decode(RunnerReply<ActionResult>.self, from: engine.handle(path: "/type", body: body))
+        #expect(reply.ok && reply.result?.method == "keyboard" && device.events.last == "type \"via http\"")
+    }
+}

@@ -79,6 +79,13 @@ final class XCUIDriver: DeviceDriving {
                                                thenHoldForDuration: 0)
     }
 
+    func typeText(_ text: String) throws { front.typeText(text) }
+
+    func pressKey(_ key: String, command: Bool) throws { front.typeKey(key, modifierFlags: command ? .command : []) }
+
+    /// Setting the pasteboard shows no prompt; only reading what another process wrote does.
+    func setPasteboard(text: String) { UIPasteboard.general.string = text }
+
     /// Waits by running the main run loop, not by sleeping. XCUITest learns that an app changed state through the run
     /// loop, so a sleeping thread keeps seeing the old state for the whole request (seen: an app sent to the
     /// background by Home stayed "in front" through two seconds of sleeping, and its snapshot then hung).

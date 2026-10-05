@@ -160,4 +160,76 @@ final class SentRequests: Sendable {
         }
         #expect(sent.count == 0)
     }
-}
+
+    @Test func typingSaysHowManyCharactersWhereAndHow() async throws {
+        defer { base.worktree.remove() }
+        var result = ActionResult(element: UIServiceTests.tree.elements[1], x: 201, y: 322, ms: 1320)
+        result.method = "keyboard"
+        var (service, ctx, sent) = try setup(result)
+        let report = try await service.type("me@example.com", TypeOptions(into: "id:email", clear: true, submit: true), options, in: &ctx)
+        let (path, request) = try sent.last(as: TypeRequest.self)
+        #expect(path == "/type")
+        #expect(request == TypeRequest(scope: Self.scope, text: "me@example.com", into: ElementQuery(target: .id("email"), role: nil, index: nil),
+                                       clear: true, submit: true))
+        #expect(report.text == "typed 14 characters into textField (no label) id=email at 201,322 by keyboard, after clearing, then Return  1320ms")
+        #expect(report.method == "keyboard" && !report.text.contains("me@example.com"))      // the text may be a secret
+    }
+
+    @Test func typingWithoutATargetGoesToTheFocusedElement() async throws {
+        defer { base.worktree.remove() }
+        var result = ActionResult(element: nil, x: nil, y: nil, ms: 900)
+        result.method = "paste"
+        var (service, ctx, sent) = try setup(result)
+        #expect(try await service.type("a", TypeOptions(into: nil, clear: false, submit: false), options, in: &ctx).text
+                == "typed 1 character into the focused element by paste  900ms")
+        #expect(try sent.last(as: TypeRequest.self).request.into == nil)
+        #expect(try await service.type("", TypeOptions(into: nil, clear: false, submit: true), options, in: &ctx).text
+                == "typed 0 characters into the focused element by paste, then Return  900ms")
+    }
+
+    @Test func typingThatCannotBeSentIsAUsageError() async throws {
+        defer { base.worktree.remove() }
+        var (service, ctx, sent) = try setup(ActionResult(element: nil, x: nil, y: nil, ms: 0))
+        let plain = TypeOptions(into: nil, clear: false, submit: false)
+        let nothing = await #expect(throws: XcdError.self) { _ = try await service.type("", plain, options, in: &ctx) }
+        #expect(nothing?.code == .usage && nothing?.message == "there is nothing to type")
+        let long = await #expect(throws: XcdError.self) { _ = try await service.type(String(repeating: "a", count: 2001), plain, options, in: &ctx) }
+        #expect(long?.code == .usage && long?.message == "the text is 2001 characters; one `xcd ui type` takes at most 2000")
+        let point = await #expect(throws: XcdError.self) {
+            _ = try await service.type("a", TypeOptions(into: "@1,2", clear: false, submit: false), options, in: &ctx)
+        }
+        #expect(point?.code == .usage && point?.message == "--into takes an element, not a point")
+        #expect(sent.count == 0)
+        _ = try await service.type(String(repeating: "a", count: 2000), plain, options, in: &ctx)
+        #expect(sent.count == 1)
+    }
+
+    /// Typing is slow, so the request is given time in proportion to the text: a request that times out would make
+    /// xcd restart a runner that is still typing.
+    @Test func aLongTextGetsALongerRequestTimeout() async throws {
+        defer { base.worktree.remove() }
+        var (service, ctx, transport, _) = try base.setup { _, _ in
+            FakeRunnerTransport.reply(Result<ActionResult, RunnerFailure>.success(ActionResult(element: nil, x: nil, y: nil, ms: 0)))
+        }
+        let plain = TypeOptions(into: nil, clear: false, submit: false)
+        _ = try await service.type("hi", plain, options, in: &ctx)
+        #expect(transport.timeouts.last == .seconds(2) + .seconds(30) + .milliseconds(500))
+        _ = try await service.type(String(repeating: "a", count: 2000), plain, options, in: &ctx)
+        #expect(transport.timeouts.last == .seconds(532))
+        _ = try await service.tap("@1,2", options, in: &ctx)
+        #expect(transport.timeouts.last == .seconds(32))
+    }
+
+    @Test func typingWithNothingFocusedSaysSo() async throws {
+        defer { base.worktree.remove() }
+        var (service, ctx, _, _) = try base.setup { _, _ in
+            FakeRunnerTransport.reply(Result<ActionResult, RunnerFailure>.failure(RunnerFailure(
+                code: RunnerFailure.Code.internal, message: "XCTest reported a problem",
+                issues: ["Failed to synthesize event: Neither element nor any descendant has keyboard focus."])))
+        }
+        let error = await #expect(throws: XcdError.self) {
+            _ = try await service.type("a", TypeOptions(into: nil, clear: false, submit: false), options, in: &ctx)
+        }
+        #expect(error?.code == .elementNotFound && error?.message == "nothing has keyboard focus, so there was nowhere to type")
+        #expect(error?.next == "focus a field first: pass `--into <target>`, or tap it")
+    }}

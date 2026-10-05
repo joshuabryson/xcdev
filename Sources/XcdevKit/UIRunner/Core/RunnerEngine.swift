@@ -20,6 +20,12 @@ public protocol DeviceDriving: AnyObject {
     func press(x: Double, y: Double, duration: Double) throws
     /// Drags from one point to another over `duration` seconds.
     func drag(from: ScreenPoint, to: ScreenPoint, duration: Double) throws
+    /// Types into whatever has keyboard focus.
+    func typeText(_ text: String) throws
+    /// Presses one key as a hardware keyboard would; with `command`, while holding Command.
+    func pressKey(_ key: String, command: Bool) throws
+    /// Puts text on the device's pasteboard.
+    func setPasteboard(text: String)
     func pause(_ seconds: Double)
     /// Seconds from any fixed origin.
     func now() -> Double
