@@ -57,6 +57,7 @@ public enum ConfigLoader {
         }
         issues += settingIssues(config)
         issues += commandIssues(config.commands ?? [:])
+        issues += DeepLinksValidation.issues(config)
         return issues
     }
 
