@@ -44,6 +44,19 @@ import Testing
             note: { optional: true }
     """
 
+    /// A launch route whose parameter is free text, to show that nothing outside a `url` is encoded.
+    static let launchYaml = """
+    version: 1
+    project: App.xcodeproj
+    deeplinks:
+      routes:
+        greet:
+          description: "Greet someone"
+          launch: { args: ["-greet", "{who}"], env: { WHO: "{who}" } }
+          params:
+            who: { default: "a b&c/é" }
+    """
+
     func resolver(_ yaml: String = RouteResolverTests.yaml) throws -> RouteResolver {
         RouteResolver(config: try ConfigLoader.parse(main: yaml))
     }
@@ -82,6 +95,11 @@ import Testing
                                           environment: ["STEP": "2", "FIXED": "1"]))
         #expect(try resolver().resolve(.route(name: "onboarding", values: [:])).delivery
                 == .launch(arguments: ["-startRoute", "onboarding/1", "Hello {id}"], environment: ["STEP": "1", "FIXED": "1"]))
+        let greetResolver = try resolver(Self.launchYaml)
+        #expect(try greetResolver.resolve(.route(name: "greet", values: ["who": "x y&z#?é/%"])).delivery
+                == .launch(arguments: ["-greet", "x y&z#?é/%"], environment: ["WHO": "x y&z#?é/%"]))
+        #expect(try greetResolver.resolve(.route(name: "greet", values: [:])).delivery
+                == .launch(arguments: ["-greet", "a b&c/é"], environment: ["WHO": "a b&c/é"]))
     }
 
     /// A script gets its values as environment variables, upper-cased, and its command is never filled in.
