@@ -31,7 +31,7 @@ extension RunnerEngine {
             return .retry(RunnerFailure(code: RunnerFailure.Code.notFound, message: "no element matches", seen: seen(scene)))
         case .one(let index):
             let node = scene.nodes[index]
-            if let problem = unhittable(node, in: scene) {
+            if let problem = unhittable(index, in: scene) {
                 return .retry(RunnerFailure(code: RunnerFailure.Code.notHittable, message: problem, frame: node.frame))
             }
             return .found(node)

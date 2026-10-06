@@ -64,6 +64,39 @@ import XcdevTestSupport
         #expect(device.events.last == "tap 201,570")
     }
 
+    /// The same two windows when the focused field has a UIKit input accessory view (seen on iOS 27.0): the bar is
+    /// in the app's own window beside the placeholder, and the keyboard's container starts at the bar's top edge.
+    static let accessoryWindows = [
+        node(4, screen, [node(1, screen, [node(1, ScreenRect(x: 0, y: 502, w: 402, h: 372), [
+            node(24, id: "Toolbar", label: "Toolbar", ScreenRect(x: 0, y: 502, w: 402, h: 44), [
+                node(9, id: "accMark", label: "Mark", ScreenRect(x: 21, y: 505, w: 61.7, h: 38)),
+            ]),
+            node(1, id: "inputView", ScreenRect(x: 0, y: 546, w: 402, h: 328)),
+        ])])]),
+        node(4, screen, [node(1, screen, [node(1, ScreenRect(x: 0, y: 502, w: 402, h: 372), [
+            node(1, ScreenRect(x: 0, y: 502, w: 402, h: 44)),
+            node(1, id: "SystemInputAssistantView", ScreenRect(x: 0, y: 546, w: 402, h: 44), [node(9, ScreenRect(x: 0, y: 546, w: 134, h: 44))]),
+            node(1, ScreenRect(x: 0, y: 590, w: 402, h: 226), [
+                node(19, ScreenRect(x: 0, y: 590, w: 402, h: 226), [node(20, label: "Q", ScreenRect(x: 4.7, y: 597, w: 39.3, h: 54))]),
+            ]),
+        ])])]),
+    ]
+
+    @Test func aBarTheAppPutAboveTheKeyboardCanBeTapped() throws {
+        let row = Self.node(9, id: "behind", label: "Behind the bar", ScreenRect(x: 16, y: 500, w: 370, h: 44))
+        let behind = Self.node(4, Self.screen, [Self.node(1, Self.screen, [row])])
+        let (engine, device) = make(Self.node(2, label: "SampleApp", Self.screen, [Self.form, behind] + Self.accessoryWindows))
+        let tree = try engine.tree(TreeRequest(bundleId: Self.bundle, system: false, all: false)).get()
+        #expect(tree.keyboard && tree.elements.map(\.identifier).contains("accMark"))
+        _ = try engine.tap(request(.id("accMark"))).get()
+        #expect(device.events == ["tap 51.9,524"])
+        // What the keys and the bar are over is still covered.
+        for id in ["low", "behind"] {
+            guard case .failure(let covered) = engine.tap(request(.id(id), timeout: 0.3)) else { Issue.record("tapped \(id)"); continue }
+            #expect(covered.code == RunnerFailure.Code.notHittable && covered.message == "the element is covered by the keyboard")
+        }
+    }
+
     @Test func aFailedSnapshotAtTheDeadlineKeepsTheLastRealAnswer() {
         let (engine, device) = make()
         device.onPause = { if $0.pauses == 1 { $0.failSnapshots = true } }

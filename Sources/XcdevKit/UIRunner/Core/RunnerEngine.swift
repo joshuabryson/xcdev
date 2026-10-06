@@ -96,24 +96,28 @@ public final class RunnerEngine {
         TreeBuilder.keyboardContainer(in: scene.nodes, screen: scene.screen).map { scene.nodes[$0].frame }
     }
 
-    /// Why a tap on `node` would not reach it: a system alert is up, or the keyboard is over it. Only app elements can be
-    /// covered. A system alert is modal, so it covers every app element, not only those under its frame.
-    func coveredBy(_ node: FlatNode, in scene: Scene) -> String? {
+    /// Why a tap on `scene.nodes[index]` would not reach it: a system alert is up, or the keyboard is over it. Only app
+    /// elements can be covered. A system alert is modal, so it covers every app element, not only those under its
+    /// frame. A bar the app put above the keyboard is in the keyboard's area, but nothing is over it.
+    func coveredBy(_ index: Int, in scene: Scene) -> String? {
+        let node = scene.nodes[index]
         guard node.source == .app else { return nil }
         if scene.alert != nil { return "the element is covered by a system alert" }
         if !node.inKeyboard, node.role != "keyboard", let keyboard = keyboardArea(in: scene),
-           keyboard.contains(x: node.frame.midX, y: node.frame.midY) {
+           keyboard.contains(x: node.frame.midX, y: node.frame.midY),
+           !TreeBuilder.isInAccessoryBar(index, in: scene.nodes, screen: scene.screen) {
             return "the element is covered by the keyboard"
         }
         return nil
     }
 
-    /// Why `node` can't be tapped now, if it can't.
-    func unhittable(_ node: FlatNode, in scene: Scene) -> String? {
+    /// Why `scene.nodes[index]` can't be tapped now, if it can't.
+    func unhittable(_ index: Int, in scene: Scene) -> String? {
+        let node = scene.nodes[index]
         if !node.enabled { return "the element is disabled" }
         if node.frame.isEmpty { return "the element has no size" }
         if !TreeBuilder.isOnScreen(node, screen: scene.screen) { return "the element is off screen" }
-        return coveredBy(node, in: scene)
+        return coveredBy(index, in: scene)
     }
 
     /// Seconds to keep looking: at most two minutes, so a runner can't be held for hours.

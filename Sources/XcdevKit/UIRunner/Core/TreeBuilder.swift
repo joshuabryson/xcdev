@@ -126,6 +126,17 @@ public enum TreeBuilder {
         return container
     }
 
+    /// Whether `nodes[index]` is in a bar the app put above the keyboard (a UIKit input accessory view). Such a bar
+    /// sits beside the keyboard's placeholder in the app's own window, and the keyboard's container leaves room for
+    /// it, so its frame is inside the keyboard's area although nothing covers it.
+    static func isInAccessoryBar(_ index: Int, in nodes: [FlatNode], screen: ScreenRect) -> Bool {
+        guard let placeholder = nodes.firstIndex(where: { $0.identifier == inputViewIdentifier && !$0.hasText && $0.source == .app }),
+              let host = nodes[placeholder].parent, nodes[host].frame.h < screen.h else { return false }
+        let node = nodes[index]
+        return isInside(index, host, in: nodes) && !isInside(index, placeholder, in: nodes)
+            && !nodes[placeholder].frame.contains(x: node.frame.midX, y: node.frame.midY)
+    }
+
     /// Whether `nodes[index]` is `ancestor` or inside it.
     static func isInside(_ index: Int, _ ancestor: Int, in nodes: [FlatNode]) -> Bool {
         var current: Int? = index
