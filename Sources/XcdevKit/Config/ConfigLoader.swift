@@ -22,7 +22,7 @@ public enum ConfigLoader {
 
         let config: XcdevConfig
         do {
-            config = try YAMLDecoder().decode(XcdevConfig.self, from: node)
+            config = try YAMLDecoder().decode(XcdevConfig.self, from: plainKeys(node))
         } catch {
             throw XcdError(.configInvalid, "\(fileName) could not be decoded", details: ["\(error)"])
         }
@@ -53,24 +53,37 @@ public enum ConfigLoader {
             issues.append(ConfigIssue(path: "defaultDevice", message: "'\(name)' is not a key under devices"))
         }
         for (name, spec) in devices.sorted(by: { $0.key < $1.key }) {
-            if !spec.isMac && spec.type == nil {
-                issues.append(ConfigIssue(path: "devices.\(name).type", message: "is required unless platform is macOS"))
-            }
-            if spec.isMac && spec.type != nil {
-                issues.append(ConfigIssue(path: "devices.\(name)", message: "set either type or platform: macOS, not both"))
-            }
-            if let partner = spec.pairWith {
-                if devices[partner] == nil || partner == name {
-                    issues.append(ConfigIssue(path: "devices.\(name).pairWith", message: "'\(partner)' is not a key under devices"))
-                } else if devices[partner]?.isMac == true {
-                    issues.append(ConfigIssue(path: "devices.\(name).pairWith", message: "'\(partner)' is a macOS device and cannot be paired"))
-                } else if devices[partner]?.pairWith != nil {
-                    // Covers cycles (a↔b) and chains; provisioning pairs one level only.
-                    issues.append(ConfigIssue(path: "devices.\(name).pairWith",
-                                              message: "'\(partner)' also has pairWith; pairing chains are not supported"))
-                }
-            }
+            issues += deviceIssues(name, spec, among: devices)
         }
+        issues += settingIssues(config)
+        issues += commandIssues(config.commands ?? [:])
+        return issues
+    }
+
+    static func deviceIssues(_ name: String, _ spec: DeviceSpec, among devices: [String: DeviceSpec]) -> [ConfigIssue] {
+        var issues: [ConfigIssue] = []
+        if !spec.isMac && spec.type == nil {
+            issues.append(ConfigIssue(path: "devices.\(name).type", message: "is required unless platform is macOS"))
+        }
+        if spec.isMac && spec.type != nil {
+            issues.append(ConfigIssue(path: "devices.\(name)", message: "set either type or platform: macOS, not both"))
+        }
+        guard let partner = spec.pairWith else { return issues }
+        let path = "devices.\(name).pairWith"
+        if devices[partner] == nil || partner == name {
+            issues.append(ConfigIssue(path: path, message: "'\(partner)' is not a key under devices"))
+        } else if devices[partner]?.isMac == true {
+            issues.append(ConfigIssue(path: path, message: "'\(partner)' is a macOS device and cannot be paired"))
+        } else if devices[partner]?.pairWith != nil {
+            // Covers cycles (a↔b) and chains; provisioning pairs one level only.
+            issues.append(ConfigIssue(path: path, message: "'\(partner)' also has pairWith; pairing chains are not supported"))
+        }
+        return issues
+    }
+
+    /// `logs:` and `ui:`.
+    static func settingIssues(_ config: XcdevConfig) -> [ConfigIssue] {
+        var issues: [ConfigIssue] = []
         if let maxFollow = config.logs?.maxFollow, DurationText.parse(maxFollow) == nil {
             issues.append(ConfigIssue(path: "logs.maxFollow",
                                       message: "'\(maxFollow)' is not a duration like \"30s\", \"5m\", or \"1h\""))
@@ -88,7 +101,6 @@ public enum ConfigLoader {
             issues.append(ConfigIssue(path: "ui.record.maxDuration",
                                       message: "'\(max)' is not a duration like \"30s\", \"10m\", or \"1h\""))
         }
-        issues += commandIssues(config.commands ?? [:])
         return issues
     }
 
@@ -114,6 +126,19 @@ public enum ConfigLoader {
             }
         }
         return issues
+    }
+
+    /// `node` with every mapping key as plain text. The decoder finds a key by its text read as YAML, so a quoted
+    /// key that looks like a number or a boolean (a route named "404") would otherwise never be found.
+    static func plainKeys(_ node: Node) -> Node {
+        switch node {
+        case .mapping(let mapping):
+            return .mapping(Node.Mapping(mapping.map { (Node($0.key.string ?? ""), plainKeys($0.value)) }))
+        case .sequence(let sequence):
+            return .sequence(Node.Sequence(sequence.map(plainKeys)))
+        default:
+            return node
+        }
     }
 
     private static func compose(_ yaml: String, file: String) throws -> Node {

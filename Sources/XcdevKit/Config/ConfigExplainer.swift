@@ -20,7 +20,7 @@ public enum ConfigExplainer {
         func walk(_ node: SchemaNode, prefix: String, parentExample: String) {
             switch node {
             case .object(_, let fields):
-                for field in fields {
+                for field in fields where !field.node.isReserved {
                     let key = prefix.isEmpty ? field.name : prefix + "." + field.name
                     docs.append(ConfigKeyDoc(key: key, type: typeName(field.node), summary: field.node.summary,
                                              required: field.required, allowed: allowed(field.node),
@@ -32,7 +32,7 @@ public enum ConfigExplainer {
                 docs.append(ConfigKeyDoc(key: key, type: typeName(value), summary: value.summary, required: false,
                                          allowed: allowed(value), defaultValue: nil, example: parentExample))
                 walk(value, prefix: key, parentExample: parentExample)
-            case .string, .integer, .stringList, .stringMap:
+            case .string, .integer, .boolean, .stringList, .stringMap, .reserved:
                 break
             }
         }
@@ -70,10 +70,12 @@ public enum ConfigExplainer {
         switch node {
         case .string: return "string"
         case .integer: return "integer"
+        case .boolean: return "true or false"
         case .stringList: return "list of strings"
         case .stringMap: return "map of strings"
         case .object: return "section"
         case .map: return "named entries"
+        case .reserved: return "reserved"
         }
     }
 

@@ -18,22 +18,32 @@ public enum JSONSchemaWriter {
             return result
         case .integer(let description):
             return ["type": "integer", "description": description]
+        case .boolean(let description):
+            return ["type": "boolean", "description": description]
         case .stringList(let description):
             return ["type": "array", "items": ["type": "string"], "description": description]
         case .stringMap(let description):
             return ["type": "object", "additionalProperties": ["type": "string"], "description": description]
         case .object(let description, let fields):
-            var result: [String: Any] = [
-                "type": "object",
-                "description": description,
-                "additionalProperties": false,
-                "properties": Dictionary(uniqueKeysWithValues: fields.map { ($0.name, object($0.node)) }),
-            ]
-            let required = fields.filter(\.required).map(\.name)
-            if !required.isEmpty { result["required"] = required }
-            return result
+            return section(description, fields)
         case .map(let description, let value):
             return ["type": "object", "description": description, "additionalProperties": object(value)]
+        case .reserved(let description):
+            return ["description": description]
         }
+    }
+
+    /// A section with fixed keys. Reserved keys are left out, so a schema-aware editor refuses them too.
+    private static func section(_ description: String, _ fields: [SchemaField]) -> [String: Any] {
+        let listed = fields.filter { !$0.node.isReserved }
+        var result: [String: Any] = [
+            "type": "object",
+            "description": description,
+            "additionalProperties": false,
+            "properties": Dictionary(uniqueKeysWithValues: listed.map { ($0.name, object($0.node)) }),
+        ]
+        let required = listed.filter(\.required).map(\.name)
+        if !required.isEmpty { result["required"] = required }
+        return result
     }
 }

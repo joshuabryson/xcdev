@@ -22,18 +22,27 @@ public struct SchemaField: Sendable {
 public indirect enum SchemaNode: Sendable {
     case string(String, allowed: [String]? = nil)
     case integer(String)
+    case boolean(String)
     case stringList(String)
     case stringMap(String)
     case object(String, [SchemaField])
     /// User-named keys (e.g. device names), each validated against the value schema.
     case map(String, SchemaNode)
+    /// A key kept for a later version. Using it is an error that says what it is kept for. It is left out of
+    /// `xcd config explain` and the JSON schema.
+    case reserved(String)
 
     public var summary: String {
         switch self {
-        case .string(let d, _), .integer(let d), .stringList(let d), .stringMap(let d),
-             .object(let d, _), .map(let d, _):
+        case .string(let d, _), .integer(let d), .boolean(let d), .stringList(let d), .stringMap(let d),
+             .object(let d, _), .map(let d, _), .reserved(let d):
             return d
         }
+    }
+
+    var isReserved: Bool {
+        if case .reserved = self { return true }
+        return false
     }
 }
 
@@ -108,8 +117,9 @@ public enum ConfigSchema {
                             default: "10m", example: "ui:\n  record:\n    maxDuration: 5m"),
             ]), example: "ui:\n  record:\n    maxDuration: 5m"),
         ]), example: "ui:\n  media:\n    dir: \".xcdev-media/{worktree}/{branch}\"\n  record:\n    maxDuration: 10m"),
+        SchemaField("deeplinks", deeplinks, example: "deeplinks:\n  vars:\n    base: \"myapp://app\"\n  routes:\n    settings:\n      description: \"Open settings\"\n      url: \"{base}/settings\""),
     ])
 
     /// Top-level keys defined later. Present keys get a clear "not supported yet" error.
-    public static let reservedTopLevelKeys = ["deeplinks", "lint", "debug"]
+    public static let reservedTopLevelKeys = ["lint", "debug"]
 }

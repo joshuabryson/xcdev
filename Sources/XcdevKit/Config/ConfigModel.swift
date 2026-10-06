@@ -11,6 +11,7 @@ public struct XcdevConfig: Codable, Sendable, Equatable {
     public var commands: [String: ProjectCommandSpec]?
     public var hooks: HookCommands?
     public var ui: UISettings?
+    public var deeplinks: DeepLinksConfig?
 
     public struct Schemes: Codable, Sendable, Equatable {
         public var app: String?
@@ -45,6 +46,10 @@ public struct XcdevConfig: Codable, Sendable, Equatable {
     public static let mediaPlaceholders = ["project", "worktree", "branch", "device"]
 
     public var allDevices: [String: DeviceSpec] { devices ?? [:] }
+    /// `deeplinks.routes`, empty when the section is absent.
+    public var routes: [String: RouteSpec] { deeplinks?.routes ?? [:] }
+    /// `deeplinks.vars`, empty when the section is absent.
+    public var linkVars: [String: String] { deeplinks?.vars ?? [:] }
     public var worktreesRoot: String { worktrees?.root ?? "../{project}.worktrees" }
 
     /// Longest `xcd logs --follow --for` allowed, so an agent can never block for long. Default 5 minutes.

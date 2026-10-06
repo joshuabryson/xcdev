@@ -32,6 +32,7 @@ Commit `.xcdev.yml`. `xcd init` adds `.xcdev/` (per-worktree build state) and `.
 | `ui` | Where screenshots and recordings go (`media.dir`) and how long they can record (`record.maxDuration`). | The app needs a custom capture folder or different recording limits. |
 | `commands` | Project commands, run as `xcd <name>`. | The project has scripts agents should run with the worktree's context. |
 | `hooks` | Scripts run at `post-worktree-create`, `pre-build`, `post-launch`, and `pre-worktree-remove`. | Worktrees need bootstrapping, code generation, or permissions after launch. |
+| `deeplinks` | The links the app can open, by name (`routes`), and text they share (`vars`). `xcd open` lists and opens them. | The app handles links or launch arguments that take an agent straight to a screen. |
 
 Per-machine overrides go in `.xcdev.local.yml`, which is merged over `.xcdev.yml`.
 """#,
