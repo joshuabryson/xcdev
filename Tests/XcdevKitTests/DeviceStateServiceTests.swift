@@ -103,6 +103,34 @@ import XcdevTestSupport
         #expect(got.text == "copied" && Renderer.report(got, command: "sim pasteboard get", format: .text) == "copied")
     }
 
+    /// A link for this worktree's own app would stop at an "Open in …?" alert on a clone that never opened its scheme.
+    @Test func openURLApprovesASchemeTheBuiltAppRegisters() async throws {
+        defer { worktree.remove() }
+        var (svc, ctx) = try setup()
+        worktree.runner.stub(["xcrun", "simctl", "spawn"])
+        let app = worktree.root + "/Build/App.app"
+        try FileManager.default.createDirectory(atPath: app, withIntermediateDirectories: true)
+        let plist: [String: Any] = ["CFBundleURLTypes": [["CFBundleURLSchemes": ["myapp"]]]]
+        try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0).write(to: URL(fileURLWithPath: app + "/Info.plist"))
+        var state = AppState()
+        state.builds["iphone"] = BuildRecord(scheme: "App", configuration: nil,
+                                             product: AppProduct(path: app, bundleId: "dev.xcdev.App", executableName: "App", platform: "iphonesimulator"),
+                                             finishedAt: Date())
+        try AppStateStore.save(state, ctx.paths)
+
+        _ = try await svc.openURL("MyApp://home", device: nil, in: &ctx)
+        #expect(last("spawn")?.arguments.suffix(3) == ["com.apple.CoreSimulator.CoreSimulatorBridge-->MyApp", "-string", "dev.xcdev.App"])
+        let approved = try #require(worktree.runner.calls.lastIndex { $0.arguments.dropFirst().first == "spawn" })
+        let sent = try #require(worktree.runner.calls.lastIndex { $0.arguments.dropFirst().first == "openurl" })
+        #expect(approved < sent)
+        // Links for other apps, and web links, are sent as before.
+        let approvals = worktree.runner.calls.filter { $0.arguments.dropFirst().first == "spawn" }.count
+        _ = try await svc.openURL("other://home", device: nil, in: &ctx)
+        _ = try await svc.openURL("https://example.com", device: nil, in: &ctx)
+        #expect(worktree.runner.calls.filter { $0.arguments.dropFirst().first == "spawn" }.count == approvals)
+        #expect(last("openurl")?.arguments.last == "https://example.com")
+    }
+
     @Test func aMacDeviceHasNoSimulator() async throws {
         defer { worktree.remove() }
         var (svc, ctx) = try setup()

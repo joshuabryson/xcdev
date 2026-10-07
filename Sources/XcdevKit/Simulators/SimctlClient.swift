@@ -105,6 +105,33 @@ public struct SimctlClient: Sendable {
         throw XcdError.subprocess(invocation, out, code: .simulatorFailed, next: "run `xcd doctor`")
     }
 
+    /// Where the app is installed on the simulator (the `.app` folder, a path on this Mac), or nil when it is not
+    /// installed. simctl answers a missing app with exit 2 and "No such file or directory".
+    public func appContainer(udid: String, bundleId: String) async throws -> String? {
+        let invocation = simctl(["get_app_container", udid, bundleId, "app"])
+        let out = try await runner.run(invocation)
+        if out.succeeded {
+            let path = out.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+            return path.isEmpty ? nil : path
+        }
+        if out.exitCode == 2 || out.stderrString.contains("No such file or directory") { return nil }
+        throw XcdError.subprocess(invocation, out, code: .simulatorFailed, next: "run `xcd doctor`")
+    }
+
+    /// Lets a link with `scheme` reach `bundleId` when it is sent with `simctl openurl`. A simulator that has never
+    /// opened the scheme otherwise asks "Open in …?" and holds the link behind that alert while simctl reports
+    /// success. The scheme is written exactly as the link spells it: the simulator compares it letter for letter
+    /// (seen on iOS 27.0). The write takes effect at once and is safe to repeat.
+    public func approveScheme(udid: String, scheme: String, bundleId: String) async throws {
+        try await runner.runChecked(simctl(["spawn", udid, "defaults", "write", Self.schemeApprovalDomain,
+                                            Self.schemeApprovalSender + scheme, "-string", bundleId]),
+                                    code: .simulatorFailed, next: "boot the simulator with `xcd sim boot`, then retry")
+    }
+
+    static let schemeApprovalDomain = "com.apple.launchservices.schemeapproval"
+    /// `simctl openurl` sends links as this process; the key is `<sender>--><scheme>`.
+    static let schemeApprovalSender = "com.apple.CoreSimulator.CoreSimulatorBridge-->"
+
     func simctl(_ args: [String], timeout: Duration = .seconds(60)) -> Invocation {
         .xcrun(["simctl"] + args, developerDir: developerDir, timeout: timeout)
     }

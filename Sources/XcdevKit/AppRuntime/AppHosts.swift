@@ -14,6 +14,35 @@ public protocol AppHost: Sendable {
     func launch(_ product: AppProduct, arguments: [String], environment: [String: String], logFile: String) async throws -> Int32?
     /// Stops the app; false when it wasn't running.
     func terminate(_ product: AppProduct) async throws -> Bool
+    /// The pid of the app's running process, however it was started, or nil when it is not running. On a simulator,
+    /// an app that is not installed is `simulator_failed`.
+    func runningPid(_ product: AppProduct) async throws -> Int32?
+    /// Sends a link to the app.
+    func open(_ url: String, in product: AppProduct) async throws
+}
+
+/// Finds running processes by the path of their executable.
+struct ProcessLookup: Sendable {
+    let runner: any ProcessRunning
+
+    /// Pids whose executable is `path`. `ps -o comm` prints the full executable path on macOS. Paths are compared in
+    /// canonical form, so a link or a `/private` prefix in either one does not hide a match. `ps` answers in a
+    /// twentieth of a second, but on a saturated Mac it has taken over ten, so it gets thirty.
+    func pids(of path: String) async throws -> Set<Int32> {
+        let out = try await runner.runChecked(Invocation("/bin/ps", ["-axo", "pid=,comm="], timeout: .seconds(30)))
+        let wanted = Paths.canonical(path)
+        let name = (path as NSString).lastPathComponent
+        var pids = Set<Int32>()
+        for line in out.stdoutString.split(separator: "\n") {
+            let trimmed = line.drop { $0 == " " }
+            guard let space = trimmed.firstIndex(of: " "), let pid = Int32(trimmed[..<space]) else { continue }
+            let command = String(trimmed[trimmed.index(after: space)...])
+            // Most processes are something else: compare names before resolving a path.
+            guard command.hasSuffix(name), Paths.canonical(command) == wanted else { continue }
+            pids.insert(pid)
+        }
+        return pids
+    }
 }
 
 public struct SimulatorAppHost: AppHost {
@@ -42,6 +71,24 @@ public struct SimulatorAppHost: AppHost {
     public func terminate(_ product: AppProduct) async throws -> Bool {
         try await simctl.terminate(udid: udid, bundleId: product.bundleId)
     }
+
+    /// A simulator app is a process on this Mac, running from where the simulator installed it.
+    public func runningPid(_ product: AppProduct) async throws -> Int32? {
+        guard let container = try await simctl.appContainer(udid: udid, bundleId: product.bundleId) else {
+            throw XcdError(.simulatorFailed, "\(product.bundleId) is not installed on this simulator",
+                           next: "install and start it with `xcd run`")
+        }
+        return try await ProcessLookup(runner: simctl.runner).pids(of: container + "/" + product.executableName).max()
+    }
+
+    /// Approves the link's own scheme first, so no "Open in …?" alert holds it. An http or
+    /// https link goes through the system like a tapped one and needs no approval.
+    public func open(_ url: String, in product: AppProduct) async throws {
+        if let scheme = LinkScheme.of(url), !LinkScheme.isWeb(scheme) {
+            try await simctl.approveScheme(udid: udid, scheme: scheme, bundleId: product.bundleId)
+        }
+        try await simctl.openURL(udid: udid, url: url)
+    }
 }
 
 /// Runs a macOS app straight from this worktree's DerivedData. Nothing is installed.
@@ -60,7 +107,7 @@ public struct MacAppHost: AppHost {
 
     public func launch(_ product: AppProduct, arguments: [String], environment: [String: String],
                        logFile: String) async throws -> Int32? {
-        let before = try await pids(of: product.executablePath)
+        let before = try await lookup.pids(of: product.executablePath)
         var args = ["-n", "-g", "--stdout", logFile, "--stderr", logFile]
         let env = AppEnvironment.captureOutput.merging(environment, uniquingKeysWith: { $1 })
         for (key, value) in env.sorted(by: { $0.key < $1.key }) { args += ["--env", "\(key)=\(value)"] }
@@ -68,30 +115,28 @@ public struct MacAppHost: AppHost {
         if !arguments.isEmpty { args += ["--args"] + arguments }
         try await runner.runChecked(Invocation("/usr/bin/open", args), next: "read the app log: \(logFile)")
         for _ in 0..<20 {
-            if let pid = try await pids(of: product.executablePath).subtracting(before).max() { return pid }
+            if let pid = try await lookup.pids(of: product.executablePath).subtracting(before).max() { return pid }
             try await sleep(.milliseconds(250))
         }
         return nil
     }
 
     public func terminate(_ product: AppProduct) async throws -> Bool {
-        let running = try await pids(of: product.executablePath).sorted()
+        let running = try await lookup.pids(of: product.executablePath).sorted()
         for pid in running {
             _ = try await runner.run(Invocation("/bin/kill", ["-TERM", String(pid)]))
         }
         return !running.isEmpty
     }
 
-    /// Pids whose executable is exactly `path`. `ps -o comm` prints the full executable path on macOS.
-    func pids(of path: String) async throws -> Set<Int32> {
-        let out = try await runner.runChecked(Invocation("/bin/ps", ["-axo", "pid=,comm="], timeout: .seconds(10)))
-        var pids = Set<Int32>()
-        for line in out.stdoutString.split(separator: "\n") {
-            let trimmed = line.drop { $0 == " " }
-            guard let space = trimmed.firstIndex(of: " "), let pid = Int32(trimmed[..<space]),
-                  trimmed[trimmed.index(after: space)...] == Substring(path) else { continue }
-            pids.insert(pid)
-        }
-        return pids
+    public func runningPid(_ product: AppProduct) async throws -> Int32? {
+        try await lookup.pids(of: product.executablePath).max()
     }
+
+    /// Mac delivery comes later. `RouteService` refuses a Mac target before it gets here.
+    public func open(_ url: String, in product: AppProduct) async throws {
+        throw RouteErrors.macNotYet(product, url: url)
+    }
+
+    var lookup: ProcessLookup { ProcessLookup(runner: runner) }
 }

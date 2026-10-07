@@ -11,8 +11,18 @@ public struct DeviceStateService: Sendable {
         self.now = now
     }
 
+    /// Opens a URL in whatever app takes it. When the link's scheme is one this worktree's built app registers, the
+    /// scheme is approved first, so no "Open in …?" alert holds the link.
     public func openURL(_ url: String, device: String?, in ctx: inout WorktreeContext) async throws -> DeviceStateReport {
-        try await run(device, &ctx, "opened \(url)") { try await $0.openURL(udid: $1, url: url) }
+        let name = try provisioner.deviceName(device, config: ctx.config)
+        let product = (try? AppStateStore.load(ctx.paths))?.builds[name]?.product
+        return try await run(name, &ctx, "opened \(url)") { simctl, udid in
+            if let product, let scheme = LinkScheme.of(url), !LinkScheme.isWeb(scheme),
+               AppSchemes.registers(scheme, in: AppSchemes.registered(by: product) ?? []) {
+                try await simctl.approveScheme(udid: udid, scheme: scheme, bundleId: product.bundleId)
+            }
+            try await simctl.openURL(udid: udid, url: url)
+        }
     }
 
     public func push(alert: String?, file: String?, bundle: String?, device: String?,

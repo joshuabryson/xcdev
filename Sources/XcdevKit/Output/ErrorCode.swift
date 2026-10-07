@@ -23,6 +23,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
     case platformUnsupported = "platform_unsupported"
     case runnerFailed = "runner_failed"
     case hookFailed = "hook_failed"
+    case routeFailed = "route_failed"
     case xcodeMissing = "xcode_missing"
     case xcodeRuntimeMismatch = "xcode_runtime_mismatch"
     case runtimeMissing = "runtime_missing"
@@ -36,7 +37,8 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
     /// 1 = the task failed (fix the code), 2 = fix the invocation or config, 3 = fix the environment (`xcd doctor`).
     public var exitCode: Int32 {
         switch self {
-        case .buildFailed, .testFailed, .appCrashed, .elementNotFound, .elementNotHittable, .waitTimeout, .hookFailed:
+        case .buildFailed, .testFailed, .appCrashed, .elementNotFound, .elementNotHittable, .waitTimeout, .hookFailed,
+             .routeFailed:
             return 1
         case .usage, .notInProject, .configMissing, .configInvalid, .deviceUnknown,
              .deviceTypeUnknown, .worktreeNotFound, .worktreeDirty, .appNotBuilt, .elementAmbiguous, .staleRef, .platformUnsupported:
@@ -70,7 +72,8 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .platformUnsupported: return "UI driving works on iPhone and iPad simulators running iOS 17 or later, and some hardware buttons exist only on some devices."
         case .runnerFailed: return "The UI runner inside the simulator could not be built or started, or stopped answering."
         case .hookFailed: return "A hook from .xcdev.yml exited non-zero; the error names the hook and its log."
-        case .xcodeMissing: return "The Xcode that .xcdev.yml or --xcode asks for isn't installed."
+        case .routeFailed: return "A route's script failed, or its link did not start the app."
+        case .xcodeMissing: return"The Xcode that .xcdev.yml or --xcode asks for isn't installed."
         case .xcodeRuntimeMismatch: return "A simulator runtime is newer than the selected Xcode supports."
         case .runtimeMissing: return "No installed simulator runtime matches the device's runtime setting."
         case .cloneFailed: return "simctl could not create, clone, or pair a simulator."
