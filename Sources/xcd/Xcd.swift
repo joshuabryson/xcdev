@@ -10,7 +10,7 @@ struct Xcd: AsyncParsableCommand {
         discussion: "Each git worktree gets its own simulators and build folders. Run commands from inside a project that has a .xcdev.yml. `xcd help` lists every command, including project commands and plugins.",
         version: XcdevVersion.current,
         subcommands: [BuildCommand.self, TestCommand.self, RunCommand.self, LogsCommand.self, CleanCommand.self,
-                      InstallCommand.self, UninstallCommand.self, LaunchCommand.self, TerminateCommand.self,
+                      InstallCommand.self, UninstallCommand.self, LaunchCommand.self, TerminateCommand.self, OpenCommand.self,
                       WorktreeCommand.self, SimCommand.self, UICommand.self, ConfigCommand.self, ContextCommand.self, InitCommand.self,
                       GuideCommand.self, DoctorCommand.self, PruneCommand.self]
     )
