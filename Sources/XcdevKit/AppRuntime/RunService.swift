@@ -26,6 +26,12 @@ public struct LaunchOptions: Sendable {
         return ((found.args ?? []) + arguments, (found.env ?? [:]).merging(environment, uniquingKeysWith: { $1 }))
     }
 
+    /// The launch with the preset applied, or `usage` for a preset `.xcdev.yml` does not define.
+    func plan(config: XcdevConfig) throws -> LaunchPlan {
+        let (arguments, environment) = try resolved(config: config)
+        return LaunchPlan(arguments: arguments, environment: environment, crashWindow: crashWindow)
+    }
+
     /// `--env KEY=VALUE` values.
     public static func parseEnvironment(_ pairs: [String]) throws -> [String: String] {
         var environment: [String: String] = [:]
@@ -37,6 +43,30 @@ public struct LaunchOptions: Sendable {
         }
         return environment
     }
+}
+
+/// A launch with its preset applied.
+struct LaunchPlan: Sendable, Equatable {
+    var arguments: [String] = []
+    var environment: [String: String] = [:]
+    var crashWindow: Duration = .seconds(5)
+}
+
+/// The latest build's app for one target, and the host it runs on.
+struct PreparedApp: Sendable {
+    let target: BuildTarget
+    let product: AppProduct
+    let host: any AppHost
+}
+
+/// An app that has just been started: what recording the launch, watching it, and reporting it need.
+struct StartedApp: Sendable {
+    let pid: Int32
+    let appLog: String
+    /// Taken before the app started: crash reports are matched to launches written at or after this time.
+    let launchedAt: Date
+    /// Set when the app died before its process was ever seen. Its crash is then already known.
+    var crashedAtLaunch: LaunchOutcome?
 }
 
 public struct RunService: Sendable {
@@ -54,54 +84,52 @@ public struct RunService: Sendable {
     /// Build (unless `noBuild`), boot, install, launch, and watch for a crash.
     public func run(_ build: BuildOptions, noBuild: Bool, launch: LaunchOptions,
                     in ctx: inout WorktreeContext) async throws -> RunReport {
-        let (arguments, environment) = try launch.resolved(config: ctx.config)
+        let plan = try launch.plan(config: ctx.config)
         var buildReport: BuildReport?
         if !noBuild {
             let report = try await builds.build(build, in: &ctx)
             guard report.succeeded else { return RunReport(buildFailed: report, worktree: ctx.state.name) }
             buildReport = report
         }
-        let (target, product, host) = try await prepare(build.device, boot: true, in: &ctx)
-        try await host.install(product)
-        return try await start(product, target: target, host: host, arguments: arguments, environment: environment,
-                               crashWindow: launch.crashWindow, build: buildReport, in: &ctx)
+        let app = try await prepare(build.device, boot: true, in: &ctx)
+        try await app.host.install(app.product)
+        return try await start(app, plan, build: buildReport, in: &ctx)
     }
 
     /// Launch the already-installed build (booting the clone if needed) and watch for a crash.
     public func launch(device: String?, options: LaunchOptions, in ctx: inout WorktreeContext) async throws -> RunReport {
-        let (arguments, environment) = try options.resolved(config: ctx.config)
-        let (target, product, host) = try await prepare(device, boot: true, in: &ctx)
-        return try await start(product, target: target, host: host, arguments: arguments, environment: environment,
-                               crashWindow: options.crashWindow, build: nil, in: &ctx)
+        let plan = try options.plan(config: ctx.config)
+        let app = try await prepare(device, boot: true, in: &ctx)
+        return try await start(app, plan, build: nil, in: &ctx)
     }
 
     public func install(device: String?, in ctx: inout WorktreeContext) async throws -> AppActionReport {
-        let (target, product, host) = try await prepare(device, boot: true, in: &ctx)
-        guard target.device != nil else {
-            return AppActionReport(action: "nothing to install", bundleId: product.bundleId, target: target.name,
+        let app = try await prepare(device, boot: true, in: &ctx)
+        guard app.target.device != nil else {
+            return AppActionReport(action: "nothing to install", bundleId: app.product.bundleId, target: app.target.name,
                                    note: "macOS apps run from this worktree's DerivedData", worktree: ctx.state.name)
         }
-        try await host.install(product)
-        return AppActionReport(action: "installed", bundleId: product.bundleId, target: target.name, note: nil,
+        try await app.host.install(app.product)
+        return AppActionReport(action: "installed", bundleId: app.product.bundleId, target: app.target.name, note: nil,
                                worktree: ctx.state.name)
     }
 
     public func uninstall(device: String?, in ctx: inout WorktreeContext) async throws -> AppActionReport {
-        let (target, product, host) = try await prepare(device, boot: true, in: &ctx)
-        guard target.device != nil else {
-            return AppActionReport(action: "nothing to uninstall", bundleId: product.bundleId, target: target.name,
+        let app = try await prepare(device, boot: true, in: &ctx)
+        guard app.target.device != nil else {
+            return AppActionReport(action: "nothing to uninstall", bundleId: app.product.bundleId, target: app.target.name,
                                    note: "macOS apps run from this worktree's DerivedData", worktree: ctx.state.name)
         }
-        try await host.uninstall(product)
-        return AppActionReport(action: "uninstalled", bundleId: product.bundleId, target: target.name, note: nil,
+        try await app.host.uninstall(app.product)
+        return AppActionReport(action: "uninstalled", bundleId: app.product.bundleId, target: app.target.name, note: nil,
                                worktree: ctx.state.name)
     }
 
     public func terminate(device: String?, in ctx: inout WorktreeContext) async throws -> AppActionReport {
-        let (target, product, host) = try await prepare(device, boot: false, in: &ctx)
-        let stopped = try await host.terminate(product)
-        return AppActionReport(action: stopped ? "terminated" : "not running", bundleId: product.bundleId,
-                               target: target.name, note: nil, worktree: ctx.state.name)
+        let app = try await prepare(device, boot: false, in: &ctx)
+        let stopped = try await app.host.terminate(app.product)
+        return AppActionReport(action: stopped ? "terminated" : "not running", bundleId: app.product.bundleId,
+                               target: app.target.name, note: nil, worktree: ctx.state.name)
     }
 
     /// The latest build's app for this target, or `app_not_built` naming the build to run.
@@ -118,62 +146,83 @@ public struct RunService: Sendable {
         return product
     }
 
-    private func prepare(_ device: String?, boot: Bool,
-                         in ctx: inout WorktreeContext) async throws -> (BuildTarget, AppProduct, any AppHost) {
+    /// The latest build's app for `device` and its host, cloning the simulator on first use.
+    func prepare(_ device: String?, boot: Bool, in ctx: inout WorktreeContext) async throws -> PreparedApp {
         let container = try ProjectContainer.resolve(config: ctx.config, worktreeRoot: ctx.location.worktreeRoot)
         let name = try builds.provisioner.targetName(device, container: container, config: ctx.config)
         let product = try Self.product(for: name, requested: device, in: ctx)
         let target = try await builds.provisioner.buildTarget(device, container: container, in: &ctx)
         guard let clone = target.device else {
-            return (target, product, MacAppHost(runner: builds.runner, sleep: sleep))
+            return PreparedApp(target: target, product: product, host: MacAppHost(runner: builds.runner, sleep: sleep))
         }
         if boot { _ = try await builds.provisioner.boot(target.name, in: &ctx) }
-        return (target, product, SimulatorAppHost(simctl: builds.provisioner.simctl(for: ctx), udid: clone.udid))
+        let host = SimulatorAppHost(simctl: builds.provisioner.simctl(for: ctx), udid: clone.udid)
+        return PreparedApp(target: target, product: product, host: host)
     }
 
-    private func start(_ product: AppProduct, target: BuildTarget, host: any AppHost, arguments: [String],
-                       environment: [String: String], crashWindow: Duration, build: BuildReport?,
+    private func start(_ app: PreparedApp, _ plan: LaunchPlan, build: BuildReport?,
                        in ctx: inout WorktreeContext) async throws -> RunReport {
-        let paths = ctx.paths
+        let started = try await begin(app, plan, in: &ctx)
+        let outcome = try await outcome(of: started, app.product, window: plan.crashWindow)
+        return Self.report(outcome, started, app, RunFacts(build: build, crashWindow: plan.crashWindow, ctx: ctx))
+    }
+
+    /// Starts the app, replacing a running copy, with its output going to a new log. Then records the launch and
+    /// runs the post-launch hook (`settle`).
+    func begin(_ app: PreparedApp, _ plan: LaunchPlan, in ctx: inout WorktreeContext) async throws -> StartedApp {
         // `simctl launch --terminate-running-process` replaces a running copy; `open -n` would start a second one.
-        if target.device == nil, try await host.terminate(product) {
-            builds.progress("stopped the running \(product.executableName)")
+        if app.target.device == nil, try await app.host.terminate(app.product) {
+            builds.progress("stopped the running \(app.product.executableName)")
         }
-        // Taken before the launch: crash reports are matched to launches written at or after this time.
         let launchedAt = builds.now()
-        let appLog = paths.newArtifact(in: paths.logs, kind: "app", ext: "log", now: launchedAt)
-        let pid: Int32
-        var crashedAtLaunch: LaunchOutcome?
-        if let launched = try await host.launch(product, arguments: arguments, environment: environment, logFile: appLog) {
-            pid = launched
-        } else if let crash = try await watcher.report(processName: product.executableName, pid: nil, since: launchedAt) {
+        let appLog = ctx.paths.newArtifact(in: ctx.paths.logs, kind: "app", ext: "log", now: launchedAt)
+        var started: StartedApp
+        if let pid = try await app.host.launch(app.product, arguments: plan.arguments, environment: plan.environment, logFile: appLog) {
+            started = StartedApp(pid: pid, appLog: appLog, launchedAt: launchedAt)
+        } else if let crash = try await watcher.report(processName: app.product.executableName, pid: nil, since: launchedAt) {
             // A Mac app that dies before `ps` sees it (e.g. a fatalError in App.init) still leaves its crash report.
-            pid = crash.pid
-            crashedAtLaunch = .exited(after: 0, crash: crash)
+            started = StartedApp(pid: crash.pid, appLog: appLog, launchedAt: launchedAt)
+            started.crashedAtLaunch = .exited(after: 0, crash: crash)
         } else {
-            throw XcdError(.subprocessFailed, "\(product.executableName) did not start within 5s",
+            throw XcdError(.subprocessFailed, "\(app.product.executableName) did not start within 5s",
                            next: "read the app log: \(appLog)")
         }
-        var state = try AppStateStore.load(paths)
-        state.lastLaunch = LaunchRecord(target: target.name, bundleId: product.bundleId, processName: product.executableName,
-                                        pid: pid, appLog: appLog, launchedAt: launchedAt)
-        try AppStateStore.save(state, paths)
-        if crashedAtLaunch == nil {
-            do {
-                try await builds.hooks?.run(.postLaunch, in: ctx, device: target.configDevice)
-            } catch var error as XcdError where error.code == .hookFailed || error.code == .timeout {
-                error.details.append("the app is still running (pid \(pid)); stop it with `xcd terminate`")
-                throw error
-            }
+        try await settle(started, app, in: &ctx)
+        return started
+    }
+
+    /// Records the launch, so `xcd logs` and `xcd terminate` know it, then runs the post-launch hook.
+    func settle(_ started: StartedApp, _ app: PreparedApp, in ctx: inout WorktreeContext) async throws {
+        var state = try AppStateStore.load(ctx.paths)
+        state.lastLaunch = LaunchRecord(target: app.target.name, bundleId: app.product.bundleId,
+                                        processName: app.product.executableName, pid: started.pid, appLog: started.appLog,
+                                        launchedAt: started.launchedAt)
+        try AppStateStore.save(state, ctx.paths)
+        guard started.crashedAtLaunch == nil else { return }
+        do {
+            try await builds.hooks?.run(.postLaunch, in: ctx, device: app.target.configDevice)
+        } catch var error as XcdError where error.code == .hookFailed || error.code == .timeout {
+            error.details.append("the app is still running (pid \(started.pid)); stop it with `xcd terminate`")
+            throw error
         }
-        let outcome: LaunchOutcome
-        if let crashedAtLaunch {
-            outcome = crashedAtLaunch
-        } else {
-            builds.progress("launched \(product.bundleId) (pid \(pid)); watching \(DurationText.format(crashWindow)) for a crash")
-            outcome = try await watcher.watch(pid: pid, processName: product.executableName, window: crashWindow,
-                                          launchedAt: launchedAt)
-        }
+    }
+
+    /// Watches a started app for `window`. An app that crashed at launch is not watched: its outcome is known.
+    func outcome(of started: StartedApp, _ product: AppProduct, window: Duration) async throws -> LaunchOutcome {
+        if let crashed = started.crashedAtLaunch { return crashed }
+        builds.progress("launched \(product.bundleId) (pid \(started.pid)); watching \(DurationText.format(window)) for a crash")
+        return try await watcher.watch(pid: started.pid, processName: product.executableName, window: window,
+                                       launchedAt: started.launchedAt)
+    }
+
+    /// What a run report needs besides the app and how its launch went.
+    struct RunFacts {
+        let build: BuildReport?
+        let crashWindow: Duration
+        let ctx: WorktreeContext
+    }
+
+    static func report(_ outcome: LaunchOutcome, _ started: StartedApp, _ app: PreparedApp, _ facts: RunFacts) -> RunReport {
         let status: RunReport.Status
         var exitedAfter: Double?
         var crash: CrashReport?
@@ -185,12 +234,12 @@ public struct RunService: Sendable {
             exitedAfter = after
             crash = report
         }
-        return RunReport(status: status, build: build, target: target.name, targetSummary: target.summary,
-                         bundleId: product.bundleId, pid: pid, appLog: appLog,
-                         crashWindow: DurationText.seconds(crashWindow), exitedAfter: exitedAfter, crash: crash,
-                         appOutput: status == .running ? nil : Self.tail(of: appLog, lines: 10),
-                         note: Self.captureNote(worktreeRoot: ctx.location.worktreeRoot, target: target),
-                         worktree: ctx.state.name)
+        return RunReport(status: status, build: facts.build, target: app.target.name, targetSummary: app.target.summary,
+                         bundleId: app.product.bundleId, pid: started.pid, appLog: started.appLog,
+                         crashWindow: DurationText.seconds(facts.crashWindow), exitedAfter: exitedAfter, crash: crash,
+                         appOutput: status == .running ? nil : Self.tail(of: started.appLog, lines: 10),
+                         note: Self.captureNote(worktreeRoot: facts.ctx.location.worktreeRoot, target: app.target),
+                         worktree: facts.ctx.state.name)
     }
 
     static func tail(of file: String, lines count: Int) -> [String] {

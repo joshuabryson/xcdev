@@ -270,6 +270,34 @@ import XcdevTestSupport
         #expect(error?.next?.hasPrefix("read the app log: \(ctx.paths.logs)/") == true)
     }
 
+    /// `xcd open` starts the app through the same steps and puts its own step before the crash watch.
+    @Test func beginStartsAndRecordsTheAppWithoutWatchingIt() async throws {
+        defer { worktree.remove() }
+        _ = try setUp()
+        var ctx = try context()
+        var state = AppState()
+        state.builds["iphone"] = BuildRecord(scheme: "App", configuration: nil, product: Self.product, finishedAt: Date())
+        try AppStateStore.save(state, ctx.paths)
+        let svc = service(FakeProbe(runningChecks: 0))                       // a watch would see the app gone at once
+        let app = try await svc.prepare(nil, boot: true, in: &ctx)
+        #expect(app.target.name == "iphone" && app.product == Self.product)
+        let started = try await svc.begin(app, LaunchPlan(arguments: ["-x"], environment: ["K": "v"]), in: &ctx)
+        #expect(started.pid == 4242 && started.crashedAtLaunch == nil)
+        #expect(try AppStateStore.load(ctx.paths).lastLaunch?.appLog == started.appLog)
+        let launch = try #require(fake.calls.last { $0.arguments.starts(with: ["simctl", "launch"]) })
+        #expect(launch.arguments.last == "-x" && launch.environment["SIMCTL_CHILD_K"] == "v")
+        #expect(try await svc.outcome(of: started, app.product, window: .seconds(5)) == .exited(after: 0, crash: nil))
+    }
+
+    @Test func presetsBecomeALaunchPlan() throws {
+        let config = try ConfigLoader.parse(main: Self.config)
+        let plan = try LaunchOptions(preset: "onboarding", arguments: ["-extra"], environment: ["GREETING": "hi"],
+                                     crashWindow: .seconds(2)).plan(config: config)
+        #expect(plan == LaunchPlan(arguments: ["-resetOnboarding", "YES", "-extra"],
+                                   environment: ["API_ENV": "staging", "GREETING": "hi"], crashWindow: .seconds(2)))
+        #expect(throws: XcdError.self) { try LaunchOptions(preset: "nope").plan(config: config) }
+    }
+
     @Test func environmentPairsParse() throws {
         #expect(try LaunchOptions.parseEnvironment(["A=1", "B=x=y", "C="]) == ["A": "1", "B": "x=y", "C": ""])
         let error = #expect(throws: XcdError.self) { try LaunchOptions.parseEnvironment(["NOPE"]) }
