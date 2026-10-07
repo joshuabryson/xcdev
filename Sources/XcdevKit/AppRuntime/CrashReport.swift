@@ -63,8 +63,9 @@ public struct CrashReportLocator: Sendable {
     }
 
     /// The newest `<process>-*.ips` written since `since` (allowing 2s of clock slack) whose pid matches;
-    /// any pid when `pid` is nil (the process died before its pid was seen).
-    public func find(processName: String, pid: Int32? = nil, since: Date) -> CrashReport? {
+    /// any pid when `pid` is nil (the process died before its pid was seen). Every simulator, and a Mac build of the
+    /// same name, writes to this folder: with `simulator`, only a report of a process that ran in that simulator counts.
+    public func find(processName: String, pid: Int32? = nil, since: Date, simulator: String? = nil) -> CrashReport? {
         let fm = FileManager.default
         let names = (try? fm.contentsOfDirectory(atPath: directory)) ?? []
         for name in names.sorted(by: >) where name.hasPrefix(processName + "-") && name.hasSuffix(".ips") {
@@ -72,9 +73,23 @@ public struct CrashReportLocator: Sendable {
             guard let modified = (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date,
                   modified >= since.addingTimeInterval(-2),
                   let text = try? String(contentsOfFile: path, encoding: .utf8),
-                  let report = try? CrashReport.parse(text, path: path), pid == nil || report.pid == pid else { continue }
+                  let report = try? CrashReport.parse(text, path: path), pid == nil || report.pid == pid,
+                  simulator.map({ CrashReport.ranIn(simulator: $0, reportText: text) }) ?? true else { continue }
             return report
         }
         return nil
+    }
+}
+
+extension CrashReport {
+    /// Whether the `.ips` text is a crash of a process that ran in simulator `udid`: its `procPath` is inside that
+    /// device's folder. The UDID identifies the device because the home folder is redacted in reports. False when
+    /// the text has no readable `procPath`.
+    static func ranIn(simulator udid: String, reportText text: String) -> Bool {
+        struct Body: Decodable { let procPath: String? }
+        guard let newline = text.firstIndex(of: "\n"),
+              let body = try? JSONDecoder().decode(Body.self, from: Data(text[text.index(after: newline)...].utf8)),
+              let path = body.procPath else { return false }
+        return path.contains("/CoreSimulator/Devices/\(udid)/")
     }
 }

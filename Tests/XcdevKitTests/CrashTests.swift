@@ -7,10 +7,17 @@ import XcdevTestSupport
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xcd-crash-\(UUID().uuidString)").path
     let launchedAt = Date()
 
-    func writeReport(named name: String = "SampleApp-2026-09-30-195619.ips", modified: Date? = nil) throws -> String {
+    /// The simulator the recorded report came from.
+    static let recordedSimulator = "C268DCFB-3E56-4C43-8947-B25ED3833F7E"
+
+    /// Writes the recorded report; with `simulator`, as a crash of that simulator's process instead.
+    func writeReport(named name: String = "SampleApp-2026-09-30-195619.ips", modified: Date? = nil,
+                     simulator: String? = nil) throws -> String {
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let path = dir + "/" + name
-        try Fixture.string("crash-sim.ips").write(toFile: path, atomically: true, encoding: .utf8)
+        let recorded = Fixture.string("crash-sim.ips")
+        let text = simulator.map { recorded.replacingOccurrences(of: Self.recordedSimulator, with: $0) } ?? recorded
+        try text.write(toFile: path, atomically: true, encoding: .utf8)
         if let modified { try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: path) }
         return path
     }
@@ -74,6 +81,37 @@ import XcdevTestSupport
         #expect(CrashReportLocator(directory: dir).find(processName: "Other", since: launchedAt) == nil)
         _ = try writeReport(modified: launchedAt.addingTimeInterval(-3600))
         #expect(CrashReportLocator(directory: dir).find(processName: "SampleApp", since: launchedAt.addingTimeInterval(60)) == nil)
+    }
+
+    @Test func aReportBelongsToTheSimulatorItsProcessRanOn() {
+        let text = Fixture.string("crash-sim.ips")
+        #expect(CrashReport.ranIn(simulator: Self.recordedSimulator, reportText: text))
+        #expect(!CrashReport.ranIn(simulator: "11111111-2222-3333-4444-555555555555", reportText: text))
+        #expect(!CrashReport.ranIn(simulator: String(Self.recordedSimulator.dropLast()), reportText: text))
+    }
+
+    /// The report says where the process ran, or it counts for no simulator: a Mac app's, a damaged one, one with no path.
+    @Test func aReportWhoseProcessPathCannotBeReadBelongsToNoSimulator() {
+        let text = Fixture.string("crash-sim.ips")
+        let simulator = Self.recordedSimulator
+        let noPath = text.replacingOccurrences(of: "\"procPath\"", with: "\"procPathUnknown\"")
+        let onTheMac = text.replacingOccurrences(of: "CoreSimulator/Devices/\(simulator)", with: "Xcode/DerivedData")
+        let headerOnly = String(text.prefix { $0 != "\n" })
+        for unreadable in [noPath, onTheMac, headerOnly, "{}\nnot json", "not an ips report", ""] {
+            #expect(!CrashReport.ranIn(simulator: simulator, reportText: unreadable))
+        }
+    }
+
+    /// Every simulator's crashes land in one folder. A simulator's own report is found even when another's is newer.
+    @Test func aSimulatorsReportIsFoundWhicheverReportIsNewer() throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let mine = "11111111-2222-3333-4444-555555555555"
+        let own = try writeReport(named: "SampleApp-2026-09-30-195619.ips", simulator: mine)
+        let newer = try writeReport(named: "SampleApp-2026-09-30-195700.ips")
+        let locator = CrashReportLocator(directory: dir)
+        #expect(locator.find(processName: "SampleApp", since: launchedAt)?.path == newer)
+        #expect(locator.find(processName: "SampleApp", since: launchedAt, simulator: mine)?.path == own)
+        #expect(locator.find(processName: "SampleApp", since: launchedAt, simulator: "99999999-2222-3333-4444-555555555555") == nil)
     }
 
     @Test func realProbeSeesThisProcess() {

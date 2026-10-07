@@ -94,13 +94,24 @@ import XcdevTestSupport
             .filter { ["launch", "terminate", "spawn", "openurl", "install"].contains($0) }
     }
 
-    /// Writes a crash report for SampleApp (pid 46606), dated at the service's clock, and returns its path.
-    func writeCrashReport() throws -> String {
+    /// The simulator the recorded crash report came from: none of these tests' own.
+    static let otherSimulator = "C268DCFB-3E56-4C43-8947-B25ED3833F7E"
+
+    /// Writes a crash report for SampleApp, dated at the service's clock, and returns its path. It is the recorded report
+    /// of process `pid` on simulator `udid`; a later `stamp` makes it the newer file.
+    func writeCrashReport(pid: Int32 = 46606, udid: String = otherSimulator, stamp: String = "2026-09-30-195619") throws -> String {
         try FileManager.default.createDirectory(atPath: crashDir, withIntermediateDirectories: true)
-        let ips = crashDir + "/SampleApp-2026-09-30-195619.ips"
-        try Fixture.string("crash-sim.ips").write(toFile: ips, atomically: true, encoding: .utf8)
+        let ips = crashDir + "/SampleApp-\(stamp).ips"
+        let text = Fixture.string("crash-sim.ips").replacingOccurrences(of: Self.otherSimulator, with: udid)
+            .replacingOccurrences(of: "\"pid\" : 46606,", with: "\"pid\" : \(pid),")
+        try text.write(toFile: ips, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_790_040_000)], ofItemAtPath: ips)
         return ips
+    }
+
+    /// The UDID of this worktree's simulator, cloned now instead of by the first command.
+    func clone(_ ctx: inout WorktreeContext) async throws -> String {
+        try await worktree.provisioner.ensure("iphone", in: &ctx).udid
     }
 
     func call(_ subcommand: String) -> Invocation? { fake.calls.last { $0.arguments.dropFirst().first == subcommand } }
@@ -266,10 +277,11 @@ import XcdevTestSupport
         defer { worktree.remove() }
         var ctx = try context()
         try setUp(ctx)
+        let udid = try await clone(&ctx)
         let ips = crashDir + "/SampleApp-2026-09-30-195619.ips"
         let test = self
         fake.stub(["xcrun", "simctl", "openurl"]) { _ in
-            _ = try test.writeCrashReport()                                 // the app dies as soon as the link arrives
+            _ = try test.writeCrashReport(udid: udid)                       // the app dies as soon as the link arrives
             return ProcessOutput()
         }
         let report = try await service().open(item(), OpenOptions(cold: true), in: &ctx)
@@ -283,7 +295,8 @@ import XcdevTestSupport
         defer { worktree.remove() }
         var ctx = try context()
         try setUp(ctx)
-        _ = try writeCrashReport()
+        let udid = try await clone(&ctx)
+        _ = try writeCrashReport(udid: udid)
         let svc = service()
         let error = await #expect(throws: XcdError.self) { _ = try await svc.open(item(), OpenOptions(cold: true), in: &ctx) }
         #expect(error?.code == .routeFailed)
@@ -293,6 +306,70 @@ import XcdevTestSupport
         }
         let report = try await svc.open(item(), OpenOptions(cold: true), in: &ctx)
         #expect(report.failure == nil && report.app?.pid == 700)
+    }
+
+    /// The reports folder is shared by every simulator: another worktree's copy of the app can crash during the wait.
+    @Test func anotherSimulatorsCrashIsNotThisLinksStart() async throws {
+        defer { worktree.remove() }
+        var ctx = try context()
+        try setUp(ctx)
+        let test = self
+        fake.stub(["xcrun", "simctl", "openurl"]) { _ in
+            _ = try test.writeCrashReport()                                 // a copy of SampleApp on another simulator
+            return ProcessOutput()
+        }
+        let svc = service()
+        let error = await #expect(throws: XcdError.self) { _ = try await svc.open(item(), OpenOptions(cold: true), in: &ctx) }
+        #expect(error?.code == .routeFailed && error?.message == "the link was sent, but it did not start dev.xcdev.SampleApp within 30s")
+        #expect(try AppStateStore.load(ctx.paths).lastLaunch == nil)
+    }
+
+    @Test func anotherSimulatorsCrashDoesNotHideThisLinksStart() async throws {
+        defer { worktree.remove() }
+        var ctx = try context()
+        try setUp(ctx)
+        let test = self
+        fake.stub(["xcrun", "simctl", "openurl"]) { _ in
+            _ = try test.writeCrashReport()
+            return ProcessOutput()
+        }
+        let looks = Counter()
+        fake.stub(["ps"]) { _ in                                            // this simulator's process: the fourth look
+            ProcessOutput(stdout: looks.increment() <= 3 ? "" : "  700 \(Self.container)/SampleApp\n")
+        }
+        let report = try await service().open(item(), OpenOptions(cold: true), in: &ctx)
+        #expect(report.app == OpenReport.App(state: "started-by-link", pid: 700, bundleId: "dev.xcdev.SampleApp", log: nil))
+        #expect(report.failure == nil && report.crash == nil)
+    }
+
+    /// Both reports are new: this simulator's is taken, whichever file is newer.
+    @Test func thisSimulatorsCrashIsTakenEvenWhenAnotherSimulatorsIsNewer() async throws {
+        defer { worktree.remove() }
+        var ctx = try context()
+        try setUp(ctx)
+        let udid = try await clone(&ctx)
+        let test = self
+        fake.stub(["xcrun", "simctl", "openurl"]) { _ in
+            _ = try test.writeCrashReport(pid: 777, udid: udid)
+            _ = try test.writeCrashReport(pid: 888, stamp: "2026-09-30-195700")
+            return ProcessOutput()
+        }
+        let report = try await service().open(item(), OpenOptions(cold: true), in: &ctx)
+        #expect(report.failure?.code == .appCrashed && report.app?.pid == 777 && report.crash?.pid == 777)
+        #expect(report.crash?.path == crashDir + "/SampleApp-2026-09-30-195619.ips")
+    }
+
+    /// The report that was already there is this simulator's newest, not another simulator's newer one.
+    @Test func anEarlierReportIsThisSimulatorsEvenWhenAnotherSimulatorsIsNewer() async throws {
+        defer { worktree.remove() }
+        var ctx = try context()
+        try setUp(ctx)
+        let udid = try await clone(&ctx)
+        _ = try writeCrashReport(pid: 777, udid: udid)
+        _ = try writeCrashReport(pid: 888, stamp: "2026-09-30-195700")
+        let svc = service()
+        let error = await #expect(throws: XcdError.self) { _ = try await svc.open(item(), OpenOptions(cold: true), in: &ctx) }
+        #expect(error?.code == .routeFailed)
     }
 
     /// The system starts a cold app, so launch arguments cannot be passed: refused before the device is touched.
