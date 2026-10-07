@@ -161,7 +161,11 @@ extension UIRunnerIntegrationTests {
         let toggle = try #require(tree.elements.first { $0.identifier == "rememberMe" }?.ref)
         _ = try await svc.ui.tap("ref:\(toggle)", options, in: &ctx)
 
-        // --clear replaces what the field holds; --submit presses Return, which the app records.
+        // --clear replaces what the field holds. Its Command-A makes iOS minimize the keyboard for about a second
+        //; the typing ends, and the tree is read, once the keyboard is back.
+        let cleared = try await svc.ui.type("old", TypeOptions(into: "id:emailField", clear: true, submit: false), withTree, in: &ctx)
+        #expect(cleared.tree?.keyboard == true && cleared.tree?.elements.first { $0.identifier == "emailField" }?.value == "old", "\(cleared.text)")
+        // --submit presses Return, which the app records.
         let replaced = try await svc.ui.type("new", TypeOptions(into: "id:emailField", clear: true, submit: true), withTree, in: &ctx)
         #expect(replaced.tree?.elements.first { $0.identifier == "emailField" }?.value == "new", "\(replaced.text)")
         #expect(try await svc.ui.wait("label:submitted: new", gone: false, options, in: &ctx).element?.identifier == "submitted")

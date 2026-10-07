@@ -91,17 +91,37 @@ extension RunnerEngine {
 
     /// Enters the text: through the keyboard when one is up, else by pasting, which never calls `typeText`
     /// (it fails without a software keyboard). `--clear` selects everything first, so what follows replaces it.
+    /// Typing through the keyboard ends once the keyboard is back (`awaitKeyboard`).
     func entered(_ request: TypeRequest, keyboard: Bool, into focused: ActionResult) throws -> ActionResult {
         if request.clear { try device.pressKey("a", command: true) }
         if keyboard {
             let text = (request.clear ? Keys.delete : "") + request.text + (request.submit ? "\n" : "")
             if !text.isEmpty { try device.typeText(text) }
+            awaitKeyboard(request.scope)
         } else {
             try paste(request)
         }
         var result = focused
         result.method = keyboard ? "keyboard" : "paste"
         return result
+    }
+
+    /// Seconds the keyboard gets to come back after typing through it: over twice what it took.
+    static let keyboardReturn = 3.0
+
+    /// Waits up to `keyboardReturn` seconds for the keyboard to be on screen again. iOS can take the typing's keys
+    /// for a hardware keyboard's: it then minimizes the software keyboard, and brings it back about a second after
+    /// the typing has returned. A tree read in between would say that no keyboard is up, and a tap
+    /// would be judged against a screen about to change. Nothing with keyboard focus means the typing closed the
+    /// keyboard (Return in a single-line field), so none is coming back; nor is one when the app has left the screen.
+    func awaitKeyboard(_ scope: ActionScope) {
+        var scope = scope
+        scope.timeout = Self.keyboardReturn
+        _ = poll(scope, what: "typing") { scene, _ in
+            let settled = scene.appAway || self.keyboardArea(in: scene) != nil || Self.keyboardFocus(in: scene) == false
+            guard settled else { return .retry(Self.noKeyboard) }
+            return .done(.success(ActionResult(element: nil, x: nil, y: nil, ms: 0)))
+        }
     }
 
     func paste(_ request: TypeRequest) throws {
