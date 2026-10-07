@@ -39,7 +39,7 @@ struct OpenPlan: Sendable {
         cold = options.cold && kind == .url
         if cold, let preset, !onMac {
             throw XcdError(.usage, "--cold cannot be combined with the preset '\(preset)' on a simulator: the system starts the app, so launch arguments cannot be passed",
-                           next: options.preset == nil ? "run it without --cold: this route has a preset" : "drop --cold or --preset")
+                           next: route.preset == nil ? "drop --cold or --preset" : "run it without --cold: this route has a preset")
         }
         var start = LaunchOptions(preset: preset, crashWindow: CrashWindows.started)
         if case .launch(let arguments, let environment) = route.delivery {

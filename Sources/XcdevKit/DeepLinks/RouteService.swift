@@ -55,7 +55,7 @@ public struct RouteService: Sendable {
             delivered = Delivered(state: running == nil ? "started" : "restarted", started: started, window: plan.launch.crashWindow,
                                   captured: true)
         }
-        let report = plan.report(device: app.target.summary, dryRun: false, worktree: ctx.state.name)
+        let report = plan.report(device: app.target.name, dryRun: false, worktree: ctx.state.name)
         return try await finish(report, plan, app, delivered)
     }
 
@@ -65,7 +65,7 @@ public struct RouteService: Sendable {
         let started = try await apps.begin(app, plan.launch, in: &ctx)
         let delivered = Delivered(state: wasRunning ? "restarted" : "started", started: started, window: plan.launch.crashWindow,
                                   captured: true)
-        let report = plan.report(device: app.target.summary, dryRun: false, worktree: ctx.state.name)
+        let report = plan.report(device: app.target.name, dryRun: false, worktree: ctx.state.name)
         return try await finish(report, plan, app, delivered)
     }
 
@@ -142,6 +142,7 @@ public struct RouteService: Sendable {
     /// Watches the app for the delivery's window and completes the report. A process that ends is a crash.
     func finish(_ base: OpenReport, _ plan: OpenPlan, _ app: PreparedApp, _ delivered: Delivered) async throws -> OpenReport {
         var report = base
+        report.deviceSummary = app.target.summary
         let started = delivered.started
         report.app = OpenReport.App(state: delivered.state, pid: started.pid, bundleId: app.product.bundleId,
                                     log: delivered.captured ? started.appLog : nil)

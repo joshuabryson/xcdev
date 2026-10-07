@@ -87,8 +87,10 @@ public struct OpenReport: Reportable {
     /// Nil for a URL given directly.
     public let route: String?
     public let kind: String
-    /// "iphone (iPhone 18 Pro, iOS 27.0)". A dry run names the device without its clone: "iphone".
+    /// The device's name in the config, as `--device` takes it: "iphone".
     public let device: String
+    /// The name with its type and OS: "iphone (iPhone 18 Pro, iOS 27.0)". Nil for a dry run, which touches no device.
+    public var deviceSummary: String?
     public let dryRun: Bool
     public var url: String?
     public var arguments: [String]?
@@ -132,7 +134,7 @@ public struct OpenReport: Reportable {
     var appEnded: Bool { exitedAfter != nil }
 
     public var text: String {
-        var head = [(dryRun ? "would open " : "opened ") + (route ?? "link"), "device=\(device)"]
+        var head = [(dryRun ? "would open " : "opened ") + (route ?? "link"), "device=\(deviceSummary ?? device)"]
         if let app {
             head.append("app=\(app.state)")
             if let pid = app.pid { head.append("pid=\(pid)") }

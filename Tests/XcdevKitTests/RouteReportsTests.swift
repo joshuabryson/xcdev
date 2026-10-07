@@ -61,7 +61,9 @@ import Testing
         let config = try config()
         let route = try RouteResolver(config: config).resolve(.route(name: name, values: values))
         let plan = try OpenPlan(route, OpenOptions(), onMac: false, config: config)
-        return plan.report(device: dryRun ? "iphone" : "iphone (iPhone 18 Pro, iOS 27.0)", dryRun: dryRun, worktree: "feat")
+        var report = plan.report(device: "iphone", dryRun: dryRun, worktree: "feat")
+        if !dryRun { report.deviceSummary = "iphone (iPhone 18 Pro, iOS 27.0)" }
+        return report
     }
 
     @Test func aDryRunSaysWhatWouldBeSent() throws {
@@ -157,7 +159,8 @@ import Testing
     }
 
     @Test func aURLGivenDirectlyIsCalledALink() throws {
-        var report = OpenReport(.direct("myapp://x"), device: "iphone (iPhone 18 Pro, iOS 27.0)", dryRun: false, worktree: "feat")
+        var report = OpenReport(.direct("myapp://x"), device: "iphone", dryRun: false, worktree: "feat")
+        report.deviceSummary = "iphone (iPhone 18 Pro, iOS 27.0)"
         report.app = OpenReport.App(state: "started-by-link", pid: 7, bundleId: "dev.x.App", log: nil)
         #expect(report.text == "opened link  device=iphone (iPhone 18 Pro, iOS 27.0)  app=started-by-link  pid=7\nurl: myapp://x")
         #expect(report.route == nil && report.kind == "url")
@@ -195,6 +198,13 @@ import Testing
         var report = try report("item", ["id": "1"])
         report.app = OpenReport.App(state: "running", pid: 4312, bundleId: "dev.x.App", log: nil)
         let json = Renderer.report(report, command: "open", format: .json)
-        #expect(json == #"{"command":"open","data":{"app":{"bundleId":"dev.x.App","pid":4312,"state":"running"},"device":"iphone (iPhone 18 Pro, iOS 27.0)","dryRun":false,"kind":"url","route":"item","url":"sampleapp://sampleapp/item?id=1","worktree":"feat"},"ok":true,"worktree":"feat"}"#)
+        #expect(json == #"{"command":"open","data":{"app":{"bundleId":"dev.x.App","pid":4312,"state":"running"},"device":"iphone","deviceSummary":"iphone (iPhone 18 Pro, iOS 27.0)","dryRun":false,"kind":"url","route":"item","url":"sampleapp://sampleapp/item?id=1","worktree":"feat"},"ok":true,"worktree":"feat"}"#)
+    }
+
+    /// A dry run names the device as the config does and has no summary: the key is left out, not written as null.
+    @Test func aDryRunAsJSONHasNoDeviceSummary() throws {
+        let json = Renderer.report(try report("item", ["id": "1"], dryRun: true), command: "open", format: .json)
+        #expect(json == #"{"command":"open","data":{"device":"iphone","dryRun":true,"kind":"url","route":"item","url":"sampleapp://sampleapp/item?id=1","worktree":"feat"},"ok":true,"worktree":"feat"}"#)
+        #expect(!json.contains("deviceSummary"))
     }
 }

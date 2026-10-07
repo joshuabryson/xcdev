@@ -130,6 +130,7 @@ import XcdevTestSupport
         #expect(report.app == OpenReport.App(state: "running", pid: 500, bundleId: "dev.xcdev.SampleApp", log: nil))
         #expect(report.failure == nil && report.check == nil)
         #expect(report.text == "opened item  device=iphone (iPhone 18 Pro, iOS 27.0)  app=running  pid=500\nurl: sampleapp://sample/item?id=42")
+        #expect(report.device == "iphone" && report.deviceSummary == "iphone (iPhone 18 Pro, iOS 27.0)")
         #expect(said.value == ["delivered to dev.xcdev.SampleApp (pid 500); watching 2.0s for a crash"])
         #expect(try AppStateStore.load(ctx.paths).lastLaunch == nil)        // xcd did not start it, so nothing is recorded
     }
@@ -385,6 +386,11 @@ import XcdevTestSupport
             _ = try await svc.open(.route(name: "welcome", values: [:]), OpenOptions(cold: true), in: &ctx)
         }
         #expect(route?.code == .usage && route?.next == "run it without --cold: this route has a preset")
+        // Dropping --preset would leave the route's own preset, so the way out is still to drop --cold.
+        let both = await #expect(throws: XcdError.self) {
+            _ = try await svc.open(.route(name: "welcome", values: [:]), OpenOptions(preset: "other", cold: true), in: &ctx)
+        }
+        #expect(both?.code == .usage && both?.next == "run it without --cold: this route has a preset")
         #expect(fake.calls.isEmpty)
     }
 
@@ -454,6 +460,7 @@ import XcdevTestSupport
         let report = try await svc.open(item("a b"), OpenOptions(dryRun: true), in: &ctx)
         #expect(report.text == "would open item  device=iphone\nurl: sampleapp://sample/item?id=a%20b")
         #expect(report.dryRun && report.app == nil)
+        #expect(report.device == "iphone" && report.deviceSummary == nil)
         let launch = try await svc.open(.route(name: "start", values: [:]), OpenOptions(device: "mac", dryRun: true), in: &ctx)
         #expect(launch.text == "would open start  device=mac\nargs: -reset -startRoute onboarding/1\nenv: MODE=fresh STEP=1\npreset: fresh")
         let script = try await svc.open(.route(name: "seeded", values: [:]), OpenOptions(dryRun: true), in: &ctx)

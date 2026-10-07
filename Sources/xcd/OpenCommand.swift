@@ -9,7 +9,8 @@ struct OpenCommand: AsyncParsableCommand {
         Routes are the links the app can open, described under `deeplinks:` in .xcdev.yml.
           xcd open                        list the routes and their parameters
           xcd open item id=42 tab=notes   open a route (quote a value that has spaces)
-          xcd open myapp://item?id=42     open a link no route describes, sent as given
+          xcd open 'myapp://item?id=42'   open a link no route describes, sent as given
+        Quote a link that has ? or & in it.
         The app is started if it is not running. Nothing is built or installed: run `xcd run` first.
         """)
     @Argument(help: ArgumentHelp("A route name, or a URL (anything with a `:` in it). After a route name: its parameters, each name=value.",

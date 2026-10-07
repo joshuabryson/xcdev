@@ -73,7 +73,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .runnerFailed: return "The UI runner inside the simulator could not be built or started, or stopped answering."
         case .hookFailed: return "A hook from .xcdev.yml exited non-zero; the error names the hook and its log."
         case .routeFailed: return "A route's script failed, or its link did not start the app."
-        case .xcodeMissing: return"The Xcode that .xcdev.yml or --xcode asks for isn't installed."
+        case .xcodeMissing: return "The Xcode that .xcdev.yml or --xcode asks for isn't installed."
         case .xcodeRuntimeMismatch: return "A simulator runtime is newer than the selected Xcode supports."
         case .runtimeMissing: return "No installed simulator runtime matches the device's runtime setting."
         case .cloneFailed: return "simctl could not create, clone, or pair a simulator."
