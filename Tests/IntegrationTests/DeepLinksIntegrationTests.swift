@@ -110,6 +110,7 @@ struct DeepLinksIntegrationTests {
             #expect(output.contains("SampleApp launched greeting=preset"))
 
             try await coldStart(&ctx, svc)
+            try await aLaunchRouteStartsAStoppedApp(&ctx, svc)
             try await otherSpellingsOfTheScheme(&ctx, svc)
         }
     }
@@ -123,6 +124,15 @@ struct DeepLinksIntegrationTests {
         #expect(record.pid == cold.app?.pid)
         let logs = try await svc.logs.logs(LogOptions(appOutput: true), in: &ctx)
         #expect(logs.lines.count == 1 && logs.lines.first?.contains("was not captured") == true, "\(logs.text)")
+        #expect(try await svc.apps.terminate(device: nil, in: &ctx).action == "terminated")
+    }
+
+    /// A launch route on an app that is not running starts it. The cold start above left the app stopped.
+    func aLaunchRouteStartsAStoppedApp(_ ctx: inout WorktreeContext, _ svc: Services) async throws {
+        let launched = try await svc.routes.open(.route(name: "start", values: ["step": "4"]), OpenOptions(), in: &ctx)
+        #expect(launched.app?.state == "started" && launched.failure == nil, "\(launched.text)")
+        #expect(try await arrival(of: "onboarding/4", &ctx, svc) == "argument")
+        // The next step sends a link to a stopped app again.
         #expect(try await svc.apps.terminate(device: nil, in: &ctx).action == "terminated")
     }
 
