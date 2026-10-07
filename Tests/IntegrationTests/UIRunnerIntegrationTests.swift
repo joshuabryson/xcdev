@@ -33,8 +33,8 @@ struct UIRunnerIntegrationTests {
 
             let nowFront = try await frontmostMacApp()
             #expect(nowFront == front, "driving the simulator changed the frontmost Mac app from \(front) to \(nowFront)")
-            #expect(!nowFront.contains("Simulator"), "Simulator.app is in front: \(nowFront)")
-            #expect(try await simulatorAppIsRunning() == simulatorWasRunning, "a ui command started Simulator.app")
+            #expect(!SimulatorApp.isNamed(nowFront), "the simulator's Mac app is in front: \(nowFront)")
+            #expect(try await simulatorAppIsRunning() == simulatorWasRunning, "a ui command started the simulator's Mac app")
         }
     }
 
@@ -132,7 +132,7 @@ extension UIRunnerIntegrationTests {
             try await longPresses(&ctx, svc)
 
             #expect(try await frontmostMacApp() == front, "driving the simulator changed the frontmost Mac app")
-            #expect(try await simulatorAppIsRunning() == simulatorWasRunning, "a ui command started Simulator.app")
+            #expect(try await simulatorAppIsRunning() == simulatorWasRunning, "a ui command started the simulator's Mac app")
         }
     }
 
@@ -285,8 +285,9 @@ extension UIRunnerIntegrationTests {
         return info.split(separator: "\n").first.map(String.init) ?? info
     }
 
+    /// Whether Simulator.app or Xcode 27's Device Hub is running.
     func simulatorAppIsRunning() async throws -> Bool {
-        try await runner.run(Invocation("/usr/bin/pgrep", ["-x", "Simulator"])).succeeded
+        try await SimulatorApp.isRunning(runner)
     }
 
     /// Runs `body` with the app built and launched, and always stops the runner and deletes the clone afterwards.
