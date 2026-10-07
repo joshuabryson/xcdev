@@ -102,6 +102,45 @@ import Testing
         #expect(report.unset == ["XCD_PARAM_NOTE"] && report.failure == nil)
     }
 
+    /// The `--preset` and `--cold` rules for a link, decided before a device is touched.
+    @Test func presetAndColdAreAppliedToALink() throws {
+        let config = try config()
+        let item = try RouteResolver(config: config).resolve(.route(name: "item", values: ["id": "7"]))
+        let preset = try OpenPlan(item, OpenOptions(preset: "fresh-install"), onMac: false, config: config)
+        #expect(preset.preset == "fresh-install" && !preset.cold)
+        #expect(preset.launch == LaunchPlan(arguments: ["-resetOnboarding", "YES"], environment: ["API_ENV": "staging"],
+                                            crashWindow: CrashWindows.started))
+        #expect(try OpenPlan(item, OpenOptions(cold: true), onMac: false, config: config).cold)
+        #expect(try OpenPlan(.direct("myapp://x"), OpenOptions(cold: true), onMac: false, config: config).cold)
+        // The system starts the app on a simulator, so a preset's launch arguments cannot be passed. A Mac can.
+        let both = OpenOptions(preset: "fresh-install", cold: true)
+        let refused = #expect(throws: XcdError.self) { _ = try OpenPlan(item, both, onMac: false, config: config) }
+        #expect(refused?.code == .usage && refused?.next == "drop --cold or --preset")
+        let mac = try OpenPlan(item, both, onMac: true, config: config)
+        #expect(mac.cold && mac.preset == "fresh-install" && mac.launch.arguments == ["-resetOnboarding", "YES"])
+        let unknown = #expect(throws: XcdError.self) { _ = try OpenPlan(item, OpenOptions(preset: "nope"), onMac: false, config: config) }
+        #expect(unknown?.code == .usage)
+    }
+
+    /// A launch route always starts the app, so `--cold` changes nothing. A script route takes neither flag.
+    @Test func aLaunchRouteIgnoresColdAndAScriptRouteTakesNeitherFlag() throws {
+        let config = try config()
+        let resolver = RouteResolver(config: config)
+        let onboarding = try resolver.resolve(.route(name: "onboarding", values: [:]))
+        let launch = try OpenPlan(onboarding, OpenOptions(cold: true), onMac: false, config: config)
+        #expect(!launch.cold && launch.preset == "fresh-install")
+        #expect(launch.launch.arguments == ["-resetOnboarding", "YES", "-startRoute", "onboarding/1"])
+        let script = try resolver.resolve(.route(name: "seeded-album", values: [:]))
+        func refusal(_ options: OpenOptions) -> XcdError? {
+            #expect(throws: XcdError.self) { _ = try OpenPlan(script, options, onMac: false, config: config) }
+        }
+        #expect(refusal(OpenOptions(preset: "fresh-install"))?.message.hasPrefix("--preset does not apply to a script route") == true)
+        #expect(refusal(OpenOptions(cold: true))?.message.hasPrefix("--cold does not apply to a script route") == true)
+        // With both flags the first one named is --preset.
+        let first = refusal(OpenOptions(preset: "fresh-install", cold: true))
+        #expect(first?.code == .usage && first?.next == "run `xcd open seeded-album` without --preset")
+    }
+
     @Test func aResultSaysWhatHappenedToTheApp() throws {
         var report = try report("item", ["id": "3F2A", "tab": "notes"])
         report.app = OpenReport.App(state: "running", pid: 4312, bundleId: "dev.x.App", log: nil)
