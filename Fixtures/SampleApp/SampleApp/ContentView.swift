@@ -8,9 +8,18 @@ struct ContentView: View {
     @State private var taps = 0
     @State private var submitted = ""
     @State private var held = false
+    @EnvironmentObject private var arrival: Arrival
 
     var body: some View {
         Form {
+            if !arrival.source.isEmpty {
+                Section("Arrival") {
+                    Text(arrival.value)
+                        .accessibilityIdentifier("arrivalValue")
+                    Text(arrival.source)
+                        .accessibilityIdentifier("arrivalSource")
+                }
+            }
             Section {
                 Text("SampleApp")
                 TextField("Email", text: $email)
