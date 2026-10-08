@@ -135,7 +135,7 @@ public final class FakeSimulators: Sendable {
             state.withLock { $0.pairs.append([inv.arguments[2], inv.arguments[3]]) }
             return ProcessOutput(stdout: UUID().uuidString + "\n")
         }
-        runner.stub(["open", "-a", "Simulator"]) { _ in ProcessOutput() }
+        runner.stub(["open", "-a"]) { _ in ProcessOutput() }
     }
 
     private func transition(_ udid: String, to target: String, verb: String) -> ProcessOutput {

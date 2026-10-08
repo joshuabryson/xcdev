@@ -55,7 +55,9 @@ import XcdevTestSupport
         #expect(report.action == "shut down" && report.udid == phone.device.udid)
     }
 
-    @Test func openBootsThenOpensSimulatorApp() async throws {
+    /// Xcode 27 has no Simulator.app. Its Device Hub is told which simulator to show by a URL, and the report says
+    /// what quitting it does: every other worktree's clone goes down with it.
+    @Test func openBootsThenShowsTheCloneInDeviceHub() async throws {
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
         var ctx = try context()
@@ -63,7 +65,23 @@ import XcdevTestSupport
         let udid = try #require(report.udid)
         #expect(report.action == "opened")
         #expect(sims.devices.first { $0.udid == udid }?.state == "Booted")
-        #expect(fake.commandLines.last?.contains("open -a Simulator --args -CurrentDeviceUDID \(udid)") == true)
+        #expect(fake.calls.last?.executable == "/usr/bin/open")
+        #expect(fake.calls.last?.arguments == ["-a", "/Applications/Xcode.app/Contents/Applications/DeviceHub.app",
+                                               "devices://manage/select?id=\(udid)"])
+        #expect(report.notes == ["quitting Device Hub shuts down every booted simulator on this Mac, other worktrees' clones included"])
+    }
+
+    @Test func openShowsTheCloneInSimulatorAppBeforeXcode27() async throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        _ = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        fake.stub(["xcrun", "xcodebuild", "-showsdks", "-json"], stdout: #"[{"platform":"iphonesimulator","sdkVersion":"26.5"}]"#)
+        var ctx = try context()
+        ctx.state.xcode = XcodeInstall(path: "/Applications/Xcode-26.5.app", version: "26.5", build: "26F1")
+        let report = try await provisioner.openReport("old", in: &ctx)
+        let udid = try #require(report.udid)
+        #expect(fake.calls.last?.executable == "/usr/bin/open")
+        #expect(fake.calls.last?.arguments == ["-a", "Simulator", "--args", "-CurrentDeviceUDID", udid])
+        #expect(report.notes.isEmpty)
     }
 
     @Test func bootReportsBooted() async throws {

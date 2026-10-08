@@ -54,7 +54,7 @@ struct SimCommand: AsyncParsableCommand {
     }
 
     struct Open: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Boot the clone and show it in Simulator.app so a human can watch.")
+        static let configuration = CommandConfiguration(abstract: "Boot the clone and show it in Device Hub (Simulator.app before Xcode 27) so a human can watch.")
         @OptionGroup var target: DeviceOption
         @OptionGroup var options: GlobalOptions
 

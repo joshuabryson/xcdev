@@ -56,8 +56,10 @@ extension DeviceProvisioner {
     public func openReport(_ requested: String?, in ctx: inout WorktreeContext) async throws -> SimReport {
         let name = try deviceName(requested, config: ctx.config)
         let (device, retries) = try await boot(name, in: &ctx)
-        try await simctl(for: ctx).openSimulatorApp(udid: device.udid)
-        return SimReport(action: "opened", device: name, udid: device.udid, retries: retries, worktree: ctx.state.name)
+        let viewer = SimulatorViewer(xcode: try await ensureXcode(&ctx))
+        try await simctl(for: ctx).show(udid: device.udid, in: viewer)
+        return SimReport(action: "opened", device: name, udid: device.udid, retries: retries, worktree: ctx.state.name,
+                         notes: viewer.notes)
     }
 
     private func notCloned(_ name: String, _ ctx: WorktreeContext) -> SimReport {
