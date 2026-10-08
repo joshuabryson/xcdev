@@ -6,6 +6,9 @@ import XcdevTestSupport
 @Suite struct PluginTests {
     let base = FileManager.default.temporaryDirectory.appendingPathComponent("xcd plugins \(UUID().uuidString)").path
 
+    /// What the slow plugin leaves when it gets to finish.
+    var finished: String { base + "/slow plugin finished" }
+
     func write(_ script: String, to path: String, executable: Bool = true) throws {
         let full = base + "/" + path
         try FileManager.default.createDirectory(atPath: (full as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
@@ -17,7 +20,8 @@ import XcdevTestSupport
         try write(#"[ "$1" = --xcd-describe ] && echo "Lint the project" && exit 0; echo linting"#, to: "first/xcd-lint")
         try write(#"echo "second copy""#, to: "second/xcd-lint")
         try write("exit 1", to: "second/xcd-silent")
-        try write("sleep 10", to: "second/xcd-slow")
+        // Its work runs as a job of its own, so it would still finish and leave the file if only the script were stopped.
+        try write("(sleep 30; touch '\(finished)') & wait", to: "second/xcd-slow")
         try write("echo hi", to: "second/xcd-notexec", executable: false)
         try FileManager.default.createDirectory(atPath: base + "/second/xcd-dir", withIntermediateDirectories: true)
         try write("echo no", to: "second/xcd-")
@@ -32,14 +36,15 @@ import XcdevTestSupport
         #expect(finder.plugin(named: "notexec") == nil)
     }
 
+    /// No clock: in a full run the plugins start seconds late, behind the suite's other tests, so a bound on the time
+    /// `describe` takes fails on a busy Mac. That the slow plugin never finished shows it was stopped, not waited for.
     @Test func describeAsksEachPluginWithATimeout() async throws {
         defer { try? FileManager.default.removeItem(atPath: base) }
         let finder = try makePlugins()
         let runner = PluginRunner(runner: SystemProcessRunner(), describeTimeout: .milliseconds(500))
-        let start = ContinuousClock.now
         let descriptions = await runner.describe(finder.plugins())
         #expect(descriptions == ["lint": "Lint the project"])
-        #expect(ContinuousClock.now - start < .seconds(5))
+        #expect(!FileManager.default.fileExists(atPath: finished), "the slow plugin ran to its end")
     }
 
     @Test func runPassesArgumentsContextAndExitCode() async throws {
