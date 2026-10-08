@@ -34,15 +34,15 @@ import XcdevTestSupport
         #expect(out.stdoutString.contains("XCD_TEST_VAR=yes"))
     }
 
-    /// The bounds in these timing tests are far below the child's own run time, not tight wall-clock limits: they
-    /// prove the deadline ended the child, and hold on a machine with a load average of 70.
+    /// The tests of deadlines and cancellation use no clock: in a full run a test waits seconds for its turn behind
+    /// the suite's others, so a bound on the time taken fails on a busy Mac. Each child instead says "finished" (or
+    /// leaves a file) when it gets to its own end, 30 seconds on; that it never did shows what ended it.
     @Test func timeoutTerminatesAndThrows() async throws {
-        let start = ContinuousClock.now
         let error = await #expect(throws: XcdError.self) {
-            try await runner.run(Invocation("/bin/sleep", ["30"], timeout: .milliseconds(500)))
+            try await runner.run(Invocation("/bin/sh", ["-c", "sleep 30; echo finished >&2"], timeout: .milliseconds(500)))
         }
         #expect(error?.code == .timeout)
-        #expect(ContinuousClock.now - start < .seconds(15))                  // the sleep would take 30
+        #expect(error?.details.contains("finished") == false)
     }
 
     @Test func missingExecutableThrowsSubprocessFailed() async throws {
@@ -71,24 +71,25 @@ import XcdevTestSupport
         await #expect(throws: XcdError.self) { try await fake.run(Invocation("/usr/bin/xcrun", ["simctl"])) }
     }
 
+    /// The sleep ignores SIGTERM too: a signal its shell ignores stays ignored in what the shell starts.
     @Test func timeoutEscalatesToKillWhenTermIsIgnored() async throws {
-        let start = ContinuousClock.now
         let error = await #expect(throws: XcdError.self) {
-            try await runner.run(Invocation("/bin/sh", ["-c", "trap '' TERM; while true; do sleep 0.1; done"],
+            try await runner.run(Invocation("/bin/sh", ["-c", "trap '' TERM; sleep 30; echo finished >&2"],
                                             timeout: .milliseconds(300)))
         }
         #expect(error?.code == .timeout)
-        #expect(ContinuousClock.now - start < .seconds(20))                  // the loop never ends by itself
+        #expect(error?.details.contains("finished") == false)
     }
 
     @Test func cancellationThrowsCancellationError() async throws {
+        let finished = FileManager.default.temporaryDirectory.appendingPathComponent("xcd finished \(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: finished) }
         let runner = self.runner
-        let start = ContinuousClock.now
-        let task = Task { try await runner.run(Invocation("/bin/sleep", ["30"])) }
+        let task = Task { try await runner.run(Invocation("/bin/sh", ["-c", "sleep 30; touch '\(finished)'"])) }
         try await Task.sleep(for: .milliseconds(200))
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
-        #expect(ContinuousClock.now - start < .seconds(15))                  // the sleep would take 30
+        #expect(!FileManager.default.fileExists(atPath: finished), "the child ran to its end")
     }
 
     @Test func outputFileReceivesBothStreamsAndAppends() async throws {
@@ -105,12 +106,10 @@ import XcdevTestSupport
     }
 
     @Test func stopAtTimeoutReturnsWhatWasCaptured() async throws {
-        let start = ContinuousClock.now
         let out = try await runner.run(Invocation("/bin/sh", ["-c", "echo started; exec sleep 30"],
                                                   timeout: .milliseconds(500), stopAtTimeout: true))
         #expect(out.stdoutString == "started\n")
-        #expect(out.stoppedAtDeadline && out.exitCode == 143)                // 128 + SIGTERM
-        #expect(ContinuousClock.now - start < .seconds(15))                  // the sleep would take 30
+        #expect(out.stoppedAtDeadline && out.exitCode == 143)                // 128 + SIGTERM; a sleep that ended by itself gives 0
     }
 
     @Test func aProcessThatEndsBeforeItsDeadlineWasNotStopped() async throws {
@@ -133,11 +132,10 @@ import XcdevTestSupport
 
     /// A timeout ends the child's whole process group, so a background job can't keep the output pipe open.
     @Test func aTimeoutStopsWhatTheChildStarted() async throws {
-        let start = ContinuousClock.now
-        let out = try await runner.run(Invocation("/bin/sh", ["-c", "sleep 30 & echo $!; wait"],
+        let out = try await runner.run(Invocation("/bin/sh", ["-c", "(sleep 30; echo finished) & echo $!; wait"],
                                                   timeout: .milliseconds(500), stopAtTimeout: true))
         #expect(out.stoppedAtDeadline)
-        #expect(ContinuousClock.now - start < .seconds(15))
+        #expect(!out.stdoutString.contains("finished"))                       // a job left running would say so, into the pipe
         let sleeper = try #require(pid_t(out.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)))
         let deadline = ContinuousClock.now + .seconds(10)                     // launchd reaps it soon after
         while kill(sleeper, 0) == 0, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
