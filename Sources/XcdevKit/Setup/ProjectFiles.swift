@@ -639,22 +639,24 @@ public struct PackageLayout: Sendable, Equatable {
         return PackageLayout(name: name, products: products, targets: targets)
     }
 
-    /// The schemes Xcode lists for the package, as observed with Xcode 27:
-    /// - at the root: a scheme per product (executable targets are products there too), plus "<name>-Package"
-    ///   when that makes more than one; a single scheme is named for the package;
-    /// - as a package reference: a scheme per product;
-    /// - as a folder: also a scheme per executable target, and per test target that tests no product's target.
+    /// The schemes Xcode lists for the package, as observed with Xcode 27. An executable target that no product
+    /// holds counts as a product of its own; a plugin product gets no scheme.
+    /// - at the root: a scheme per product plus "<name>-Package", which is the only one for a package without
+    ///   products; but a package with exactly one product has a single scheme, named for the package;
+    /// - as a package reference: a scheme per declared product;
+    /// - as a folder: a scheme per product, and per test target that tests no product's target.
     public func schemes(as style: Style) -> [String] {
         let declared = products.filter { $0.kind != "plugin" }.map(\.name)
-        let executables = targets.filter { $0.kind == "executable" && !declared.contains($0.name) }.map(\.name)
+        let productTargets = Set(products.flatMap(\.targets))
+        let executables = targets.filter { $0.kind == "executable" && !declared.contains($0.name) && !productTargets.contains($0.name) }
+            .map(\.name)
         switch style {
         case .root:
             let all = declared + executables
-            return all.count > 1 ? all + [name + "-Package"] : [name]
+            return all.count == 1 ? [name] : all + [name + "-Package"]
         case .packageReference:
             return declared
         case .folder:
-            let productTargets = Set(products.flatMap(\.targets))
             let tests = targets.filter { $0.kind == "test" && !$0.dependencies.contains(where: productTargets.contains) }.map(\.name)
             return declared + executables + tests
         }
