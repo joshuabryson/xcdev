@@ -51,6 +51,7 @@ public struct TestService: Sendable {
                                 exampleFilter: options.only.first, resultBundle: run.resultBundle, log: run.log,
                                 logTail: verdict.logTail, worktree: ctx.state.name)
         report.notes = stopped.map { "\($0) first: these tests may drive the UI themselves; the next `xcd ui` command starts it again" }
+            + SetupNotes.build(in: ctx.location.worktreeRoot)
         return report
     }
 

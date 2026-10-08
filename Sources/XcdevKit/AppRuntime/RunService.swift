@@ -87,7 +87,7 @@ public struct RunService: Sendable {
         let plan = try launch.plan(config: ctx.config)
         var buildReport: BuildReport?
         if !noBuild {
-            let report = try await builds.build(build, in: &ctx)
+            let report = try await builds.buildNotingSetup(build, in: &ctx)
             guard report.succeeded else { return RunReport(buildFailed: report, worktree: ctx.state.name) }
             buildReport = report
         }

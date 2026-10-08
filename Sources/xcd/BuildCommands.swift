@@ -15,7 +15,7 @@ struct BuildCommand: AsyncParsableCommand {
         try await Emit.run("build", options) { services in
             var ctx = try await services.open(worktree: options.worktree, xcode: target.xcode)
             let timeout = try DurationText.option(scheme.timeout, flag: "--timeout") ?? .seconds(1800)
-            return try await services.builds.build(
+            return try await services.builds.buildNotingSetup(
                 BuildOptions(device: target.device, scheme: scheme.scheme, configuration: scheme.configuration,
                              clean: clean, showWarnings: warnings, timeout: timeout),
                 in: &ctx)

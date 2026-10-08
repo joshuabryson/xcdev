@@ -14,6 +14,8 @@ public struct BuildReport: Reportable {
     /// The log's last lines, when xcodebuild failed without reporting an error.
     public let logTail: [String]?
     public let worktree: String
+    /// What about the worktree's setup the reader should know, e.g. that it slows every build (`SetupNotes`).
+    public var notes: [String] = []
 
     public init(succeeded: Bool, scheme: String, target: String, targetSummary: String, seconds: Double,
                 errors: [Diagnostic], warningCount: Int, warnings: [Diagnostic]?, product: AppProduct?, log: String,
@@ -49,6 +51,7 @@ public struct BuildReport: Reportable {
         }
         if let product { lines.append("app: \(product.path)  bundle=\(product.bundleId)") }
         lines += (logTail ?? []).map { "  " + $0 }
+        lines += notes.map { "note: " + $0 }
         lines.append("log: \(log)")
         return lines.joined(separator: "\n")
     }

@@ -47,7 +47,7 @@ public struct RunReport: Reportable {
     public var text: String {
         if status == .buildFailed, let build { return build.text }
         var lines: [String] = []
-        if let build { lines.append(build.headline) }
+        if let build { lines += [build.headline] + build.notes.map { "note: " + $0 } }
         let identity = "bundle=\(bundleId ?? "-") device=\(targetSummary ?? "-")  pid=\(pid.map(String.init) ?? "-")"
         let after = DurationText.format(.seconds(exitedAfter ?? 0))
         switch status {

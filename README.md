@@ -50,7 +50,7 @@ xcd help                  # every command, project command, and plugin
   simulators, so read the problems first.
 - SwiftLint searches hidden folders, so it would lint `.xcdev/` (DerivedData and package checkouts) on every build.
   `xcd init` adds `.xcdev` to the `excluded` list of the project's `.swiftlint.yml`, and `xcd doctor` reports a
-  config that lacks it (`--fix` adds it).
+  config that lacks it (`--fix` adds it). Until then `xcd build`, `xcd run`, and `xcd test` say so in a `note:`.
 
 ## Extending
 
