@@ -13,6 +13,8 @@ Use this guide when a project has no `.xcdev.yml`, or when the user wants to cha
 
 Commit `.xcdev.yml`. `xcd init` adds `.xcdev/` (per-worktree build state) and `.xcdev.local.yml` (per-machine overrides) to `.gitignore`.
 
+If the project has a `.swiftlint.yml` that would let SwiftLint search `.xcdev/`, `xcd init` also adds `.xcdev` to its `excluded` list and says so; commit that change too. SwiftLint searches hidden folders, so without the entry every build that runs it also lints the build folder and the package checkouts, which can add minutes. When `xcd init` reports this as a `warning:` instead, it left the file alone: add the entry by hand, or run `xcd doctor --fix`.
+
 ## What each section of .xcdev.yml is for
 
 | Section | What it controls | Change it when |

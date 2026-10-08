@@ -104,12 +104,12 @@ public struct DoctorService: Sendable {
 
     /// Every check, in the order fixes should happen: worktrees before the clones they leave behind. Scratch
     /// folders and package caches depend on nothing else, so they come after the simulators, before the project's
-    /// own setup.
+    /// own setup and its SwiftLint config.
     public static var allChecks: [any DoctorCheck] {
         [CoreSimulatorCheck(), MissingWorktreesCheck(), IncompleteWorktreesCheck(), OrphanedClonesCheck(),
          StuckClonesCheck(), TemplatesCheck(), RecordingsCheck(), StaleUIRunnersCheck(),
          InitScratchCheck(), PackageCacheCheck(),
-         ProjectCheck()]
+         ProjectCheck(), SwiftLintCheck()]
     }
 
     /// `xcd prune`: worktrees that are gone, and clones nothing owns.
@@ -124,21 +124,9 @@ public struct DoctorService: Sendable {
             var problems = await check.detect(env)
             var inProgress = check.inProgress(env)
             if fix, problems.contains(where: { $0.action != nil }) {
-                var leftAlone: Set<Int> = []
-                for index in problems.indices where problems[index].action != nil {
-                    do {
-                        try await check.fix(problems[index], env)
-                        problems[index].fixed = true
-                    } catch let left as DoctorLeftAlone {
-                        inProgress.append(left.note)
-                        leftAlone.insert(index)
-                    } catch let error as XcdError {
-                        problems[index].fixError = error.message + (error.next.map { "; \($0)" } ?? "")
-                    } catch {
-                        problems[index].fixError = "\(error)"
-                    }
-                }
-                problems = problems.indices.filter { !leftAlone.contains($0) }.map { problems[$0] }
+                let fixed = await applyFixes(of: check, to: problems, env)
+                problems = fixed.problems
+                inProgress += fixed.leftAlone
                 let before = env
                 env = await environment(from: directory, fixing: fix)
                 env.formerEntries = Self.formerEntries(before, now: env.registry)
@@ -148,6 +136,31 @@ public struct DoctorService: Sendable {
         return DoctorReport(fixMode: fix, checks: results, disk: includeDisk ? await disk(env) : nil)
     }
 
+    /// Runs the fix of every problem that has one. Returns the problems to list, each fixed or with why its fix
+    /// failed, and the notes of the ones a fix found it must leave alone, which are no longer listed as problems.
+    func applyFixes(of check: any DoctorCheck, to problems: [DoctorProblem],
+                    _ env: DoctorEnvironment) async -> (problems: [DoctorProblem], leftAlone: [String]) {
+        var listed: [DoctorProblem] = []
+        var leftAlone: [String] = []
+        for var problem in problems {
+            if problem.action != nil {
+                do {
+                    try await check.fix(problem, env)
+                    problem.fixed = true
+                } catch let left as DoctorLeftAlone {
+                    leftAlone.append(left.note)
+                    continue
+                } catch let error as XcdError {
+                    problem.fixError = error.message + (error.next.map { "; \($0)" } ?? "")
+                } catch {
+                    problem.fixError = "\(error)"
+                }
+            }
+            listed.append(problem)
+        }
+        return (listed, leftAlone)
+    }
+
     /// The entries `before` (or a snapshot before it) had that `now` lacks, each once.
     static func formerEntries(_ before: DoctorEnvironment, now: [RegistryEntry]) -> [RegistryEntry] {
         var seen = Set(now.map(\.id))
@@ -155,22 +168,8 @@ public struct DoctorService: Sendable {
     }
 
     public func environment(from directory: String?, fixing: Bool = false) async -> DoctorEnvironment {
-        var catalog: SimCatalog?
-        var catalogFailure: XcdError?
-        do {
-            catalog = try await CoreSimulatorCheck.listCatalog(SimctlClient(runner: runner, developerDir: nil, sleep: sleep))
-        } catch let error as XcdError {
-            catalogFailure = error
-        } catch {
-            catalogFailure = XcdError(.simulatorFailed, "\(error)")
-        }
-        var registry: [RegistryEntry] = []
-        var registryError: XcdError?
-        do {
-            registry = try Registry(paths: globalPaths).entries()
-        } catch let error as XcdError {
-            registryError = error
-        } catch {}
+        let (catalog, catalogFailure) = await listCatalog()
+        let (registry, registryError) = listRegistry()
         var states: [String: WorktreeState] = [:]
         for entry in registry where FileManager.default.fileExists(atPath: entry.path) {
             if let state = try? WorktreeStateStore.load(WorktreePaths(root: entry.path)) { states[entry.id] = state }
@@ -186,6 +185,28 @@ public struct DoctorService: Sendable {
                                  busy: busy, fixing: fixing)
         env.useProcesses(detached: detached, runnerClient: runnerClient)
         return env
+    }
+
+    /// The simulators, or why `simctl list` failed after its retries.
+    func listCatalog() async -> (SimCatalog?, XcdError?) {
+        do {
+            return (try await CoreSimulatorCheck.listCatalog(SimctlClient(runner: runner, developerDir: nil, sleep: sleep)), nil)
+        } catch let error as XcdError {
+            return (nil, error)
+        } catch {
+            return (nil, XcdError(.simulatorFailed, "\(error)"))
+        }
+    }
+
+    /// The registry's entries, or why it could not be read. Any other failure reads as an empty registry.
+    func listRegistry() -> ([RegistryEntry], XcdError?) {
+        do {
+            return (try Registry(paths: globalPaths).entries(), nil)
+        } catch let error as XcdError {
+            return ([], error)
+        } catch {
+            return ([], nil)
+        }
     }
 
     /// The project at `directory`, read-only: a missing or invalid .xcdev.yml is recorded, not thrown.

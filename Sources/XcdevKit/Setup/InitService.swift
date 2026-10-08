@@ -30,12 +30,24 @@ public struct InitService: Sendable {
         InitScratch.removeStale(in: globalPaths.cacheDirectory, now: now())
         let location = try await WorktreeLocator(runner: runner).locate(from: directory)
         let root = location.worktreeRoot
-        let plan = try await makePlan(location, container: nil)
-        return InitPlanReport(plan: plan, root: root, configExists: configExists(root))
+        var plan = try await makePlan(location, container: nil)
+        let exists = configExists(root)
+        if let note = swiftLintNote(in: root, configExists: exists) { plan = plan.noting(note) }
+        return InitPlanReport(plan: plan, root: root, configExists: exists)
     }
 
-    /// `xcd init`, `--defaults`, and `--set`: writes .xcdev.yml from the recommendations and `answers`, and adds
-    /// .xcdev/ and .xcdev.local.yml to .gitignore. An existing .xcdev.yml is kept unless `force`.
+    /// What `--plan` says about a .swiftlint.yml that has SwiftLint search .xcdev/; nil when there is nothing to
+    /// say. A plain `init` changes nothing in a project that has a config, and no `init` edits a layout it doesn't
+    /// know, so the note then names what does add the entry.
+    func swiftLintNote(in root: String, configExists: Bool) -> String? {
+        guard let lint = SwiftLintConfig.load(in: root), lint.searchesStateFolder else { return nil }
+        guard !configExists, lint.excludingStateFolder != nil else { return lint.warning(fixedBy: SwiftLintConfig.doctorFix) }
+        return SwiftLintConfig.problem + "; `xcd init` adds `\(SwiftLintConfig.stateFolder)` to its `excluded` list"
+    }
+
+    /// `xcd init`, `--defaults`, and `--set`: writes .xcdev.yml from the recommendations and `answers`, adds
+    /// .xcdev/ and .xcdev.local.yml to .gitignore, and keeps SwiftLint out of .xcdev/ (`excludeFromSwiftLint`).
+    /// An existing .xcdev.yml is kept unless `force`: nothing is changed then.
     public func write(answers: [String: String], force: Bool, from directory: String) async throws -> InitReport {
         InitScratch.removeStale(in: globalPaths.cacheDirectory, now: now())
         let location = try await WorktreeLocator(runner: runner).locate(from: directory)
@@ -46,15 +58,36 @@ public struct InitService: Sendable {
                 throw XcdError(.usage, "\(ConfigLoader.fileName) already exists, so these answers were not applied",
                                next: "re-run with --force to replace it: `xcd init --force --set …`")
             }
-            let project = (try? ConfigLoader.load(worktreeRoot: root, projectRoot: root))?.project
-            return InitReport(status: .unchanged, path: path, summary: project.map { ["project: \($0)"] } ?? [],
-                              gitignoreAdded: [])
+            return unchanged(path: path, root: root)
         }
         let plan = try await makePlan(location, container: answers["project"])
         let generated = try plan.config(answers: answers)
         try generated.yaml.write(toFile: path, atomically: true, encoding: .utf8)
         let added = try Gitignore.ensure([".xcdev/", ConfigLoader.localFileName, ".xcdev-media/"], in: root)
-        return InitReport(status: .written, path: path, summary: generated.summary, gitignoreAdded: added)
+        var report = InitReport(status: .written, path: path, summary: generated.summary, gitignoreAdded: added)
+        excludeFromSwiftLint(in: root, &report)
+        return report
+    }
+
+    /// What `init` reports when it keeps the .xcdev.yml that is there. It changes nothing then, so a .swiftlint.yml
+    /// that has SwiftLint search .xcdev/ is a warning.
+    func unchanged(path: String, root: String) -> InitReport {
+        let project = (try? ConfigLoader.load(worktreeRoot: root, projectRoot: root))?.project
+        let lint = SwiftLintConfig.load(in: root).flatMap { $0.searchesStateFolder ? $0 : nil }
+        return InitReport(status: .unchanged, path: path, summary: project.map { ["project: \($0)"] } ?? [],
+                          gitignoreAdded: [], warnings: lint.map { [$0.warning(fixedBy: SwiftLintConfig.doctorFix)] } ?? [])
+    }
+
+    /// Adds .xcdev to the `excluded` list of the project's .swiftlint.yml when SwiftLint would search the folder
+    /// (see `SwiftLintConfig`). A file that can't be edited or written is a warning: the config `init` came to
+    /// write is in place.
+    func excludeFromSwiftLint(in root: String, _ report: inout InitReport) {
+        guard let lint = SwiftLintConfig.load(in: root), lint.searchesStateFolder else { return }
+        if (try? lint.excludeStateFolder()) == true {
+            report.swiftlintExcluded = [SwiftLintConfig.stateFolder]
+        } else {
+            report.warnings = [lint.warning(fixedBy: nil)]
+        }
     }
 
     func configExists(_ root: String) -> Bool {
@@ -93,6 +126,14 @@ public struct InitService: Sendable {
     }
 }
 
+extension InitPlan {
+    /// The plan with one more note.
+    func noting(_ note: String) -> InitPlan {
+        InitPlan(detected: detected, xcodes: xcodes, selectedXcode: selectedXcode, primary: primary, choices: choices,
+                 notes: notes + [note])
+    }
+}
+
 public enum Gitignore {
     /// Appends each entry `.gitignore` in `root` doesn't already list (with or without leading and trailing
     /// slashes), creating the file if needed. Returns the entries it added.
@@ -121,16 +162,25 @@ public struct InitReport: Reportable {
     public let path: String
     public let summary: [String]
     public let gitignoreAdded: [String]
+    /// What was added to the `excluded` list of the project's .swiftlint.yml: `.xcdev`, or nothing.
+    public var swiftlintExcluded: [String] = []
+    public var warnings: [String] = []
 
     public var text: String {
         guard status == .written else {
             return (["\(ConfigLoader.fileName) already exists, so nothing changed  path=\(path)"] + summary
+                + warnings.map { "warning: " + $0 }
                 + ["next: inspect it with `xcd config show`; regenerate it with `xcd init --force` (plus any --set answers from `xcd init --plan`)"])
                 .joined(separator: "\n")
         }
         var lines = ["wrote \(path)"] + summary
         lines.append(gitignoreAdded.isEmpty ? ".gitignore: already ignores .xcdev/, .xcdev.local.yml, and .xcdev-media/"
                                             : ".gitignore: added " + gitignoreAdded.joined(separator: ", "))
+        if !swiftlintExcluded.isEmpty {
+            lines.append("\(SwiftLintConfig.fileName): added \(swiftlintExcluded.joined(separator: ", ")) to `excluded`, "
+                + "so SwiftLint stays out of xcd's build folder")
+        }
+        lines += warnings.map { "warning: " + $0 }
         lines.append("change a choice: `xcd init --force --set <key>=<value>` (`xcd init --plan` lists the keys), or edit .xcdev.yml (`xcd config explain <key>`)")
         lines.append("next: run `xcd config show` to check the result, then `xcd doctor`")
         return lines.joined(separator: "\n")

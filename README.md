@@ -48,6 +48,9 @@ xcd help                  # every command, project command, and plugin
 - `xcd doctor` checks simulators, worktrees, xcd's scratch folders and leftover package caches, and the project's
   setup; `xcd doctor --fix` repairs what it can. It may restart CoreSimulator, which shuts down every agent's
   simulators, so read the problems first.
+- SwiftLint searches hidden folders, so it would lint `.xcdev/` (DerivedData and package checkouts) on every build.
+  `xcd init` adds `.xcdev` to the `excluded` list of the project's `.swiftlint.yml`, and `xcd doctor` reports a
+  config that lacks it (`--fix` adds it).
 
 ## Extending
 

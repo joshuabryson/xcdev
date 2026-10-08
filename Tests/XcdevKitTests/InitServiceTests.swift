@@ -227,6 +227,93 @@ import XcdevTestSupport
         #expect(leftoverScratch(project).isEmpty)
     }
 
+    static let lintConfig = "excluded:\n  - Pods\n\ndisabled_rules:\n  - todo\n"
+    static let lintProblem = ".swiftlint.yml doesn't exclude .xcdev/, so SwiftLint searches xcd's build folder on every run, "
+        + "which can add minutes to a build"
+
+    func lintConfig(_ project: TempProject) throws -> String {
+        try String(contentsOfFile: project.root + "/.swiftlint.yml", encoding: .utf8)
+    }
+
+    /// SwiftLint searches hidden folders too, so a project that runs it would lint `.xcdev/` on every build.
+    @Test func writeKeepsSwiftLintOutOfTheStateFolder() async throws {
+        let (project, service) = try setup()
+        defer { project.remove() }
+        try project.write(Self.lintConfig, to: ".swiftlint.yml")
+        let report = try await service.write(answers: [:], force: false, from: project.root)
+        #expect(try lintConfig(project) == "excluded:\n  - Pods\n  - .xcdev\n\ndisabled_rules:\n  - todo\n")
+        #expect(report.swiftlintExcluded == [".xcdev"] && report.warnings.isEmpty)
+        let lines = report.text.components(separatedBy: "\n")
+        #expect(lines.contains(".swiftlint.yml: added .xcdev to `excluded`, so SwiftLint stays out of xcd's build folder"))
+        #expect(lines.last == "next: run `xcd config show` to check the result, then `xcd doctor`")
+    }
+
+    @Test func aSwiftLintConfigThatStaysOutAlreadyIsNotTouched() async throws {
+        let (project, service) = try setup()
+        defer { project.remove() }
+        try project.write("included:\n  - App\n", to: ".swiftlint.yml")
+        let report = try await service.write(answers: [:], force: false, from: project.root)
+        #expect(try lintConfig(project) == "included:\n  - App\n")
+        #expect(report.swiftlintExcluded.isEmpty && report.warnings.isEmpty && !report.text.contains("swiftlint"))
+    }
+
+    @Test func aProjectWithoutSwiftLintGetsNoConfigForIt() async throws {
+        let (project, service) = try setup()
+        defer { project.remove() }
+        let report = try await service.write(answers: [:], force: false, from: project.root)
+        #expect(!FileManager.default.fileExists(atPath: project.root + "/.swiftlint.yml"))
+        #expect(report.swiftlintExcluded.isEmpty && report.warnings.isEmpty && !report.text.contains("swiftlint"))
+    }
+
+    @Test func aSwiftLintConfigInitCannotEditIsAWarning() async throws {
+        let (project, service) = try setup()
+        defer { project.remove() }
+        try project.write("excluded: Pods\n", to: ".swiftlint.yml")
+        let report = try await service.write(answers: [:], force: false, from: project.root)
+        #expect(report.status == .written && report.swiftlintExcluded.isEmpty)
+        #expect(try lintConfig(project) == "excluded: Pods\n")
+        #expect(report.warnings == [Self.lintProblem + "; add `.xcdev` to the `excluded` list in .swiftlint.yml"])
+        #expect(report.text.components(separatedBy: "\n").contains("warning: " + (report.warnings.first ?? "none")))
+    }
+
+    /// `init` changes nothing in a project that has a config, so there it only says so.
+    @Test func initOnAnExistingConfigWarnsAboutSwiftLintAndLeavesIt() async throws {
+        let (project, service) = try setup()
+        defer { project.remove() }
+        _ = try await service.write(answers: [:], force: false, from: project.root)
+        try project.write(Self.lintConfig, to: ".swiftlint.yml")
+        let again = try await service.write(answers: [:], force: false, from: project.root)
+        #expect(again.status == .unchanged && again.swiftlintExcluded.isEmpty)
+        #expect(try lintConfig(project) == Self.lintConfig)
+        #expect(again.warnings == [Self.lintProblem + "; run `xcd doctor --fix`, or add `.xcdev` to the `excluded` list in .swiftlint.yml"])
+        let lines = again.text.components(separatedBy: "\n")
+        #expect(lines.contains("warning: " + (again.warnings.first ?? "none")) && lines.last?.hasPrefix("next: inspect it with") == true)
+
+        let forced = try await service.write(answers: [:], force: true, from: project.root)
+        #expect(forced.swiftlintExcluded == [".xcdev"] && forced.warnings.isEmpty)
+        #expect(try await service.write(answers: [:], force: false, from: project.root).warnings.isEmpty)
+    }
+
+    @Test func thePlanSaysWhatInitWillDoAboutSwiftLint() async throws {
+        let (project, service) = try setup()
+        defer { project.remove() }
+        #expect(try await !service.plan(from: project.root).text.contains("swiftlint"))
+        try project.write(Self.lintConfig, to: ".swiftlint.yml")
+        let report = try await service.plan(from: project.root)
+        #expect(report.notes.last == Self.lintProblem + "; `xcd init` adds `.xcdev` to its `excluded` list")
+        #expect(try lintConfig(project) == Self.lintConfig)
+
+        try project.write("excluded: Pods\n", to: ".swiftlint.yml")
+        #expect(try await service.plan(from: project.root).notes.last
+                == Self.lintProblem + "; add `.xcdev` to the `excluded` list in .swiftlint.yml")
+
+        // With a config in place a plain `init` changes nothing, so the note names what does.
+        try project.write(Self.lintConfig, to: ".swiftlint.yml")
+        try project.write("version: 1\nproject: SampleApp.xcodeproj\n", to: ".xcdev.yml")
+        #expect(try await service.plan(from: project.root).notes
+                .contains(Self.lintProblem + "; run `xcd doctor --fix`, or add `.xcdev` to the `excluded` list in .swiftlint.yml"))
+    }
+
     @Test func anExistingConfigIsKeptUnlessForced() async throws {
         let (project, service) = try setup()
         defer { project.remove() }
