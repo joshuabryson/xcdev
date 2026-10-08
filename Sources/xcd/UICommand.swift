@@ -11,7 +11,8 @@ struct UICommand: AsyncParsableCommand {
         --system the Home Screen. Actions and wait act on the app and any system alert over it, so the app must be \
         running in front: start it with `xcd run` or `xcd launch` first (not needed with --system, button, or rotate). \
         Every action takes --tree, which prints the tree after it. Driving works on iPhone and iPad simulators running \
-        iOS 17 or later. Nothing here opens Simulator.app or takes focus on the Mac. `xcd guide ui` has the whole loop.
+        iOS 17 or later. No `ui` command opens Device Hub (Simulator.app before Xcode 27) or takes focus on the Mac; \
+        `xcd sim open` shows the simulator when a person wants to watch. `xcd guide ui` has the whole loop.
 
         Captures go to ui.media.dir (default .xcdev-media/<worktree>/<branch> in the main checkout); each prints its path.
         """,

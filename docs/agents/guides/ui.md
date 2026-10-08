@@ -1,6 +1,6 @@
 # See and drive the app's UI
 
-Use this guide to check your work in the running app: read what is on screen, act on it, and confirm what happened. It works on iPhone and iPad simulators running iOS 17 or later. Nothing here opens Simulator.app or takes focus on the Mac.
+Use this guide to check your work in the running app: read what is on screen, act on it, and confirm what happened. It works on iPhone and iPad simulators running iOS 17 or later. Nothing here opens Device Hub (Simulator.app before Xcode 27) or takes focus on the Mac; when a person wants to watch, `xcd sim open` shows them the simulator.
 
 ## The loop
 

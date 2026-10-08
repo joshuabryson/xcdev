@@ -22,7 +22,7 @@ public struct CoreSimulatorCheck: DoctorCheck {
         }
         return [DoctorProblem(check: id, message: "CoreSimulator didn't answer `simctl list`: \(reason)",
                               action: .restartCoreSimulator, fix: "restart the CoreSimulator service (booted simulators shut down)",
-                              next: "if it still fails, quit Simulator.app and Xcode, or restart the Mac")]
+                              next: "if it still fails, quit Device Hub (Simulator.app before Xcode 27) and Xcode, or restart the Mac")]
     }
 
     public func fix(_ problem: DoctorProblem, _ env: DoctorEnvironment) async throws {
