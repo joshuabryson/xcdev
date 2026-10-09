@@ -24,6 +24,11 @@ import XcdevTestSupport
         FakeArrival(answers.isEmpty ? [.success(.found(seconds: 0.6))] : answers, runner: fake)
     }
 
+    /// A looker on the service's clock: a look that does not find its element takes its whole 10 s there.
+    func timedLooker(_ answers: Result<ArrivalSight, XcdError>...) -> FakeArrival {
+        FakeArrival(answers, runner: fake, clock: base.clock)
+    }
+
     /// The index of the command that sent the link.
     var sent: Int? { fake.calls.firstIndex { $0.arguments.starts(with: ["simctl", "openurl"]) } }
 
@@ -165,9 +170,69 @@ import XcdevTestSupport
         let appeared = try await base.service(FakeProbe(runningChecks: 2), arrival: seen).open(checked, OpenOptions(), in: &ctx)
         #expect(appeared.failure?.code == .appCrashed && appeared.crash?.path == ips)
         #expect(appeared.check?.outcome == .appeared)                       // it did show, and then the app died
+        #expect(appeared.exitedAfter == 0.5)                                // the watch saw it end, so the watch's time stands
         let unseen = try await base.service(FakeProbe(runningChecks: 2), arrival: looker(.success(Self.missing)))
             .open(checked, OpenOptions(), in: &ctx)
         #expect(unseen.failure?.code == .appCrashed && unseen.check?.outcome == .missing)
+    }
+
+    /// The watch's window is over after 2 s, and the look goes on to 10 s. An app that dies in between, after a fetch
+    /// say, died while xcd was still there with its pid: that is a crash with its report, not an element that did not
+    /// appear. The probe sees the app alive at each of the watch's 9 checks, and gone at the one after the look.
+    @Test func anAppThatDiesDuringTheLookAfterTheWatchIsACrash() async throws {
+        defer { base.worktree.remove() }
+        var ctx = try context(pids: [46606])
+        let ips = try base.writeCrashReport()
+        let gone = ArrivalSight.missing(onScreen: [], away: "the app is not running")
+        let arrival = timedLooker(.success(Self.missing), .success(gone))
+        let report = try await base.service(FakeProbe(runningChecks: 9), arrival: arrival).open(checked, OpenOptions(), in: &ctx)
+        #expect(report.failure?.code == .appCrashed && report.failure?.code.exitCode == 1)
+        #expect(report.failure?.message == "the link was sent, and the app crashed 10.0s later")
+        #expect(report.failure?.next == "fix the crash (see the frames and report above), then run `xcd open` again")
+        #expect(report.crash?.path == ips && report.exitedAfter == 10)
+        // The check stays as the look answered it.
+        #expect(report.check == OpenReport.Check(target: "label~Milk", outcome: .missing, seconds: 10, reason: "the app is not running"))
+        #expect(report.text.contains("\ncheck: label~Milk did not appear within 10.0s (the app is not running)\napp crashed 10.0s later\n"))
+        #expect(base.steps == ["spawn", "openurl"])                         // the link went out once
+    }
+
+    /// The same for an app xcd started, whose window is 5 s (21 checks). It left no crash report, so the result
+    /// shows what it printed.
+    @Test func aStartedAppThatExitsDuringTheLookShowsItsLastWords() async throws {
+        defer { base.worktree.remove() }
+        var ctx = try context()
+        let gone = ArrivalSight.missing(onScreen: [], away: "the app is not running")
+        let report = try await base.service(FakeProbe(runningChecks: 21), arrival: timedLooker(.success(gone)))
+            .open(.route(name: "tour", values: [:]), OpenOptions(), in: &ctx)
+        #expect(report.failure?.code == .appCrashed && report.exitedAfter == 10)
+        #expect(report.failure?.message == "the app was started with the route's arguments, and the app exited 10.0s later without a crash report")
+        #expect(report.appOutput == ["SampleApp launched"] && report.crash == nil && report.check?.outcome == .missing)
+    }
+
+    /// Whatever the look answered, a process that is gone when both are done is the failure: the element can show
+    /// and the app die after it, and a look that could not be made says nothing about the app.
+    @Test func anAppThatIsGoneWhenTheLookIsDoneIsACrashWhateverTheLookSaw() async throws {
+        defer { base.worktree.remove() }
+        var ctx = try context()
+        // xcd starts the app each time: one check before the link is sent, then the 21 of the 5 s watch.
+        let appeared = try await base.service(FakeProbe(runningChecks: 22), arrival: looker()).open(checked, OpenOptions(), in: &ctx)
+        #expect(appeared.failure?.code == .appCrashed && appeared.check?.outcome == .appeared)
+        let failed = try await base.service(FakeProbe(runningChecks: 22), arrival: looker(.failure(Self.noRunner)))
+            .open(checked, OpenOptions(preset: "fresh"), in: &ctx)
+        #expect(failed.failure?.code == .appCrashed && failed.check?.outcome == .failed)
+    }
+
+    /// With no look, the watch's window is all that xcd watches: the process is not asked
+    /// for again, so an app that ends after the window is not this command's to report.
+    @Test func anAppIsNotAskedForAgainWhenNoLookWasMade() async throws {
+        defer { base.worktree.remove() }
+        var ctx = try context(pids: [500])
+        let plain = try await base.service(FakeProbe(runningChecks: 9)).open(.route(name: "item", values: ["id": "1"]), OpenOptions(), in: &ctx)
+        #expect(plain.failure == nil && plain.exitedAfter == nil)           // the route has no `expect`
+        let seen = looker(.success(.found(seconds: 0)))
+        let vague = try await base.service(FakeProbe(runningChecks: 9), arrival: seen).open(checked, OpenOptions(), in: &ctx)
+        #expect(vague.check?.outcome == .inconclusive && seen.looks.count == 1)        // on screen before the link: no look after it
+        #expect(vague.failure == nil && vague.exitedAfter == nil)
     }
 
     /// A route with `expect` promises a check, so a runner that cannot run is a failure, not a skip. The link has
@@ -186,7 +251,7 @@ import XcdevTestSupport
         #expect(report.failure?.next == Self.noRunner.next && report.failure?.details == ["log: /w/runner.log"])
         #expect(report.check == OpenReport.Check(target: "label~Milk", outcome: .failed, seconds: nil,
                                                  reason: "the iphone UI runner did not start within 2m00s"))
-        #expect(report.text.contains("\ncheck: could not run (the iphone UI runner did not start within 2m00s)"))
+        #expect(report.text.contains("\ncheck: could not run (the iphone UI runner did not start within 2m00s)\n  log: /w/runner.log"))
     }
 
     /// An app that was gone before its link could be sent has nothing to check.
@@ -196,6 +261,23 @@ import XcdevTestSupport
         let arrival = looker()
         let report = try await base.service(FakeProbe(runningChecks: 0), arrival: arrival).open(checked, OpenOptions(), in: &ctx)
         #expect(arrival.looks.isEmpty && report.check == nil && report.linkSent == false && report.failure?.code == .appCrashed)
+    }
+
+    /// An app that crashed as the link started it is gone before anything could be looked for. The crash is the
+    /// result, and a look would only start the runner and wait 10 s for an app that is not there.
+    @Test func nothingIsLookedForWhenTheAppCrashedAsItStarted() async throws {
+        defer { base.worktree.remove() }
+        var ctx = try context()
+        let udid = try await base.clone(&ctx)
+        let test = base
+        fake.stub(["xcrun", "simctl", "openurl"]) { _ in
+            _ = try test.writeCrashReport(udid: udid)                       // the app dies as soon as the link starts it
+            return ProcessOutput()
+        }
+        let arrival = looker()
+        let report = try await base.service(arrival: arrival).open(checked, OpenOptions(cold: true), in: &ctx)
+        #expect(arrival.looks.isEmpty && report.check == nil && report.linkSent == true)
+        #expect(report.failure?.code == .appCrashed && report.failure?.message == "the link was sent, and the app crashed 0.0s later")
     }
 
     /// UI driving is for iPhone and iPad simulators on iOS 17 or later. Elsewhere the check is skipped, and says why.
@@ -228,5 +310,30 @@ import XcdevTestSupport
         #expect(try await svc.open(.url("HTTPS://example.com/x"), OpenOptions(), in: &ctx).note == note)
         #expect(try await svc.open(.route(name: "item", values: ["id": "1"]), OpenOptions(), in: &ctx).note == nil)
         #expect(try await svc.open(.route(name: "article", values: [:]), OpenOptions(), in: &ctx).note == nil)       // it has a check
+    }
+
+    /// The note is for a link that went out to an app that is still there. A link that was not sent went nowhere,
+    /// and when the app ended, the crash is the result: nothing about Safari is said beside it.
+    @Test func aLinkThatWasNotSentOrAnAppThatEndedIsNotNoted() async throws {
+        defer { base.worktree.remove() }
+        var ctx = try context()
+        let udid = try await base.clone(&ctx)
+        let web = OpenRequest.route(name: "web", values: [:])
+        // The copy xcd started was gone before its link could be sent.
+        let unsent = try await base.service(FakeProbe(runningChecks: 0)).open(web, OpenOptions(), in: &ctx)
+        #expect(unsent.linkSent == false && unsent.failure?.code == .appCrashed && unsent.note == nil)
+        // The link went to the copy that was up (the fake launch left 4242), and that copy died in the watch's window.
+        let died = try await base.service(FakeProbe(runningChecks: 2)).open(web, OpenOptions(), in: &ctx)
+        #expect(died.linkSent == true && died.app?.state == .running && died.failure?.code == .appCrashed && died.note == nil)
+        // The link started the app, and it crashed before xcd saw its process: without a check, and with one.
+        let test = base
+        for (route, stamp) in [("web", "2026-09-30-195619"), ("article", "2026-09-30-195700")] {
+            fake.stub(["xcrun", "simctl", "openurl"]) { _ in
+                _ = try test.writeCrashReport(udid: udid, stamp: stamp)
+                return ProcessOutput()
+            }
+            let cold = try await base.service().open(.route(name: route, values: [:]), OpenOptions(cold: true), in: &ctx)
+            #expect(cold.linkSent == true && cold.failure?.code == .appCrashed && cold.check == nil && cold.note == nil, "\(route): \(cold.text)")
+        }
     }
 }

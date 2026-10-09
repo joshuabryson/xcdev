@@ -154,6 +154,8 @@ public struct OpenReport: Reportable {
         var lines = [head.joined(separator: "  ")] + sentLines
         if let preset { lines.append("preset: \(preset)") }
         if let check { lines.append("check: " + Self.checkText(check)) }
+        // What kept the check from running, such as the runner log's path and last lines: text may be all an agent sees.
+        lines += checkFailure?.details.map { "  " + $0 } ?? []
         lines += endedLines
         if let note { lines.append("note: \(note)") }
         if let log = app?.log ?? scriptLog { lines.append("log: \(log)") }

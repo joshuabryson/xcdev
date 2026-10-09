@@ -178,6 +178,31 @@ import Testing
         #expect(report.failure?.code == .appCrashed)
     }
 
+    /// Text may be all an agent sees. A check that could not run shows the error's details there, under the `check:`
+    /// line, as `xcd ui wait` shows them for the same failure: the runner log's path and its last lines.
+    @Test func aCheckThatCouldNotRunShowsTheErrorsDetailsInText() throws {
+        var report = try report("item", ["id": "3F2A"])
+        report.app = OpenReport.App(state: .started, pid: 9, bundleId: "dev.x.App", log: "/w/app.log")
+        report.linkSent = true
+        let reason = "the iphone UI runner did not start within 2m00s"
+        report.check = OpenReport.Check(target: "id:item-detail", outcome: .failed, seconds: nil, reason: reason)
+        report.checkFailure = XcdError(.runnerFailed, "the link was sent, but the arrival check could not run: " + reason, next: "run `xcd doctor`",
+                                       details: ["log: /w/runner.log", "Testing failed:", "  SampleApp is not installed"])
+        #expect(report.text == """
+        opened item  device=iphone (iPhone 18 Pro, iOS 27.0)  app=started  pid=9
+        url: sampleapp://sampleapp/item?id=3F2A
+        check: could not run (the iphone UI runner did not start within 2m00s)
+          log: /w/runner.log
+          Testing failed:
+            SampleApp is not installed
+        log: /w/app.log
+        """)
+        #expect(Renderer.report(report, command: "open", format: .text).hasSuffix("\nlog: /w/app.log\nnext: run `xcd doctor`"))
+        // A check that failed with no details adds no lines.
+        report.checkFailure = XcdError(.waitTimeout, "the link was sent, but id:item-detail did not appear within 10.0s", next: "run `xcd ui tree`")
+        #expect(report.text.hasSuffix("\ncheck: could not run (the iphone UI runner did not start within 2m00s)\nlog: /w/app.log"))
+    }
+
     @Test func aNoteComesBeforeTheLog() throws {
         var report = try report("item", ["id": "1"])
         report.app = OpenReport.App(state: .started, pid: 9, bundleId: "dev.x.App", log: "/w/app.log")

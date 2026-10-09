@@ -10,6 +10,8 @@ import XcdevTestSupport
     var crashDir: String { worktree.root + "/DiagnosticReports" }
     /// The pids `ps` lists for the installed app.
     let running = Shared<[Int32]>([])
+    /// The service's clock. It stands still unless a test moves it.
+    let clock = Shared(Date(timeIntervalSince1970: 1_790_040_000))
     static let container = "/sims/U1/data/Containers/Bundle/Application/AB12/SampleApp.app"
     static let config = """
     version: 1
@@ -67,8 +69,8 @@ import XcdevTestSupport
     /// element is found.
     func service(_ probe: FakeProbe = FakeProbe(), hooks: HookRunner? = nil, arrival: FakeArrival = FakeArrival(),
                  progress: @escaping @Sendable (String) -> Void = { _ in /* progress is not looked at */ }) -> RouteService {
-        let builds = BuildService(runner: fake, provisioner: worktree.provisioner, progress: progress,
-                                  now: { Date(timeIntervalSince1970: 1_790_040_000) }, hooks: hooks)
+        let builds = BuildService(runner: fake, provisioner: worktree.provisioner, progress: progress, now: { [clock] in clock.value },
+                                  hooks: hooks)
         let watcher = CrashWatcher(probe: probe, locator: CrashReportLocator(directory: crashDir), sleep: Instant.sleep)
         return RouteService(apps: RunService(builds: builds, watcher: watcher, sleep: Instant.sleep), arrival: arrival)
     }

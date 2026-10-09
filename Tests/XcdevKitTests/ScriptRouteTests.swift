@@ -129,8 +129,9 @@ import XcdevTestSupport
         #expect(error?.details == ["script: \(Self.command)", "log: \(log)"] + (6...25).map { "line \($0)" })
     }
 
-    /// 126 and 127 are the shell's "not executable" and "not found".
-    @Test(arguments: [(127, "the script's command was not found; fix deeplinks.routes.seeded.run in .xcdev.yml (paths are relative to the worktree root), then run `xcd open seeded` again"),
+    /// 126 and 127 are the shell's "not executable" and "not found". A 127 is the shell's for the route's own command
+    /// and for any command the script runs, so its advice covers both and sends the agent to the log to tell them apart.
+    @Test(arguments: [(127, "a command was not found, and the log names it: if it is the route's own command, fix deeplinks.routes.seeded.run in .xcdev.yml (paths are relative to the worktree root); if it is one the script runs, fix the script; then run `xcd open seeded` again"),
                       (126, "the script is not executable; run `chmod +x` on it, then run `xcd open seeded` again")])
     func aScriptTheShellCannotRunSaysWhatToFix(exitCode: Int, next: String) async throws {
         defer { worktree.remove() }
@@ -189,6 +190,8 @@ import XcdevTestSupport
         let report = try await service(arrival: FakeArrival([.failure(unbuilt)])).open(.route(name: "settings/about", values: [:]), OpenOptions(), in: &ctx)
         #expect(report.failure?.code == .appNotBuilt)
         #expect(report.failure?.message == "the script ran, but the arrival check could not run: " + unbuilt.message)
+        // The error's own `next` names flags of `xcd ui`, which `xcd open` does not take.
+        #expect(report.failure?.next == "build first with `xcd build --device iphone` (or have the script build), then run `xcd open settings/about` again")
         #expect(report.check?.outcome == .failed)
     }
 

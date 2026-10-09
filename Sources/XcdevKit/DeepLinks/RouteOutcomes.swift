@@ -13,7 +13,8 @@ public enum AppArrival: String, Codable, Sendable, Equatable {
 /// How a route's arrival check ended.
 public enum CheckOutcome: String, Codable, Sendable, Equatable {
     case appeared
-    /// The element was on screen before the link was sent, so seeing it afterwards proves nothing.
+    /// Seeing the element after the link proves nothing, for one of two reasons: it was on screen before the link
+    /// was sent, or xcd could not look before the link was sent, so it may have been.
     case inconclusive
     /// UI driving does not work on this device.
     case skipped

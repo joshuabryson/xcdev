@@ -17,14 +17,16 @@ public protocol ArrivalLooking: Sendable {
 
 /// How a route's arrival check goes for one delivery.
 enum ArrivalPlan: Sendable, Equatable {
-    /// The route has no `expect`, or nothing went out that could be checked.
+    /// The route has no `expect`, or there is nothing to check: the link did not go out, or the app crashed as it
+    /// started.
     case none
     /// UI driving does not work on this device.
     case skipped(target: String, reason: String)
     /// The element was on screen before the link went to a copy that was already up, so seeing it proves nothing.
     case inconclusive(target: String)
     /// `unsure` is why the look before the link to a copy that was already up could not tell whether the element was
-    /// on screen. It was there all along if the look afterwards finds it at once, so that look proves nothing.
+    /// on screen. The element may then have been there all along, so a find by the look afterwards proves nothing,
+    /// however long it took.
     case look(target: String, device: String, unsure: String? = nil)
 }
 
@@ -64,7 +66,8 @@ enum ArrivalCheck {
     }
 
     /// The result of a look after a delivery when the look before it could not tell whether the element was already
-    /// on screen (`why`): an element found at once may have been there all along, so the check is inconclusive.
+    /// on screen (`why`): the element may have been there all along, so any find is inconclusive, however long it
+    /// took. A look that did not find the element, or that could not be made, is a failure as it stands.
     static func doubted(_ result: ArrivalResult, because why: String?) -> ArrivalResult {
         guard let why, let check = result.check, check.outcome == .appeared else { return result }
         let reason = "xcd could not look before the link was sent (\(why)), so \(check.target) may already have been on screen"
@@ -82,13 +85,22 @@ enum ArrivalCheck {
         return "on screen now: \(onScreen.prefix(8).joined(separator: ", ")); run `xcd ui tree`"
     }
 
-    /// The result of a look that could not be made. A route with `expect` promises a check, so this is a failure and
-    /// not a skip: it keeps the error's code and `next`, and its message says what had already reached the device.
-    static func unchecked(_ error: any Error, _ target: String, after sent: String) -> ArrivalResult {
+    /// The result of a look that could not be made after `route` was delivered to `device`. A route with `expect`
+    /// promises a check, so this is a failure and not a skip: it keeps the error's code, and its message says what
+    /// had already reached the device. It keeps the error's `next` too, except for an app that is not built: that
+    /// `next` is written for `xcd ui` and names flags `xcd open` does not take.
+    static func unchecked(_ error: any Error, _ target: String, after route: ResolvedRoute, on device: String) -> ArrivalResult {
         var failure = error as? XcdError ?? XcdError(.runnerFailed, "\(error)", next: "run `xcd ui stop`, then retry")
         let reason = failure.message
-        failure.message = "\(sent), but the arrival check could not run: \(reason)"
+        failure.message = "\(OpenReport.sent(route.delivery.kind)), but the arrival check could not run: \(reason)"
+        if failure.code == .appNotBuilt { failure.next = notBuiltNext(route, on: device) }
         return ArrivalResult(check: OpenReport.Check(target: target, outcome: .failed, seconds: nil, reason: reason), failure: failure)
+    }
+
+    /// What to do when no app has been built for `device`, so xcd does not know which app to look in. Only a script
+    /// route gets this far without a build, and its script may be where the build belongs.
+    static func notBuiltNext(_ route: ResolvedRoute, on device: String) -> String {
+        "build first with `xcd build --device \(device)` (or have the script build), then run `xcd open \(route.name ?? "<route>")` again"
     }
 }
 
@@ -150,7 +162,7 @@ extension RouteService {
                 let result = ArrivalCheck.result(sight, target, after: sent, web: route.isWebLink)
                 return ArrivalCheck.doubted(result, because: unsure)
             } catch {
-                return ArrivalCheck.unchecked(error, target, after: sent)
+                return ArrivalCheck.unchecked(error, target, after: route, on: device)
             }
         }
     }

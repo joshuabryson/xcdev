@@ -165,6 +165,16 @@ import XcdevTestSupport
         #expect(web.note == nil && steps.last == ["open", "-g", "-a", app, "https://example.com/item"])
     }
 
+    /// A skipped check makes no look, so the watch's 2 s window (9 checks) is all that xcd watches: a Mac app that
+    /// ends after it is not asked for again.
+    @Test func aSkippedCheckDoesNotLengthenTheWatch() async throws {
+        defer { worktree.remove() }
+        var ctx = try context()
+        try setUp(ctx, pids: [500])
+        let report = try await service(FakeProbe(runningChecks: 9)).open(.route(name: "checked", values: ["id": "Milk"]), OpenOptions(device: "mac"), in: &ctx)
+        #expect(report.check?.outcome == .skipped && report.failure == nil && report.exitedAfter == nil)
+    }
+
     @Test func aMacAppThatWasNeverBuiltSaysWhatToRun() async throws {
         defer { worktree.remove() }
         var ctx = try context()

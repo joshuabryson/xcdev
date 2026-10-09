@@ -119,6 +119,7 @@ struct DeepLinksIntegrationTests {
             // The link is still sent, encoded.
             let vague = try await svc.routes.open(.route(name: "shown", values: ["id": "a b", "tab": "notes"]), OpenOptions(), in: &ctx)
             #expect(vague.check?.outcome == .inconclusive && vague.failure == nil, "\(vague.text)")
+            #expect(vague.check?.reason == "id:arrivalValue was already on screen", "\(vague.text)")
             #expect(try await arrival(of: "sampleapp://sample/item?id=a%20b&tab=notes", &ctx, svc) == "warm")
 
             // A launch route restarts the app with its arguments.
@@ -162,7 +163,8 @@ struct DeepLinksIntegrationTests {
         let web = try await svc.routes.open(.route(name: "web", values: [:]), OpenOptions(), in: &ctx)
         #expect(web.linkSent == true && web.check?.outcome == .missing, "\(web.text)")
         #expect(web.failure?.code == .waitTimeout, "\(String(describing: web.failure))")
-        #expect(web.failure?.message == "the link was sent, but label~xcd-sample did not appear within 10.0s")
+        #expect(web.failure?.message == "the link was sent, but label~xcd-sample did not appear within 10.0s",
+                "\(String(describing: web.failure))")
         #expect(web.failure?.next?.contains("an https link opens in Safari") == true, "\(String(describing: web.failure?.next))")
     }
 
@@ -183,6 +185,7 @@ struct DeepLinksIntegrationTests {
     func aLaunchRouteStartsAStoppedApp(_ ctx: inout WorktreeContext, _ svc: Services) async throws {
         let launched = try await svc.routes.open(.route(name: "start", values: ["step": "4"]), OpenOptions(), in: &ctx)
         #expect(launched.app?.state == .started && launched.failure == nil, "\(launched.text)")
+        #expect(launched.check?.outcome == .appeared, "\(launched.text)")
         #expect(try await arrival(of: "onboarding/4", &ctx, svc) == "argument")
         // The next step sends a link to a stopped app again.
         #expect(try await svc.apps.terminate(device: nil, in: &ctx).action == "terminated")

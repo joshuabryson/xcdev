@@ -34,14 +34,16 @@ struct RouteScript: Sendable {
     }
 
     /// The script ran and exited non-zero: `route_failed`, with the last 20 lines of its log. 126 and 127 are the
-    /// shell's "not executable" and "not found".
+    /// shell's "not executable" and "not found". A 127 can be for the route's own command or for one the script
+    /// runs, and only the log tells which.
     static func failed(_ name: String, _ command: String, exitCode: Int32, log: String) -> XcdError {
         let tail = ((try? String(contentsOfFile: log, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init).suffix(20)
         let again = "then run `xcd open \(name)` again"
         let next: String
         switch exitCode {
         case 127:
-            next = "the script's command was not found; fix deeplinks.routes.\(name).run in .xcdev.yml (paths are relative to the worktree root), \(again)"
+            next = "a command was not found, and the log names it: if it is the route's own command, fix deeplinks.routes.\(name).run "
+                + "in .xcdev.yml (paths are relative to the worktree root); if it is one the script runs, fix the script; \(again)"
         case 126:
             next = "the script is not executable; run `chmod +x` on it, \(again)"
         default:

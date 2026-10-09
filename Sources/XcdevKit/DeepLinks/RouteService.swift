@@ -92,7 +92,8 @@ public struct RouteService: Sendable {
 
     /// Watches the app for the delivery's window, looks for the route's `expect` beside the watch, and completes
     /// the report. The watch always runs for its whole window, and the command returns when both are done. A process
-    /// that ends is a crash, whatever the look saw.
+    /// that ends before then is a crash, whatever the look saw. The look can go on
+    /// long after the window, so when one was made the process is asked for once more at the end.
     func finish(_ delivered: Delivered, _ plan: OpenPlan, _ app: PreparedApp, in ctx: WorktreeContext) async throws -> OpenReport {
         var report = plan.report(device: app.target.name, dryRun: false, worktree: ctx.state.name)
         report.deviceSummary = app.target.summary
@@ -101,25 +102,32 @@ public struct RouteService: Sendable {
                                     log: delivered.captured ? started.appLog : nil)
         if report.kind == .url { report.linkSent = delivered.linkSent }
         let check = checkPlan(delivered, plan, app, in: ctx)
+        let watchedFrom = apps.builds.now()
         async let watching = watch(delivered, app)
         async let arriving = arrive(check, after: plan.route, in: ctx)
-        let (outcome, arrived) = try await (watching, arriving)
+        let (watched, arrived) = try await (watching, arriving)
         report.arrived(arrived)
+        var outcome = watched
+        if case .look = check, watched == .running { outcome = try await outcomeAfterLook(of: started, app, watchedFrom: watchedFrom) }
         if case .exited(let after, let crash) = outcome {
             report.exitedAfter = after
             report.crash = crash
             report.appOutput = delivered.captured ? RunService.tail(of: started.appLog, lines: 10) : nil
         }
-        // On a simulator the system decides where an https link goes, and with no check nothing looked.
-        if check == .none, delivered.linkSent, app.target.device != nil, plan.route.isWebLink { report.note = RouteErrors.uncheckedWebLink }
+        // On a simulator the system decides where an https link goes, and with no check nothing looked. That is said
+        // of a link that went out to an app that is still there: when the app ended, the crash is the result.
+        if check == .none, delivered.linkSent, !report.appEnded, app.target.device != nil, plan.route.isWebLink {
+            report.note = RouteErrors.uncheckedWebLink
+        }
         return report
     }
 
-    /// The check for this delivery: none for a link that never went out, and nothing to wait for when the element
-    /// was on screen before the link went to a copy that was already up. When the look before could not tell, the
-    /// look after is still made, and a find proves nothing.
+    /// The check for this delivery: none for a link that never went out or an app that crashed as it started, since
+    /// the crash is then the result and a look would only wait for an app that is gone. Nothing to wait for when the
+    /// element was on screen before the link went to a copy that was already up. When the look before could not
+    /// tell, the look after is still made, and a find proves nothing.
     func checkPlan(_ delivered: Delivered, _ plan: OpenPlan, _ app: PreparedApp, in ctx: WorktreeContext) -> ArrivalPlan {
-        guard delivered.linkSent else { return .none }
+        guard delivered.linkSent, delivered.started.crashedAtLaunch == nil else { return .none }
         let planned = arrivalPlan(plan.route, on: app.target.name, in: ctx)
         guard case .look(let target, let device, _) = planned else { return planned }
         switch delivered.alreadyThere {
@@ -138,5 +146,17 @@ public struct RouteService: Sendable {
         }
         return try await apps.watcher.watch(pid: started.pid, processName: app.product.executableName, window: delivered.window,
                                             launchedAt: started.launchedAt)
+    }
+
+    /// What became of an app that the watch left running, once the look for the route's `expect` is done too. The
+    /// look can go on long after the watch's window, and xcd still has the pid: a process that ended in that time
+    /// is a crash, not an element that did not appear. The process is asked for once, and its
+    /// crash report is looked for only when it is gone. xcd cannot tell when in that time the process ended, so
+    /// `after` is how long xcd had been watching when it saw that the process was gone.
+    func outcomeAfterLook(of started: StartedApp, _ app: PreparedApp, watchedFrom: Date) async throws -> LaunchOutcome {
+        guard !apps.watcher.probe.isRunning(started.pid) else { return .running }
+        let after = apps.builds.now().timeIntervalSince(watchedFrom)
+        let crash = try await apps.watcher.report(processName: app.product.executableName, pid: started.pid, since: started.launchedAt)
+        return .exited(after: after, crash: crash)
     }
 }
