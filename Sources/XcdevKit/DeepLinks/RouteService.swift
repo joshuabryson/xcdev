@@ -32,12 +32,13 @@ public struct RouteService: Sendable {
 
     /// An app after its route was delivered: how it got there, and what to watch.
     struct Delivered {
-        /// running, started, restarted, or started-by-link.
-        let state: String
+        let state: AppArrival
         let started: StartedApp
         let window: Duration
         /// Whether `started.appLog` holds this run's output.
         let captured: Bool
+        /// False when the copy xcd started was gone before its link could be sent.
+        var linkSent = true
     }
 
     func send(_ url: String, _ plan: OpenPlan, in ctx: inout WorktreeContext) async throws -> OpenReport {
@@ -51,9 +52,9 @@ public struct RouteService: Sendable {
             delivered = try await sendToRunning(url, app, pid: pid, in: ctx)
         } else {
             let started = try await apps.begin(app, plan.launch, in: &ctx)
-            if started.crashedAtLaunch == nil { try await app.host.open(url, in: app.product) }
-            delivered = Delivered(state: running == nil ? "started" : "restarted", started: started, window: plan.launch.crashWindow,
-                                  captured: true)
+            let sent = try await sendIfAlive(url, to: started, app)
+            delivered = Delivered(state: running == nil ? .started : .restarted, started: started, window: plan.launch.crashWindow,
+                                  captured: true, linkSent: sent)
         }
         let report = plan.report(device: app.target.name, dryRun: false, worktree: ctx.state.name)
         return try await finish(report, plan, app, delivered)
@@ -63,7 +64,7 @@ public struct RouteService: Sendable {
         let app = try await simulatorApp(plan, url: nil, in: &ctx)
         let wasRunning = try await app.host.runningPid(app.product) != nil
         let started = try await apps.begin(app, plan.launch, in: &ctx)
-        let delivered = Delivered(state: wasRunning ? "restarted" : "started", started: started, window: plan.launch.crashWindow,
+        let delivered = Delivered(state: wasRunning ? .restarted : .started, started: started, window: plan.launch.crashWindow,
                                   captured: true)
         let report = plan.report(device: app.target.name, dryRun: false, worktree: ctx.state.name)
         return try await finish(report, plan, app, delivered)
@@ -76,13 +77,26 @@ public struct RouteService: Sendable {
         return app
     }
 
+    /// Sends the link to the copy xcd just started, unless that copy is already gone: a link would start the app a
+    /// second time, and its crash would be reported as one that followed the link. False when nothing was sent.
+    func sendIfAlive(_ url: String, to started: StartedApp, _ app: PreparedApp) async throws -> Bool {
+        guard started.crashedAtLaunch == nil, apps.watcher.probe.isRunning(started.pid) else { return false }
+        do {
+            try await app.host.open(url, in: app.product)
+        } catch var error as XcdError {
+            error.details.append("xcd had started the app (pid \(started.pid)) before this failed, and the link was not sent")
+            throw error
+        }
+        return true
+    }
+
     /// The link goes to the copy that is up. Its output is in the log of the launch that started it, if xcd did.
     func sendToRunning(_ url: String, _ app: PreparedApp, pid: Int32, in ctx: WorktreeContext) async throws -> Delivered {
         let sentAt = apps.builds.now()
         try await app.host.open(url, in: app.product)
         let launch = try AppStateStore.load(ctx.paths).lastLaunch
         let log = launch?.pid == pid && launch?.target == app.target.name ? launch?.appLog : nil
-        return Delivered(state: "running", started: StartedApp(pid: pid, appLog: log ?? "", launchedAt: sentAt),
+        return Delivered(state: .running, started: StartedApp(pid: pid, appLog: log ?? "", launchedAt: sentAt),
                          window: CrashWindows.running, captured: log != nil)
     }
 
@@ -99,7 +113,7 @@ public struct RouteService: Sendable {
         var started = StartedApp(pid: outcome.pid, appLog: try Self.uncapturedLog(ctx.paths, at: sentAt), launchedAt: sentAt)
         started.crashedAtLaunch = outcome.crash.map { .exited(after: 0, crash: $0) }
         try await apps.settle(started, app, in: &ctx)
-        return Delivered(state: "started-by-link", started: started, window: CrashWindows.started, captured: false)
+        return Delivered(state: .startedByLink, started: started, window: CrashWindows.started, captured: false)
     }
 
     /// What a link that had to start the app did: the pid of the process it started, and that process's crash report
@@ -146,23 +160,27 @@ public struct RouteService: Sendable {
         let started = delivered.started
         report.app = OpenReport.App(state: delivered.state, pid: started.pid, bundleId: app.product.bundleId,
                                     log: delivered.captured ? started.appLog : nil)
+        if plan.route.delivery.kind == .url { report.linkSent = delivered.linkSent }
         if let target = plan.route.expect {
-            report.check = OpenReport.Check(target: target, outcome: "skipped", seconds: nil,
+            report.check = OpenReport.Check(target: target, outcome: .skipped, seconds: nil,
                                             reason: "the arrival check is not in this version; use `xcd ui wait \(Shell.quote(target))`")
         }
-        let outcome: LaunchOutcome
-        if let crashed = started.crashedAtLaunch {
-            outcome = crashed
-        } else {
-            apps.builds.progress("delivered to \(app.product.bundleId) (pid \(started.pid)); watching \(DurationText.format(delivered.window)) for a crash")
-            outcome = try await apps.watcher.watch(pid: started.pid, processName: app.product.executableName,
-                                                   window: delivered.window, launchedAt: started.launchedAt)
-        }
-        if case .exited(let after, let crash) = outcome {
+        if case .exited(let after, let crash) = try await watch(delivered, app) {
             report.exitedAfter = after
             report.crash = crash
             report.appOutput = delivered.captured ? RunService.tail(of: started.appLog, lines: 10) : nil
         }
         return report
+    }
+
+    /// What became of the app in the delivery's window. An app that died as it started is not watched: its end is known.
+    func watch(_ delivered: Delivered, _ app: PreparedApp) async throws -> LaunchOutcome {
+        let started = delivered.started
+        if let crashed = started.crashedAtLaunch { return crashed }
+        if delivered.linkSent {
+            apps.builds.progress("delivered to \(app.product.bundleId) (pid \(started.pid)); watching \(DurationText.format(delivered.window)) for a crash")
+        }
+        return try await apps.watcher.watch(pid: started.pid, processName: app.product.executableName, window: delivered.window,
+                                            launchedAt: started.launchedAt)
     }
 }

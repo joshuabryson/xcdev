@@ -89,22 +89,22 @@ struct DeepLinksIntegrationTests {
 
             // Not running: xcd starts the app, then sends the link. The clone has never seen this scheme.
             let started = try await svc.routes.open(.route(name: "item", values: ["id": "42"]), OpenOptions(), in: &ctx)
-            #expect(started.app?.state == "started" && started.failure == nil, "\(started.text)")
+            #expect(started.app?.state == .started && started.failure == nil, "\(started.text)")
             #expect(try await arrival(of: "sampleapp://sample/item?id=42", &ctx, svc) == "warm")
 
             // Running: the link goes to the same process, encoded.
             let warm = try await svc.routes.open(.route(name: "item", values: ["id": "a b", "tab": "notes"]), OpenOptions(), in: &ctx)
-            #expect(warm.app?.state == "running" && warm.app?.pid == started.app?.pid, "\(warm.text)")
+            #expect(warm.app?.state == .running && warm.app?.pid == started.app?.pid, "\(warm.text)")
             #expect(try await arrival(of: "sampleapp://sample/item?id=a%20b&tab=notes", &ctx, svc) == "warm")
 
             // A launch route restarts the app with its arguments.
             let launched = try await svc.routes.open(.route(name: "start", values: ["step": "3"]), OpenOptions(), in: &ctx)
-            #expect(launched.app?.state == "restarted" && launched.app?.pid != started.app?.pid, "\(launched.text)")
+            #expect(launched.app?.state == .restarted && launched.app?.pid != started.app?.pid, "\(launched.text)")
             #expect(try await arrival(of: "onboarding/3", &ctx, svc) == "argument")
 
             // A route with a preset restarts the app with it, then sends the link.
             let greeted = try await svc.routes.open(.route(name: "greeted", values: [:]), OpenOptions(), in: &ctx)
-            #expect(greeted.app?.state == "restarted" && greeted.preset == "greeting", "\(greeted.text)")
+            #expect(greeted.app?.state == .restarted && greeted.preset == "greeting", "\(greeted.text)")
             #expect(try await arrival(of: "sampleapp://sample/home", &ctx, svc) == "warm")
             let output = try String(contentsOfFile: try #require(greeted.app?.log), encoding: .utf8)
             #expect(output.contains("SampleApp launched greeting=preset"))
@@ -118,7 +118,7 @@ struct DeepLinksIntegrationTests {
     /// `--cold`: the system starts the app because of the link, and xcd can still stop it afterwards.
     func coldStart(_ ctx: inout WorktreeContext, _ svc: Services) async throws {
         let cold = try await svc.routes.open(.route(name: "item", values: ["id": "cold"]), OpenOptions(cold: true), in: &ctx)
-        #expect(cold.app?.state == "started-by-link" && cold.app?.log == nil && cold.failure == nil, "\(cold.text)")
+        #expect(cold.app?.state == .startedByLink && cold.app?.log == nil && cold.failure == nil, "\(cold.text)")
         #expect(try await arrival(of: "sampleapp://sample/item?id=cold", &ctx, svc) == "cold")
         let record = try #require(try AppStateStore.load(ctx.paths).lastLaunch)
         #expect(record.pid == cold.app?.pid)
@@ -130,7 +130,7 @@ struct DeepLinksIntegrationTests {
     /// A launch route on an app that is not running starts it. The cold start above left the app stopped.
     func aLaunchRouteStartsAStoppedApp(_ ctx: inout WorktreeContext, _ svc: Services) async throws {
         let launched = try await svc.routes.open(.route(name: "start", values: ["step": "4"]), OpenOptions(), in: &ctx)
-        #expect(launched.app?.state == "started" && launched.failure == nil, "\(launched.text)")
+        #expect(launched.app?.state == .started && launched.failure == nil, "\(launched.text)")
         #expect(try await arrival(of: "onboarding/4", &ctx, svc) == "argument")
         // The next step sends a link to a stopped app again.
         #expect(try await svc.apps.terminate(device: nil, in: &ctx).action == "terminated")
@@ -140,7 +140,7 @@ struct DeepLinksIntegrationTests {
     /// their own approval. Neither may leave an alert.
     func otherSpellingsOfTheScheme(_ ctx: inout WorktreeContext, _ svc: Services) async throws {
         let capitals = try await svc.routes.open(.url("SAMPLEAPP://sample/capitals"), OpenOptions(), in: &ctx)
-        #expect(capitals.route == nil && capitals.app?.state == "started", "\(capitals.text)")
+        #expect(capitals.route == nil && capitals.app?.state == .started, "\(capitals.text)")
         #expect(try await arrival(of: "SAMPLEAPP://sample/capitals", &ctx, svc) == "warm")
         // `sim open-url` approves a scheme the built app registers. The app writes this one as "SampleCaps".
         _ = try await svc.deviceState.openURL("samplecaps://sample/via-sim", device: nil, in: &ctx)
@@ -159,7 +159,7 @@ struct DeepLinksIntegrationTests {
             #expect(report.appOutput?.contains { $0.contains("SampleApp crashed on a link") } == true)
             // The app is gone, so the same link sent cold must start it, and it crashes again.
             let cold = try await svc.routes.open(.route(name: "crash", values: [:]), OpenOptions(cold: true), in: &ctx)
-            #expect(cold.app?.state == "started-by-link" && cold.failure?.code == .appCrashed, "\(cold.text)")
+            #expect(cold.app?.state == .startedByLink && cold.failure?.code == .appCrashed, "\(cold.text)")
             let script = await #expect(throws: XcdError.self) { _ = try await svc.routes.open(.route(name: "seeded", values: [:]), OpenOptions(), in: &ctx) }
             #expect(script?.code == .usage, "\(String(describing: script))")
         }

@@ -127,12 +127,40 @@ import XcdevTestSupport
         #expect(steps == ["spawn", "openurl"])                              // approved, then sent; never relaunched
         #expect(call("spawn")?.arguments.suffix(3) == ["com.apple.CoreSimulator.CoreSimulatorBridge-->sampleapp", "-string", "dev.xcdev.SampleApp"])
         #expect(call("openurl")?.arguments.last == "sampleapp://sample/item?id=42")
-        #expect(report.app == OpenReport.App(state: "running", pid: 500, bundleId: "dev.xcdev.SampleApp", log: nil))
+        #expect(report.app == OpenReport.App(state: .running, pid: 500, bundleId: "dev.xcdev.SampleApp", log: nil))
         #expect(report.failure == nil && report.check == nil)
         #expect(report.text == "opened item  device=iphone (iPhone 18 Pro, iOS 27.0)  app=running  pid=500\nurl: sampleapp://sample/item?id=42")
         #expect(report.device == "iphone" && report.deviceSummary == "iphone (iPhone 18 Pro, iOS 27.0)")
         #expect(said.value == ["delivered to dev.xcdev.SampleApp (pid 500); watching 2.0s for a crash"])
         #expect(try AppStateStore.load(ctx.paths).lastLaunch == nil)        // xcd did not start it, so nothing is recorded
+        #expect(report.linkSent == true)
+    }
+
+    /// The copy xcd started can be gone before its link goes out. A link would then start the app a second time,
+    /// and its crash would be reported as one that followed the link.
+    @Test func anAppThatDiesWhileStartingIsNotSentTheLink() async throws {
+        defer { worktree.remove() }
+        var ctx = try context()
+        try setUp(ctx)
+        let report = try await service(FakeProbe(runningChecks: 0)).open(item(), OpenOptions(), in: &ctx)
+        #expect(steps == ["launch"])                                        // no approval, and no link
+        #expect(report.linkSent == false && report.app?.state == .started && report.app?.pid == 4242)
+        #expect(report.failure?.code == .appCrashed)
+        #expect(report.failure?.message == "xcd started the app, and it exited 0.0s later without a crash report, before the link was sent")
+        #expect(report.appOutput == ["SampleApp launched"])
+    }
+
+    /// A failure after xcd started the app says so: the device changed, and the link did not go out.
+    @Test func aFailedSendSaysTheAppWasStartedFirst() async throws {
+        defer { worktree.remove() }
+        var ctx = try context()
+        try setUp(ctx)
+        fake.stub(["xcrun", "simctl", "openurl"], exitCode: 1, stderr: "Simulator device failed to open the URL.")
+        let svc = service()
+        let error = await #expect(throws: XcdError.self) { _ = try await svc.open(item(), OpenOptions(), in: &ctx) }
+        #expect(error?.code == .simulatorFailed && error?.message == "the simulator could not open sampleapp://sample/item?id=42")
+        #expect(error?.details.last == "xcd had started the app (pid 4242) before this failed, and the link was not sent")
+        #expect(steps == ["launch", "spawn", "openurl"])
     }
 
     /// The copy xcd started earlier has a log; a link sent to it names that log.
@@ -143,7 +171,7 @@ import XcdevTestSupport
         let svc = service()
         let first = try await svc.open(item("1"), OpenOptions(), in: &ctx)
         let second = try await svc.open(item("2"), OpenOptions(), in: &ctx)
-        #expect(first.app?.state == "started" && second.app?.state == "running" && second.app?.pid == 4242)
+        #expect(first.app?.state == .started && second.app?.state == .running && second.app?.pid == 4242)
         #expect(second.app?.log == first.app?.log && second.app?.log != nil)
     }
 
@@ -161,7 +189,7 @@ import XcdevTestSupport
         let link = try #require(fake.calls.firstIndex { $0.arguments.starts(with: ["simctl", "openurl"]) })
         #expect(launch < hook && hook < link)                               // launch, hook, link
         #expect(Array(try #require(call("launch")).arguments.suffix(2)) == [try #require(ctx.state.devices["iphone"]?.udid), "dev.xcdev.SampleApp"])
-        #expect(report.app?.state == "started" && report.app?.pid == 4242)
+        #expect(report.app?.state == .started && report.app?.pid == 4242)
         let log = try #require(report.app?.log)
         #expect(log.hasPrefix(ctx.paths.logs + "/") && log.hasSuffix("-app.log"))
         #expect(said.value.last == "delivered to dev.xcdev.SampleApp (pid 4242); watching 5.0s for a crash")
@@ -176,7 +204,7 @@ import XcdevTestSupport
         let report = try await service().open(.route(name: "welcome", values: [:]), OpenOptions(), in: &ctx)
         #expect(steps == ["launch", "spawn", "openurl"])
         #expect(call("launch")?.arguments.last == "-reset" && call("launch")?.environment["SIMCTL_CHILD_MODE"] == "fresh")
-        #expect(report.app?.state == "restarted" && report.app?.pid == 4242 && report.preset == "fresh")
+        #expect(report.app?.state == .restarted && report.app?.pid == 4242 && report.preset == "fresh")
         #expect(report.text.contains("\npreset: fresh\n"))
     }
 
@@ -187,9 +215,9 @@ import XcdevTestSupport
         let svc = service()
         let welcome = try await svc.open(.route(name: "welcome", values: [:]), OpenOptions(preset: "other"), in: &ctx)
         #expect(call("launch")?.arguments.last == "-other" && call("launch")?.environment["SIMCTL_CHILD_MODE"] == nil)
-        #expect(welcome.preset == "other" && welcome.app?.state == "restarted")
+        #expect(welcome.preset == "other" && welcome.app?.state == .restarted)
         let direct = try await svc.open(.url("sampleapp://x"), OpenOptions(preset: "fresh"), in: &ctx)
-        #expect(call("launch")?.arguments.last == "-reset" && direct.app?.state == "restarted" && direct.route == nil)
+        #expect(call("launch")?.arguments.last == "-reset" && direct.app?.state == .restarted && direct.route == nil)
         let unknown = await #expect(throws: XcdError.self) { _ = try await svc.open(item(), OpenOptions(preset: "nope"), in: &ctx) }
         #expect(unknown?.code == .usage && unknown?.next == "use one of: fresh, other")
     }
@@ -203,7 +231,8 @@ import XcdevTestSupport
         #expect(steps == ["launch"])                                        // no link, and --cold changes nothing
         #expect(Array(try #require(call("launch")).arguments.suffix(3)) == ["-reset", "-startRoute", "onboarding/3"])
         #expect(call("launch")?.environment["SIMCTL_CHILD_MODE"] == "fresh" && call("launch")?.environment["SIMCTL_CHILD_STEP"] == "3")
-        #expect(report.app?.state == "restarted" && report.kind == "launch" && report.url == nil)
+        #expect(report.app?.state == .restarted && report.kind == .launch && report.url == nil)
+        #expect(report.linkSent == nil)                                     // a launch route has no link
         #expect(report.arguments == ["-reset", "-startRoute", "onboarding/3"] && report.environment == ["MODE": "fresh", "STEP": "3"])
         // --preset replaces the route's preset; the route's own arguments and environment still apply.
         _ = try await svc.open(.route(name: "start", values: [:]), OpenOptions(preset: "other"), in: &ctx)
@@ -215,7 +244,7 @@ import XcdevTestSupport
         defer { worktree.remove() }
         var ctx = try context()
         try setUp(ctx)
-        #expect(try await service().open(.route(name: "start", values: [:]), OpenOptions(), in: &ctx).app?.state == "started")
+        #expect(try await service().open(.route(name: "start", values: [:]), OpenOptions(), in: &ctx).app?.state == .started)
     }
 
     /// `--cold`: the running copy is stopped and the link itself starts the app. xcd never launches it.
@@ -232,7 +261,7 @@ import XcdevTestSupport
         }
         let report = try await service(hooks: HookRunner(runner: fake)).open(item(), OpenOptions(cold: true), in: &ctx)
         #expect(steps == ["terminate", "spawn", "openurl"])
-        #expect(report.app == OpenReport.App(state: "started-by-link", pid: 600, bundleId: "dev.xcdev.SampleApp", log: nil))
+        #expect(report.app == OpenReport.App(state: .startedByLink, pid: 600, bundleId: "dev.xcdev.SampleApp", log: nil))
         #expect(report.failure == nil)
         let record = try #require(try AppStateStore.load(ctx.paths).lastLaunch)
         #expect(record.pid == 600 && record.launchedAt == Date(timeIntervalSince1970: 1_790_040_000))
@@ -252,7 +281,7 @@ import XcdevTestSupport
             return ProcessOutput()
         }
         let report = try await service().open(item(), OpenOptions(cold: true), in: &ctx)
-        #expect(steps == ["spawn", "openurl"] && report.app?.pid == 700 && report.app?.state == "started-by-link")
+        #expect(steps == ["spawn", "openurl"] && report.app?.pid == 700 && report.app?.state == .startedByLink)
     }
 
     @Test func aColdLinkThatStartsNothingIsRouteFailed() async throws {
@@ -287,7 +316,7 @@ import XcdevTestSupport
         }
         let report = try await service().open(item(), OpenOptions(cold: true), in: &ctx)
         #expect(report.failure?.code == .appCrashed && report.failure?.message == "the link was sent, and the app crashed 0.0s later")
-        #expect(report.app?.state == "started-by-link" && report.app?.pid == 46606 && report.crash?.path == ips)
+        #expect(report.app?.state == .startedByLink && report.app?.pid == 46606 && report.crash?.path == ips)
         #expect(fake.calls.filter { $0.argv[0] == "ps" }.count == 2)        // found on the first look after the link
     }
 
@@ -339,7 +368,7 @@ import XcdevTestSupport
             ProcessOutput(stdout: looks.increment() <= 3 ? "" : "  700 \(Self.container)/SampleApp\n")
         }
         let report = try await service().open(item(), OpenOptions(cold: true), in: &ctx)
-        #expect(report.app == OpenReport.App(state: "started-by-link", pid: 700, bundleId: "dev.xcdev.SampleApp", log: nil))
+        #expect(report.app == OpenReport.App(state: .startedByLink, pid: 700, bundleId: "dev.xcdev.SampleApp", log: nil))
         #expect(report.failure == nil && report.crash == nil)
     }
 
@@ -491,7 +520,7 @@ import XcdevTestSupport
         try setUp(ctx, pids: [500])
         let svc = service()
         let checked = try await svc.open(.route(name: "checked", values: ["id": "Milk"]), OpenOptions(), in: &ctx)
-        #expect(checked.check == OpenReport.Check(target: "label~Milk", outcome: "skipped", seconds: nil,
+        #expect(checked.check == OpenReport.Check(target: "label~Milk", outcome: .skipped, seconds: nil,
                                                  reason: "the arrival check is not in this version; use `xcd ui wait 'label~Milk'`"))
         #expect(checked.failure == nil)
         let script = await #expect(throws: XcdError.self) { _ = try await svc.open(.route(name: "seeded", values: [:]), OpenOptions(), in: &ctx) }

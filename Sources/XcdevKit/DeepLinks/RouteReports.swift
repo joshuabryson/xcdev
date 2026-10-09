@@ -68,8 +68,7 @@ public struct RouteListReport: Reportable {
 /// `--dry-run` what would be sent.
 public struct OpenReport: Reportable {
     public struct App: Codable, Sendable, Equatable {
-        /// running, started, restarted, started-by-link, or untouched.
-        public let state: String
+        public let state: AppArrival
         public let pid: Int32?
         public let bundleId: String
         /// The app's captured output, when xcd started it.
@@ -78,21 +77,23 @@ public struct OpenReport: Reportable {
 
     public struct Check: Codable, Sendable, Equatable {
         public let target: String
-        /// appeared, inconclusive, or skipped.
-        public let outcome: String
+        public let outcome: CheckOutcome
         public let seconds: Double?
         public let reason: String?
     }
 
     /// Nil for a URL given directly.
     public let route: String?
-    public let kind: String
+    public let kind: RouteSpec.Kind
     /// The device's name in the config, as `--device` takes it: "iphone".
     public let device: String
     /// The name with its type and OS: "iphone (iPhone 18 Pro, iOS 27.0)". Nil for a dry run, which touches no device.
     public var deviceSummary: String?
     public let dryRun: Bool
     public var url: String?
+    /// For a link route on a real run: whether the link went out. False when the copy xcd started was gone before
+    /// it could be sent.
+    public var linkSent: Bool?
     public var arguments: [String]?
     public var environment: [String: String]?
     public var script: String?
@@ -110,7 +111,7 @@ public struct OpenReport: Reportable {
 
     init(_ route: ResolvedRoute, device: String, dryRun: Bool, worktree: String) {
         self.route = route.name
-        kind = route.delivery.kind.rawValue
+        kind = route.delivery.kind
         self.device = device
         self.dryRun = dryRun
         self.worktree = worktree
@@ -136,7 +137,7 @@ public struct OpenReport: Reportable {
     public var text: String {
         var head = [(dryRun ? "would open " : "opened ") + (route ?? "link"), "device=\(deviceSummary ?? device)"]
         if let app {
-            head.append("app=\(app.state)")
+            head.append("app=\(app.state.rawValue)")
             if let pid = app.pid { head.append("pid=\(pid)") }
         }
         var lines = [head.joined(separator: "  ")] + sentLines
@@ -163,7 +164,8 @@ public struct OpenReport: Reportable {
     var endedLines: [String] {
         guard let exitedAfter else { return [] }
         let after = DurationText.format(.seconds(exitedAfter))
-        var lines = [crash == nil ? "app exited \(after) later (no crash report found)" : "app crashed \(after) later"]
+        let unsent = linkSent == false ? ", before the link was sent" : ""
+        var lines = [(crash == nil ? "app exited \(after) later (no crash report found)" : "app crashed \(after) later") + unsent]
         if let crash {
             lines.append("crash: " + [crash.exception, crash.termination].compactMap { $0 }.joined(separator: ", "))
             lines += crash.frames.map { "  " + $0 }
@@ -178,20 +180,24 @@ public struct OpenReport: Reportable {
 
     static func checkText(_ check: Check) -> String {
         switch check.outcome {
-        case "appeared": return "\(check.target) appeared after \(DurationText.format(.seconds(check.seconds ?? 0)))"
-        default: return "\(check.outcome)" + (check.reason.map { " (\($0))" } ?? "")
+        case .appeared: return "\(check.target) appeared after \(DurationText.format(.seconds(check.seconds ?? 0)))"
+        case .inconclusive, .skipped: return check.outcome.rawValue + (check.reason.map { " (\($0))" } ?? "")
         }
     }
 
     public var failure: XcdError? {
         guard let exitedAfter else { return nil }
         let after = DurationText.format(.seconds(exitedAfter))
-        let sent = kind == RouteSpec.Kind.launch.rawValue ? "the app was started with the route's arguments" : "the link was sent"
-        guard crash != nil else {
-            return XcdError(.appCrashed, "\(sent), and the app exited \(after) later without a crash report",
-                            next: "check the app's output with `xcd logs --app` and its logs with `xcd logs`")
-        }
-        return XcdError(.appCrashed, "\(sent), and the app crashed \(after) later",
-                        next: "fix the crash (see the frames and report above), then run `xcd open` again")
+        let ended = crash == nil ? "exited \(after) later without a crash report" : "crashed \(after) later"
+        let next = crash == nil ? "check the app's output with `xcd logs --app` and its logs with `xcd logs`"
+                                : "fix the crash (see the frames and report above), then run `xcd open` again"
+        return XcdError(.appCrashed, Self.endedText(kind, linkSent: linkSent, ended), next: next)
+    }
+
+    /// What reached the app before it ended, then how it ended. A link that never went out is not called sent.
+    static func endedText(_ kind: RouteSpec.Kind, linkSent: Bool?, _ ended: String) -> String {
+        if kind == .launch { return "the app was started with the route's arguments, and the app \(ended)" }
+        if linkSent == false { return "xcd started the app, and it \(ended), before the link was sent" }
+        return "the link was sent, and the app \(ended)"
     }
 }

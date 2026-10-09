@@ -145,15 +145,15 @@ import Testing
 
     @Test func aResultSaysWhatHappenedToTheApp() throws {
         var report = try report("item", ["id": "3F2A", "tab": "notes"])
-        report.app = OpenReport.App(state: "running", pid: 4312, bundleId: "dev.x.App", log: nil)
-        report.check = OpenReport.Check(target: "id:item-detail", outcome: "appeared", seconds: 0.6, reason: nil)
+        report.app = OpenReport.App(state: .running, pid: 4312, bundleId: "dev.x.App", log: nil)
+        report.check = OpenReport.Check(target: "id:item-detail", outcome: .appeared, seconds: 0.6, reason: nil)
         #expect(report.text == """
         opened item  device=iphone (iPhone 18 Pro, iOS 27.0)  app=running  pid=4312
         url: sampleapp://sampleapp/item?id=3F2A&tab=notes
         check: id:item-detail appeared after 0.6s
         """)
-        report.check = OpenReport.Check(target: "id:item-detail", outcome: "skipped", seconds: nil, reason: "not an iPhone or iPad")
-        report.app = OpenReport.App(state: "started", pid: 9, bundleId: "dev.x.App", log: "/w/app.log")
+        report.check = OpenReport.Check(target: "id:item-detail", outcome: .skipped, seconds: nil, reason: "not an iPhone or iPad")
+        report.app = OpenReport.App(state: .started, pid: 9, bundleId: "dev.x.App", log: "/w/app.log")
         #expect(report.text.hasSuffix("check: skipped (not an iPhone or iPad)\nlog: /w/app.log"))
         #expect(report.failure == nil)
     }
@@ -161,14 +161,14 @@ import Testing
     @Test func aURLGivenDirectlyIsCalledALink() throws {
         var report = OpenReport(.direct("myapp://x"), device: "iphone", dryRun: false, worktree: "feat")
         report.deviceSummary = "iphone (iPhone 18 Pro, iOS 27.0)"
-        report.app = OpenReport.App(state: "started-by-link", pid: 7, bundleId: "dev.x.App", log: nil)
+        report.app = OpenReport.App(state: .startedByLink, pid: 7, bundleId: "dev.x.App", log: nil)
         #expect(report.text == "opened link  device=iphone (iPhone 18 Pro, iOS 27.0)  app=started-by-link  pid=7\nurl: myapp://x")
-        #expect(report.route == nil && report.kind == "url")
+        #expect(report.route == nil && report.kind == .url)
     }
 
     @Test func aCrashIsAFailureThatSaysTheLinkWasSent() throws {
         var report = try report("item", ["id": "1"])
-        report.app = OpenReport.App(state: "running", pid: 4312, bundleId: "dev.x.App", log: "/w/app.log")
+        report.app = OpenReport.App(state: .running, pid: 4312, bundleId: "dev.x.App", log: "/w/app.log")
         report.exitedAfter = 0.25
         report.crash = CrashReport(path: "/r/App.ips", processName: "App", pid: 4312, bundleId: "dev.x.App",
                                    exception: "EXC_BREAKPOINT (SIGTRAP)", termination: "Trace/BPT trap: 5", frames: ["App  handle(_:)"])
@@ -194,9 +194,25 @@ import Testing
         #expect(launched.failure?.message == "the app was started with the route's arguments, and the app exited 1.0s later without a crash report")
     }
 
+    /// The copy xcd started was gone before its link could be sent, so the failure must not say the link was sent.
+    @Test func aCrashBeforeTheLinkSaysTheLinkWasNotSent() throws {
+        var report = try report("item", ["id": "1"])
+        report.app = OpenReport.App(state: .started, pid: 9, bundleId: "dev.x.App", log: "/w/app.log")
+        report.linkSent = false
+        report.exitedAfter = 0
+        #expect(report.failure?.code == .appCrashed)
+        #expect(report.failure?.message == "xcd started the app, and it exited 0.0s later without a crash report, before the link was sent")
+        #expect(report.text.contains("\napp exited 0.0s later (no crash report found), before the link was sent\n"))
+        report.crash = CrashReport(path: "/r/App.ips", processName: "App", pid: 9, bundleId: "dev.x.App",
+                                   exception: "EXC_BREAKPOINT (SIGTRAP)", termination: nil, frames: [])
+        #expect(report.failure?.message == "xcd started the app, and it crashed 0.0s later, before the link was sent")
+        #expect(report.text.contains("\napp crashed 0.0s later, before the link was sent\n"))
+        #expect(Renderer.report(report, command: "open", format: .json).contains(#""linkSent":false"#))
+    }
+
     @Test func aResultAsJSON() throws {
         var report = try report("item", ["id": "1"])
-        report.app = OpenReport.App(state: "running", pid: 4312, bundleId: "dev.x.App", log: nil)
+        report.app = OpenReport.App(state: .running, pid: 4312, bundleId: "dev.x.App", log: nil)
         let json = Renderer.report(report, command: "open", format: .json)
         #expect(json == #"{"command":"open","data":{"app":{"bundleId":"dev.x.App","pid":4312,"state":"running"},"device":"iphone","deviceSummary":"iphone (iPhone 18 Pro, iOS 27.0)","dryRun":false,"kind":"url","route":"item","url":"sampleapp://sampleapp/item?id=1","worktree":"feat"},"ok":true,"worktree":"feat"}"#)
     }
