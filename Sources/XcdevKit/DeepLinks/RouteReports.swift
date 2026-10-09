@@ -70,7 +70,8 @@ public struct OpenReport: Reportable {
     public struct App: Codable, Sendable, Equatable {
         public let state: AppArrival
         public let pid: Int32?
-        public let bundleId: String
+        /// Nil for a script route in a worktree with no build: xcd does not know the app.
+        public let bundleId: String?
         /// The app's captured output, when xcd started it.
         public let log: String?
     }
@@ -97,6 +98,8 @@ public struct OpenReport: Reportable {
     public var arguments: [String]?
     public var environment: [String: String]?
     public var script: String?
+    /// Where a script route's script wrote its output.
+    public var scriptLog: String?
     /// For a dry run of a script route: the `XCD_PARAM_*` variables that would be left unset.
     public var unset: [String]?
     public var preset: String?
@@ -144,7 +147,7 @@ public struct OpenReport: Reportable {
         if let preset { lines.append("preset: \(preset)") }
         if let check { lines.append("check: " + Self.checkText(check)) }
         lines += endedLines
-        if let log = app?.log { lines.append("log: \(log)") }
+        if let log = app?.log ?? scriptLog { lines.append("log: \(log)") }
         return lines.joined(separator: "\n")
     }
 

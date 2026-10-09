@@ -513,8 +513,8 @@ import XcdevTestSupport
         #expect(fake.calls.isEmpty)
     }
 
-    /// For now: a route's `expect` is named but not checked, and script routes say they come later.
-    @Test func whatThisVersionDoesNotDoYetSaysSo() async throws {
+    /// Until the arrival check: a route's `expect` is named but not checked. A script route takes neither flag.
+    @Test func anExpectIsNotCheckedYetAndAScriptRouteTakesNoFlags() async throws {
         defer { worktree.remove() }
         var ctx = try context()
         try setUp(ctx, pids: [500])
@@ -523,8 +523,6 @@ import XcdevTestSupport
         #expect(checked.check == OpenReport.Check(target: "label~Milk", outcome: .skipped, seconds: nil,
                                                  reason: "the arrival check is not in this version; use `xcd ui wait 'label~Milk'`"))
         #expect(checked.failure == nil)
-        let script = await #expect(throws: XcdError.self) { _ = try await svc.open(.route(name: "seeded", values: [:]), OpenOptions(), in: &ctx) }
-        #expect(script?.code == .usage && script?.message == "route 'seeded' runs a script, which this version of xcd cannot do yet")
         for flags in [OpenOptions(preset: "fresh"), OpenOptions(cold: true)] {
             let refused = await #expect(throws: XcdError.self) { _ = try await svc.open(.route(name: "seeded", values: [:]), flags, in: &ctx) }
             #expect(refused?.code == .usage && refused?.message.hasSuffix("does not apply to a script route: its script starts the app itself") == true)

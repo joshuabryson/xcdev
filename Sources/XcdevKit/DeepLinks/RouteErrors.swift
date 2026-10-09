@@ -20,13 +20,4 @@ enum RouteErrors {
         return XcdError(.routeFailed, "the link was sent, but it did not start \(product.bundleId) within 30s", next: next,
                         details: ["url: \(url)"])
     }
-
-    /// Script routes come later.
-    static func scriptsNotYet(_ route: ResolvedRoute) -> XcdError {
-        var command = ""
-        if case .script(let run, _, _) = route.delivery { command = run }
-        let name = route.name ?? ""
-        return XcdError(.usage, "route '\(name)' runs a script, which this version of xcd cannot do yet",
-                        next: "run it yourself from the worktree root: \(command)  (`xcd open \(name) --dry-run` shows the variables it expects)")
-    }
 }

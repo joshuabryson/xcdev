@@ -106,14 +106,14 @@ public struct RouteResolver: Sendable {
             return .launch(arguments: try (launch.args ?? []).map { try template($0).filled(plain) },
                            environment: try (launch.env ?? [:]).mapValues { try template($0).filled(plain) })
         }
-        var environment = ["XCD_ROUTE": route]
+        var environment = [ContextInfo.routeKey: route]
         for (name, value) in values { environment[Self.variable(name)] = value }
         let unset = spec.allParams.keys.filter { values[$0] == nil }.map(Self.variable).sorted()
         return .script(command: spec.run ?? "", environment: environment, unset: unset)
     }
 
     /// The environment variable a script reads a parameter from.
-    static func variable(_ param: String) -> String { "XCD_PARAM_" + param.uppercased() }
+    static func variable(_ param: String) -> String { ContextInfo.paramPrefix + param.uppercased() }
 
     func usage(_ message: String, _ spec: RouteSpec, _ route: String) -> XcdError {
         XcdError(.usage, message, next: "run it as `\(RouteListing.usage(route, spec))`",

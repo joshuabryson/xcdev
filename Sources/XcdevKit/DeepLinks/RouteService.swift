@@ -3,12 +3,17 @@ import Foundation
 /// `xcd open`: lists the project's routes and delivers one to this worktree's app.
 public struct RouteService: Sendable {
     public let apps: RunService
+    /// Passed to a route's script as XCD_OUTPUT.
+    public let output: OutputFormat
 
     /// A link that must start the app gets 60 looks, half a second apart, to do it.
     static let coldPolls = 60
     static let coldPollInterval: Duration = .milliseconds(500)
 
-    public init(apps: RunService) { self.apps = apps }
+    public init(apps: RunService, output: OutputFormat = .text) {
+        self.apps = apps
+        self.output = output
+    }
 
     public func list(in ctx: WorktreeContext) -> RouteListReport {
         RouteListReport(config: ctx.config, worktree: ctx.state.name)
@@ -22,12 +27,29 @@ public struct RouteService: Sendable {
         if options.dryRun { return plan.report(device: device, dryRun: true, worktree: ctx.state.name) }
         switch route.delivery {
         case .script:
-            throw RouteErrors.scriptsNotYet(route)
+            return try await runScript(plan, on: device, in: &ctx)
         case .url(let url):
             return try await send(url, plan, in: &ctx)
         case .launch:
             return try await relaunch(plan, in: &ctx)
         }
+    }
+
+    /// A script route: the simulator is booted, and the project's script does the rest. No build is needed, and xcd
+    /// does not start, stop, or watch the app.
+    func runScript(_ plan: OpenPlan, on device: String, in ctx: inout WorktreeContext) async throws -> OpenReport {
+        var target = BuildTarget(name: device, destination: .macOS, device: nil)
+        if ctx.config.allDevices[device]?.isMac != true {
+            let clone = try await apps.builds.provisioner.boot(device, in: &ctx).device
+            target = BuildTarget(name: device, destination: .simulator(udid: clone.udid), device: clone)
+        }
+        let context = ContextInfo.build(ctx: ctx, device: device, output: output)
+        let script = RouteScript(runner: apps.builds.runner, progress: apps.builds.progress, now: apps.builds.now)
+        var report = plan.report(device: device, dryRun: false, worktree: ctx.state.name)
+        report.scriptLog = try await script.run(plan.route, context: context, logs: ctx.paths)
+        report.deviceSummary = target.summary
+        report.app = OpenReport.App(state: .untouched, pid: nil, bundleId: context.bundleId, log: nil)
+        return report
     }
 
     /// An app after its route was delivered: how it got there, and what to watch.

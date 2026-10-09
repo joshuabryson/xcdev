@@ -160,8 +160,6 @@ struct DeepLinksIntegrationTests {
             // The app is gone, so the same link sent cold must start it, and it crashes again.
             let cold = try await svc.routes.open(.route(name: "crash", values: [:]), OpenOptions(cold: true), in: &ctx)
             #expect(cold.app?.state == .startedByLink && cold.failure?.code == .appCrashed, "\(cold.text)")
-            let script = await #expect(throws: XcdError.self) { _ = try await svc.routes.open(.route(name: "seeded", values: [:]), OpenOptions(), in: &ctx) }
-            #expect(script?.code == .usage, "\(String(describing: script))")
         }
     }
 }

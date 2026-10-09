@@ -58,11 +58,22 @@ public struct ContextInfo: Reportable {
         "XCD_DERIVED_DATA", "XCD_APP_PATH", "XCD_BUNDLE_ID", "XCD_OUTPUT", "XCD_MEDIA_DIR",
     ]
 
-    /// A child's environment: `inherited` without the contract's XCD_* variables, with `overrides` merged over it.
-    /// A nested xcd (inside a project command, plugin, or hook) inherits its parent's context, so a variable that
-    /// doesn't apply to this child would otherwise leak the parent's value instead of being unset.
+    /// What a script route's script reads its route's name from.
+    public static let routeKey = "XCD_ROUTE"
+    /// What a script route's script reads a parameter from, followed by the parameter's name in capitals.
+    public static let paramPrefix = "XCD_PARAM_"
+
+    /// Whether xcd sets this variable for a child: the contract's variables, and a script route's.
+    static func isSetByXcd(_ name: String) -> Bool {
+        contractKeys.contains(name) || name == routeKey || name.hasPrefix(paramPrefix)
+    }
+
+    /// A child's environment: `inherited` without the variables xcd sets, with `overrides` merged over it.
+    /// A nested xcd (inside a project command, plugin, hook, or route script) inherits its parent's context, so a
+    /// variable that doesn't apply to this child would otherwise leak the parent's value instead of being unset. A
+    /// script that opens another route therefore never passes its own parameters along.
     public static func childEnvironment(inherited: [String: String], overrides: [String: String]) -> [String: String] {
-        inherited.filter { !contractKeys.contains($0.key) }.merging(overrides) { $1 }
+        inherited.filter { !isSetByXcd($0.key) }.merging(overrides) { $1 }
     }
 
     public var environment: [String: String] {
