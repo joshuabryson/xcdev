@@ -21,13 +21,6 @@ enum RouteErrors {
                         details: ["url: \(url)"])
     }
 
-    /// Mac delivery comes later.
-    static func macNotYet(_ product: AppProduct, url: String?) -> XcdError {
-        let next = url.map { "until it can, send the link yourself: /usr/bin/open -g -a \(Shell.quote(product.path)) \(Shell.quote($0))" }
-            ?? "until it can, start the app with `xcd launch -- <arguments>`"
-        return XcdError(.platformUnsupported, "`xcd open` cannot deliver to a Mac app yet", next: next)
-    }
-
     /// Script routes come later.
     static func scriptsNotYet(_ route: ResolvedRoute) -> XcdError {
         var command = ""

@@ -42,11 +42,13 @@ public struct RouteService: Sendable {
     }
 
     func send(_ url: String, _ plan: OpenPlan, in ctx: inout WorktreeContext) async throws -> OpenReport {
-        let app = try await simulatorApp(plan, url: url, in: &ctx)
+        let app = try await apps.prepare(plan.requestedDevice, boot: true, in: &ctx)
         try RouteErrors.checkScheme(url, registeredBy: app.product)
         let running = try await app.host.runningPid(app.product)
         let delivered: Delivered
-        if plan.cold {
+        if plan.cold, let host = app.host.launching(with: url) {
+            delivered = try await startWithLink(PreparedApp(target: app.target, product: app.product, host: host), plan, in: &ctx)
+        } else if plan.cold {
             delivered = try await startByLink(url, app, replacing: running, in: &ctx)
         } else if let pid = running, plan.preset == nil {
             delivered = try await sendToRunning(url, app, pid: pid, in: ctx)
@@ -61,20 +63,13 @@ public struct RouteService: Sendable {
     }
 
     func relaunch(_ plan: OpenPlan, in ctx: inout WorktreeContext) async throws -> OpenReport {
-        let app = try await simulatorApp(plan, url: nil, in: &ctx)
+        let app = try await apps.prepare(plan.requestedDevice, boot: true, in: &ctx)
         let wasRunning = try await app.host.runningPid(app.product) != nil
         let started = try await apps.begin(app, plan.launch, in: &ctx)
         let delivered = Delivered(state: wasRunning ? .restarted : .started, started: started, window: plan.launch.crashWindow,
                                   captured: true)
         let report = plan.report(device: app.target.name, dryRun: false, worktree: ctx.state.name)
         return try await finish(report, plan, app, delivered)
-    }
-
-    /// The latest build's app on its booted simulator. `app_not_built` without a build.
-    func simulatorApp(_ plan: OpenPlan, url: String?, in ctx: inout WorktreeContext) async throws -> PreparedApp {
-        let app = try await apps.prepare(plan.requestedDevice, boot: true, in: &ctx)
-        guard app.target.device != nil else { throw RouteErrors.macNotYet(app.product, url: url) }
-        return app
     }
 
     /// Sends the link to the copy xcd just started, unless that copy is already gone: a link would start the app a
@@ -100,7 +95,14 @@ public struct RouteService: Sendable {
                          window: CrashWindows.running, captured: log != nil)
     }
 
-    /// `--cold`: the app is stopped, and the system starts it because of the link.
+    /// `--cold` where xcd can start the app with the link attached (a Mac): the running copy is replaced, the app's
+    /// output is captured, and a preset's arguments apply.
+    func startWithLink(_ app: PreparedApp, _ plan: OpenPlan, in ctx: inout WorktreeContext) async throws -> Delivered {
+        let started = try await apps.begin(app, plan.launch, in: &ctx)
+        return Delivered(state: .startedByLink, started: started, window: plan.launch.crashWindow, captured: true)
+    }
+
+    /// `--cold` on a simulator: the app is stopped, and the system starts it because of the link.
     func startByLink(_ url: String, _ app: PreparedApp, replacing old: Int32?, in ctx: inout WorktreeContext) async throws -> Delivered {
         if old != nil { _ = try await app.host.terminate(app.product) }
         let sentAt = apps.builds.now()

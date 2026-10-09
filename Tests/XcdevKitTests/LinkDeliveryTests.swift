@@ -95,14 +95,10 @@ import XcdevTestSupport
         #expect(fake.commandLines == ["xcrun simctl openurl U1 https://example.com/a", "xcrun simctl openurl U1 HTTP://example.com/a"])
     }
 
-    @Test func aMacAppIsFoundByItsBuildPathAndTakesNoLinksYet() async throws {
+    @Test func aMacAppIsFoundByItsBuildPath() async throws {
         let mac = AppProduct(path: "/dd/Mac App.app", bundleId: "dev.x.Mac", executableName: "Mac App", platform: "macosx")
         fake.stub(["ps"], stdout: "  100 \(mac.executablePath)\n  300 \(mac.executablePath)\n  400 /other\n")
-        let host = MacAppHost(runner: fake, sleep: { _ in })
-        #expect(try await host.runningPid(mac) == 300)
-        let error = await #expect(throws: XcdError.self) { try await host.open("myapp://x", in: mac) }
-        #expect(error?.code == .platformUnsupported && error?.message == "`xcd open` cannot deliver to a Mac app yet")
-        #expect(error?.next == "until it can, send the link yourself: /usr/bin/open -g -a '/dd/Mac App.app' myapp://x")
+        #expect(try await MacAppHost(runner: fake, sleep: Instant.sleep).runningPid(mac) == 300)
     }
 }
 

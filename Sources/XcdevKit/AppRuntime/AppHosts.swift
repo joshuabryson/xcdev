@@ -19,6 +19,9 @@ public protocol AppHost: Sendable {
     func runningPid(_ product: AppProduct) async throws -> Int32?
     /// Sends a link to the app.
     func open(_ url: String, in product: AppProduct) async throws
+    /// A host whose `launch` starts the app with `url` as the link it is started for, or nil where only the system
+    /// can start an app for a link (a simulator: stop the app and send the link with `open`).
+    func launching(with url: String) -> (any AppHost)?
 }
 
 /// Finds running processes by the path of their executable.
@@ -89,12 +92,16 @@ public struct SimulatorAppHost: AppHost {
         }
         try await simctl.openURL(udid: udid, url: url)
     }
+
+    public func launching(with url: String) -> (any AppHost)? { nil }
 }
 
 /// Runs a macOS app straight from this worktree's DerivedData. Nothing is installed.
 public struct MacAppHost: AppHost {
     public let runner: any ProcessRunning
     let sleep: @Sendable (Duration) async throws -> Void
+    /// The link `launch` starts the app with: a cold start.
+    private(set) var link: String?
 
     public init(runner: any ProcessRunning,
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
@@ -111,7 +118,8 @@ public struct MacAppHost: AppHost {
         var args = ["-n", "-g", "--stdout", logFile, "--stderr", logFile]
         let env = AppEnvironment.captureOutput.merging(environment, uniquingKeysWith: { $1 })
         for (key, value) in env.sorted(by: { $0.key < $1.key }) { args += ["--env", "\(key)=\(value)"] }
-        args.append(product.path)
+        // With a link, the app is named by `-a` and the link is what `open` opens with it.
+        args += link.map { ["-a", product.path, $0] } ?? [product.path]
         if !arguments.isEmpty { args += ["--args"] + arguments }
         try await runner.runChecked(Invocation("/usr/bin/open", args), next: "read the app log: \(logFile)")
         for _ in 0..<20 {
@@ -133,9 +141,17 @@ public struct MacAppHost: AppHost {
         try await lookup.pids(of: product.executablePath).max()
     }
 
-    /// Mac delivery comes later. `RouteService` refuses a Mac target before it gets here.
+    /// The link goes to the copy at this build's path, also when another worktree's copy of the app is running,
+    /// and `-g` keeps it in the background.
     public func open(_ url: String, in product: AppProduct) async throws {
-        throw RouteErrors.macNotYet(product, url: url)
+        try await runner.runChecked(Invocation("/usr/bin/open", ["-g", "-a", product.path, url]),
+                                    next: "check that the app is still at \(product.path) (`xcd build` puts it there), then retry")
+    }
+
+    public func launching(with url: String) -> (any AppHost)? {
+        var host = self
+        host.link = url
+        return host
     }
 
     var lookup: ProcessLookup { ProcessLookup(runner: runner) }

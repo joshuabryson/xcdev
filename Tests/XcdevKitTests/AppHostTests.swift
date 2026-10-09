@@ -84,6 +84,38 @@ import XcdevTestSupport
         #expect(fake.calls.filter { $0.argv[0] == "ps" }.count == 21)    // before `open`, then 20 polls
     }
 
+    /// The link goes to the copy at this build's path, and `-g` keeps it in the background.
+    @Test func aMacLinkIsOpenedWithThisBuildInTheBackground() async throws {
+        fake.stub(["open"])
+        try await MacAppHost(runner: fake, sleep: Instant.sleep).open("myapp://item?id=1", in: macProduct)
+        #expect(fake.calls.map(\.argv) == [["open", "-g", "-a", macProduct.path, "myapp://item?id=1"]])
+        fake.stub(["open"], exitCode: 1, stderr: "The file /w/DD/Build/Products/Debug/Mac App.app does not exist.")
+        let error = await #expect(throws: XcdError.self) {
+            try await MacAppHost(runner: fake, sleep: Instant.sleep).open("myapp://x", in: macProduct)
+        }
+        #expect(error?.code == .subprocessFailed && error?.next == "check that the app is still at \(macProduct.path) (`xcd build` puts it there), then retry")
+    }
+
+    /// A cold start on a Mac: xcd starts the app itself with the link attached, so its output is captured and
+    /// launch arguments still apply.
+    @Test func aMacAppCanBeStartedWithALinkAttached() async throws {
+        let exe = macProduct.executablePath
+        let polls = Counter()
+        fake.stub(["ps"]) { _ in ProcessOutput(stdout: polls.increment() >= 2 ? "  300 \(exe)\n" : "") }
+        fake.stub(["open"])
+        let host = try #require(MacAppHost(runner: fake, sleep: Instant.sleep).launching(with: "myapp://item?id=1"))
+        #expect(try await host.launch(macProduct, arguments: ["-flag"], environment: [:], logFile: "/w/app.log") == 300)
+        let open = try #require(fake.calls.first { $0.argv[0] == "open" })
+        // As a plain launch up to the app, which `-a` now names, with the link after it and before the arguments.
+        #expect(open.arguments.starts(with: ["-n", "-g", "--stdout", "/w/app.log", "--stderr", "/w/app.log", "--env"]))
+        #expect(open.arguments.suffix(5) == ["-a", macProduct.path, "myapp://item?id=1", "--args", "-flag"])
+    }
+
+    /// Only the system can start a simulator's app for a link.
+    @Test func xcdCannotStartASimulatorAppWithALink() {
+        #expect(SimulatorAppHost(simctl: simctl, udid: "U1").launching(with: "myapp://x") == nil)
+    }
+
     @Test func macTerminateStopsEveryCopyOfThisBuild() async throws {
         let exe = macProduct.executablePath
         fake.stub(["ps"], stdout: "  100 \(exe)\n  300 \(exe)\n  400 /other\n")

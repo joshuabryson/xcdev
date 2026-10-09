@@ -513,7 +513,7 @@ import XcdevTestSupport
         #expect(fake.calls.isEmpty)
     }
 
-    /// For now: a route's `expect` is named but not checked, and script routes and Mac apps say they come later.
+    /// For now: a route's `expect` is named but not checked, and script routes say they come later.
     @Test func whatThisVersionDoesNotDoYetSaysSo() async throws {
         defer { worktree.remove() }
         var ctx = try context()
@@ -529,11 +529,6 @@ import XcdevTestSupport
             let refused = await #expect(throws: XcdError.self) { _ = try await svc.open(.route(name: "seeded", values: [:]), flags, in: &ctx) }
             #expect(refused?.code == .usage && refused?.message.hasSuffix("does not apply to a script route: its script starts the app itself") == true)
         }
-        try AppStateStore.save(AppState(builds: ["mac": BuildRecord(scheme: "App", configuration: nil,
-            product: AppProduct(path: "/dd/Mac.app", bundleId: "dev.x.Mac", executableName: "Mac", platform: "macosx"), finishedAt: Date())]), ctx.paths)
-        let mac = await #expect(throws: XcdError.self) { _ = try await svc.open(item(), OpenOptions(device: "mac"), in: &ctx) }
-        #expect(mac?.code == .platformUnsupported)
-        #expect(mac?.next == "until it can, send the link yourself: /usr/bin/open -g -a /dd/Mac.app 'sampleapp://sample/item?id=42'")
     }
 
     @Test func theListComesFromTheConfig() throws {
