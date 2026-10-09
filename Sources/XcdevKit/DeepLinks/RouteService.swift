@@ -115,12 +115,17 @@ public struct RouteService: Sendable {
     }
 
     /// The check for this delivery: none for a link that never went out, and nothing to wait for when the element
-    /// was on screen before the link went to a copy that was already up.
+    /// was on screen before the link went to a copy that was already up. When the look before could not tell, the
+    /// look after is still made, and a find proves nothing.
     func checkPlan(_ delivered: Delivered, _ plan: OpenPlan, _ app: PreparedApp, in ctx: WorktreeContext) -> ArrivalPlan {
         guard delivered.linkSent else { return .none }
         let planned = arrivalPlan(plan.route, on: app.target.name, in: ctx)
-        if delivered.alreadyThere, case .look(let target, _) = planned { return .inconclusive(target: target) }
-        return planned
+        guard case .look(let target, let device, _) = planned else { return planned }
+        switch delivered.alreadyThere {
+        case .seen: return .inconclusive(target: target)
+        case .couldNotTell(let why): return .look(target: target, device: device, unsure: why)
+        case .notSeen: return planned
+        }
     }
 
     /// What became of the app in the delivery's window. An app that died as it started is not watched: its end is known.

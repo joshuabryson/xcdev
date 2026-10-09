@@ -64,6 +64,45 @@ import XcdevTestSupport
         #expect(report.failure == nil && report.text.hasSuffix("\ncheck: inconclusive (label~Milk was already on screen)"))
     }
 
+    /// A look before the link that could not see the app tells nothing about what was on its screen. The runner does
+    /// not read an app that is in the background, so its element can be there all along, and finding it at once
+    /// afterwards would prove nothing.
+    @Test func anAppInTheBackgroundBeforeTheLinkProvesNothingAfterIt() async throws {
+        try await checkLookAfterABlindLook(before: .success(.missing(onScreen: [], away: "the app is in the background")),
+                                           why: "the app is in the background")
+    }
+
+    @Test func aLookBeforeTheLinkThatCouldNotBeMadeProvesNothingAfterIt() async throws {
+        try await checkLookAfterABlindLook(before: .failure(Self.noRunner), why: "the iphone UI runner did not start within 2m00s")
+    }
+
+    /// Two looks, the second finds the element at once: the check is inconclusive, and the command succeeds.
+    func checkLookAfterABlindLook(before: Result<ArrivalSight, XcdError>, why: String) async throws {
+        defer { base.worktree.remove() }
+        var ctx = try context(pids: [500])
+        let arrival = looker(before, .success(.found(seconds: 0)))
+        let report = try await base.service(arrival: arrival).open(checked, OpenOptions(), in: &ctx)
+        let link = try #require(sent)
+        let reason = "xcd could not look before the link was sent (\(why)), so label~Milk may already have been on screen"
+        #expect(arrival.looks.map(\.timeout) == [.zero, .seconds(10)])
+        #expect(arrival.looks.map { $0.commandsBefore > link } == [false, true])       // one before the link, one after
+        #expect(base.steps == ["spawn", "openurl"])
+        #expect(report.check == OpenReport.Check(target: "label~Milk", outcome: .inconclusive, seconds: nil, reason: reason))
+        #expect(report.failure == nil && report.text.hasSuffix("\ncheck: inconclusive (" + reason + ")"))
+    }
+
+    /// Not being able to look before does not excuse the element: if the look after misses it, that is today's failure.
+    @Test func aLookBeforeThatCouldNotTellStillFailsWhenTheElementNeverShows() async throws {
+        defer { base.worktree.remove() }
+        var ctx = try context(pids: [500])
+        let arrival = looker(.failure(Self.noRunner), .success(Self.missing))
+        let report = try await base.service(arrival: arrival).open(checked, OpenOptions(), in: &ctx)
+        #expect(arrival.looks.map(\.timeout) == [.zero, .seconds(10)])
+        #expect(report.failure?.code == .waitTimeout)
+        #expect(report.failure?.message == "the link was sent, but label~Milk did not appear within 10.0s")
+        #expect(report.check == OpenReport.Check(target: "label~Milk", outcome: .missing, seconds: 10, reason: nil))
+    }
+
     /// A restart clears the screen, so what shows up afterwards is the link's doing: no look before.
     @Test func anAppThatIsRestartedIsNotLookedAtFirst() async throws {
         defer { base.worktree.remove() }

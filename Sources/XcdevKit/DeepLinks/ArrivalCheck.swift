@@ -23,7 +23,19 @@ enum ArrivalPlan: Sendable, Equatable {
     case skipped(target: String, reason: String)
     /// The element was on screen before the link went to a copy that was already up, so seeing it proves nothing.
     case inconclusive(target: String)
-    case look(target: String, device: String)
+    /// `unsure` is why the look before the link to a copy that was already up could not tell whether the element was
+    /// on screen. It was there all along if the look afterwards finds it at once, so that look proves nothing.
+    case look(target: String, device: String, unsure: String? = nil)
+}
+
+/// What the one look before a link to a copy that is already up saw.
+enum EarlierSight: Sendable, Equatable {
+    /// The app was in front, and the element was not on screen.
+    case notSeen
+    /// The element was on screen.
+    case seen
+    /// The look could not see the app: it was not in front, or the look could not be made. `why` says so.
+    case couldNotTell(why: String)
 }
 
 /// What an arrival check found: the report's `check`, and the failure when the element was not there or the look
@@ -49,6 +61,14 @@ enum ArrivalCheck {
             let message = "\(sent), but \(target) did not appear within \(DurationText.format(wait))"
             return ArrivalResult(check: check, failure: XcdError(.waitTimeout, message, next: next(onScreen: onScreen, away: away, web: web)))
         }
+    }
+
+    /// The result of a look after a delivery when the look before it could not tell whether the element was already
+    /// on screen (`why`): an element found at once may have been there all along, so the check is inconclusive.
+    static func doubted(_ result: ArrivalResult, because why: String?) -> ArrivalResult {
+        guard let why, let check = result.check, check.outcome == .appeared else { return result }
+        let reason = "xcd could not look before the link was sent (\(why)), so \(check.target) may already have been on screen"
+        return ArrivalResult(check: OpenReport.Check(target: check.target, outcome: .inconclusive, seconds: nil, reason: reason))
     }
 
     /// What to do about an element that did not show. An app that was not in front is where a link that opened
@@ -95,12 +115,20 @@ extension RouteService {
     }
 
     /// One look before a link goes to a copy that is already up: the runner's wait returns at once for an element
-    /// that is already there, whether or not the link did anything. A look that cannot be made counts as not seen;
-    /// the look after the delivery says what is wrong.
-    func alreadyThere(_ plan: ArrivalPlan, in ctx: inout WorktreeContext) async -> Bool {
-        guard case .look(let target, let device) = plan,
-              case .found? = try? await arrival.look(for: target, timeout: .zero, device: device, in: &ctx) else { return false }
-        return true
+    /// that is already there, whether or not the link did anything. A look that cannot see the app, because it is
+    /// not in front or the look cannot be made, could not tell. That is not a failure here: the look after the
+    /// delivery is still made, says what is wrong if it cannot be, and proves nothing if it finds the element.
+    func alreadyThere(_ plan: ArrivalPlan, in ctx: inout WorktreeContext) async -> EarlierSight {
+        guard case .look(let target, let device, _) = plan else { return .notSeen }
+        do {
+            switch try await arrival.look(for: target, timeout: .zero, device: device, in: &ctx) {
+            case .found: return .seen
+            case .missing(_, let away?): return .couldNotTell(why: away)
+            case .missing: return .notSeen
+            }
+        } catch {
+            return .couldNotTell(why: (error as? XcdError)?.message ?? "\(error)")
+        }
     }
 
     /// Carries out the plan once the route was delivered.
@@ -113,13 +141,14 @@ extension RouteService {
         case .inconclusive(let target):
             return ArrivalResult(check: OpenReport.Check(target: target, outcome: .inconclusive, seconds: nil,
                                                          reason: "\(target) was already on screen"))
-        case .look(let target, let device):
+        case .look(let target, let device, let unsure):
             let sent = OpenReport.sent(route.delivery.kind)
             // The device is cloned and booted by now, so the look changes nothing in the context: its copy is dropped.
             var context = ctx
             do {
                 let sight = try await arrival.look(for: target, timeout: ArrivalCheck.wait, device: device, in: &context)
-                return ArrivalCheck.result(sight, target, after: sent, web: route.isWebLink)
+                let result = ArrivalCheck.result(sight, target, after: sent, web: route.isWebLink)
+                return ArrivalCheck.doubted(result, because: unsure)
             } catch {
                 return ArrivalCheck.unchecked(error, target, after: sent)
             }

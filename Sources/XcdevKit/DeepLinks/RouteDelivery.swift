@@ -12,8 +12,8 @@ extension RouteService {
         let captured: Bool
         /// False when the copy xcd started was gone before its link could be sent.
         var linkSent = true
-        /// The route's `expect` was on screen before the link went to a copy that was already up.
-        var alreadyThere = false
+        /// What the look for the route's `expect` saw before the link went to a copy that was already up.
+        var alreadyThere = EarlierSight.notSeen
     }
 
     /// Sends the link to the copy xcd just started, unless that copy is already gone: a link would start the app a
