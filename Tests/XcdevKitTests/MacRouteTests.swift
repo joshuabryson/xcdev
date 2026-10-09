@@ -16,11 +16,13 @@ import XcdevTestSupport
 
     func context() throws -> WorktreeContext { try worktree.context(RouteServiceTests.config, container: "App.xcodeproj") }
 
+    let arrival = FakeArrival()
+
     func service(_ probe: FakeProbe = FakeProbe()) -> RouteService {
         let builds = BuildService(runner: fake, provisioner: worktree.provisioner, now: { Date(timeIntervalSince1970: 1_790_040_000) })
         let watcher = CrashWatcher(probe: probe, locator: CrashReportLocator(directory: worktree.root + "/DiagnosticReports"),
                                    sleep: Instant.sleep)
-        return RouteService(apps: RunService(builds: builds, watcher: watcher, sleep: Instant.sleep))
+        return RouteService(apps: RunService(builds: builds, watcher: watcher, sleep: Instant.sleep), arrival: arrival)
     }
 
     /// A built Mac app that registers `sampleapp`. `pids` are its running copies; starting it leaves 4242 as the only one.
@@ -146,6 +148,21 @@ import XcdevTestSupport
         let report = try await service(FakeProbe(runningChecks: 1)).open(item, OpenOptions(device: "mac"), in: &ctx)
         #expect(report.failure?.code == .appCrashed)
         #expect(report.failure?.message == "the link was sent, and the app exited 0.2s later without a crash report")
+    }
+
+    /// UI driving does not reach a Mac app, so a route's `expect` is skipped there, and says so. An https link is
+    /// handed straight to the app on a Mac, so there is nothing to note about Safari.
+    @Test func theArrivalCheckIsSkippedOnAMac() async throws {
+        defer { worktree.remove() }
+        var ctx = try context()
+        try setUp(ctx, pids: [500])
+        let svc = service()
+        let report = try await svc.open(.route(name: "checked", values: ["id": "Milk"]), OpenOptions(device: "mac"), in: &ctx)
+        #expect(report.check == OpenReport.Check(target: "label~Milk", outcome: .skipped, seconds: nil,
+                                                 reason: "the arrival check needs UI driving, which works on iPhone and iPad simulators only"))
+        #expect(arrival.looks.isEmpty && report.failure == nil)
+        let web = try await svc.open(.route(name: "web", values: [:]), OpenOptions(device: "mac"), in: &ctx)
+        #expect(web.note == nil && steps.last == ["open", "-g", "-a", app, "https://example.com/item"])
     }
 
     @Test func aMacAppThatWasNeverBuiltSaysWhatToRun() async throws {

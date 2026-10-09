@@ -29,6 +29,12 @@ public struct ResolvedRoute: Sendable, Equatable {
     /// How long a script may take.
     public let timeout: Duration
 
+    /// Whether this is an http or https link, which the system routes like one a person tapped.
+    public var isWebLink: Bool {
+        guard case .url(let url) = delivery, let scheme = LinkScheme.of(url) else { return false }
+        return LinkScheme.isWeb(scheme)
+    }
+
     /// A link that no route describes. It is sent as given, never re-encoded.
     public static func direct(_ url: String) -> ResolvedRoute {
         ResolvedRoute(name: nil, delivery: .url(url), preset: nil, expect: nil, timeout: RouteSpec.defaultTimeout)
@@ -58,7 +64,20 @@ public struct RouteResolver: Sendable {
         let values = try self.values(given, for: spec, route: name)
         let fill: (String) -> String = { values[$0] ?? config.linkVars[$0] ?? "" }
         return ResolvedRoute(name: name, delivery: try delivery(spec, values, route: name), preset: spec.preset,
-                             expect: try spec.expect.map { try template($0).filled(fill) }, timeout: spec.timeoutDuration)
+                             expect: try spec.expect.map { try expect($0, fill, route: name) }, timeout: spec.timeoutDuration)
+    }
+
+    /// The route's `expect` with its values filled in. A value can leave it with nothing to look for: `label~{title}`
+    /// with an empty title is `label~`, which is no target.
+    func expect(_ text: String, _ fill: (String) -> String, route: String) throws -> String {
+        let target = try template(text).filled(fill)
+        switch TargetParser.parse(target) {
+        case .success(.id), .success(.label), .success(.labelContains):
+            return target
+        case .success(.ref), .success(.point), .failure:
+            throw XcdError(.usage, "route '\(route)' expects '\(text)', which names nothing with these values: '\(target)'",
+                           next: "give the parameters it uses a value that is not empty")
+        }
     }
 
     func route(named name: String) throws -> RouteSpec {

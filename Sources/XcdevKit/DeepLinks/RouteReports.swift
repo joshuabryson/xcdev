@@ -105,12 +105,20 @@ public struct OpenReport: Reportable {
     public var preset: String?
     public var app: App?
     public var check: Check?
+    /// Why the command failed when the check did: the element did not appear, or the look could not be made.
+    var checkFailure: XcdError?
     /// Seconds after delivery at which the app's process was gone.
     public var exitedAfter: Double?
     public var crash: CrashReport?
     /// The app's last output lines, when it crashed or exited and xcd had started it.
     public var appOutput: [String]?
+    public var note: String?
     public let worktree: String
+
+    enum CodingKeys: String, CodingKey {
+        case route, kind, device, deviceSummary, dryRun, url, linkSent, arguments, environment, script, scriptLog, unset, preset, app,
+             check, exitedAfter, crash, appOutput, note, worktree
+    }
 
     init(_ route: ResolvedRoute, device: String, dryRun: Bool, worktree: String) {
         self.route = route.name
@@ -147,6 +155,7 @@ public struct OpenReport: Reportable {
         if let preset { lines.append("preset: \(preset)") }
         if let check { lines.append("check: " + Self.checkText(check)) }
         lines += endedLines
+        if let note { lines.append("note: \(note)") }
         if let log = app?.log ?? scriptLog { lines.append("log: \(log)") }
         return lines.joined(separator: "\n")
     }
@@ -184,12 +193,32 @@ public struct OpenReport: Reportable {
     static func checkText(_ check: Check) -> String {
         switch check.outcome {
         case .appeared: return "\(check.target) appeared after \(DurationText.format(.seconds(check.seconds ?? 0)))"
-        case .inconclusive, .skipped: return check.outcome.rawValue + (check.reason.map { " (\($0))" } ?? "")
+        case .missing: return "\(check.target) did not appear within \(DurationText.format(.seconds(check.seconds ?? 0)))" + why(check)
+        case .failed: return "could not run" + why(check)
+        case .inconclusive, .skipped: return check.outcome.rawValue + why(check)
         }
     }
 
+    private static func why(_ check: Check) -> String { check.reason.map { " (\($0))" } ?? "" }
+
+    /// Takes over what the arrival check found.
+    mutating func arrived(_ result: ArrivalResult) {
+        check = result.check
+        checkFailure = result.failure
+    }
+
+    /// What reached the device for a route of this kind, as a failure that follows it says it.
+    static func sent(_ kind: RouteSpec.Kind) -> String {
+        switch kind {
+        case .url: return "the link was sent"
+        case .launch: return "the app was started with the route's arguments"
+        case .run: return "the script ran"
+        }
+    }
+
+    /// A process that ended is the failure, whatever the check saw. Else the check's failure, if it has one.
     public var failure: XcdError? {
-        guard let exitedAfter else { return nil }
+        guard let exitedAfter else { return checkFailure }
         let after = DurationText.format(.seconds(exitedAfter))
         let ended = crash == nil ? "exited \(after) later without a crash report" : "crashed \(after) later"
         let next = crash == nil ? "check the app's output with `xcd logs --app` and its logs with `xcd logs`"
@@ -199,8 +228,7 @@ public struct OpenReport: Reportable {
 
     /// What reached the app before it ended, then how it ended. A link that never went out is not called sent.
     static func endedText(_ kind: RouteSpec.Kind, linkSent: Bool?, _ ended: String) -> String {
-        if kind == .launch { return "the app was started with the route's arguments, and the app \(ended)" }
-        if linkSent == false { return "xcd started the app, and it \(ended), before the link was sent" }
-        return "the link was sent, and the app \(ended)"
+        if kind == .url, linkSent == false { return "xcd started the app, and it \(ended), before the link was sent" }
+        return "\(sent(kind)), and the app \(ended)"
     }
 }

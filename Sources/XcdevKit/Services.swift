@@ -73,7 +73,7 @@ public struct Services: Sendable {
     public var apps: RunService {
         RunService(builds: builds, watcher: CrashWatcher(probe: SystemProcessProbe(), locator: CrashReportLocator()))
     }
-    public var routes: RouteService { RouteService(apps: apps, output: output) }
+    public var routes: RouteService { RouteService(apps: apps, arrival: ui, output: output) }
     public var projectCommands: ProjectCommandRunner {
         ProjectCommandRunner(builds: builds, output: output, environment: environment)
     }

@@ -41,6 +41,14 @@ import XcdevTestSupport
         web:
           description: "A web link"
           url: "https://example.com/item"
+        article:
+          description: "A web link with a check"
+          url: "https://example.com/article"
+          expect: "id:article"
+        tour:
+          description: "Start the tour"
+          launch: { args: ["-tour"] }
+          expect: "id:tour"
         start:
           description: "Start at a step"
           launch: { args: ["-startRoute", "onboarding/{step}"], env: { STEP: "{step}" } }
@@ -55,12 +63,14 @@ import XcdevTestSupport
         try worktree.context(Self.config + hooks, container: "App.xcodeproj")
     }
 
-    func service(_ probe: FakeProbe = FakeProbe(), hooks: HookRunner? = nil,
-                 progress: @escaping @Sendable (String) -> Void = { _ in }) -> RouteService {
+    /// A service on the fake simulator. `arrival` answers the looks a route's `expect` asks for: by default the
+    /// element is found.
+    func service(_ probe: FakeProbe = FakeProbe(), hooks: HookRunner? = nil, arrival: FakeArrival = FakeArrival(),
+                 progress: @escaping @Sendable (String) -> Void = { _ in /* progress is not looked at */ }) -> RouteService {
         let builds = BuildService(runner: fake, provisioner: worktree.provisioner, progress: progress,
                                   now: { Date(timeIntervalSince1970: 1_790_040_000) }, hooks: hooks)
-        let watcher = CrashWatcher(probe: probe, locator: CrashReportLocator(directory: crashDir), sleep: { _ in })
-        return RouteService(apps: RunService(builds: builds, watcher: watcher, sleep: { _ in }))
+        let watcher = CrashWatcher(probe: probe, locator: CrashReportLocator(directory: crashDir), sleep: Instant.sleep)
+        return RouteService(apps: RunService(builds: builds, watcher: watcher, sleep: Instant.sleep), arrival: arrival)
     }
 
     /// A built, installed app on a fake simulator. `pids` are its running processes; a launch replaces them with 4242.
@@ -513,16 +523,12 @@ import XcdevTestSupport
         #expect(fake.calls.isEmpty)
     }
 
-    /// Until the arrival check: a route's `expect` is named but not checked. A script route takes neither flag.
-    @Test func anExpectIsNotCheckedYetAndAScriptRouteTakesNoFlags() async throws {
+    /// A script starts the app itself, so the flags that say how xcd starts it do not apply.
+    @Test func aScriptRouteTakesNeitherFlag() async throws {
         defer { worktree.remove() }
         var ctx = try context()
         try setUp(ctx, pids: [500])
         let svc = service()
-        let checked = try await svc.open(.route(name: "checked", values: ["id": "Milk"]), OpenOptions(), in: &ctx)
-        #expect(checked.check == OpenReport.Check(target: "label~Milk", outcome: .skipped, seconds: nil,
-                                                 reason: "the arrival check is not in this version; use `xcd ui wait 'label~Milk'`"))
-        #expect(checked.failure == nil)
         for flags in [OpenOptions(preset: "fresh"), OpenOptions(cold: true)] {
             let refused = await #expect(throws: XcdError.self) { _ = try await svc.open(.route(name: "seeded", values: [:]), flags, in: &ctx) }
             #expect(refused?.code == .usage && refused?.message.hasSuffix("does not apply to a script route: its script starts the app itself") == true)
@@ -532,6 +538,7 @@ import XcdevTestSupport
     @Test func theListComesFromTheConfig() throws {
         defer { worktree.remove() }
         let report = service().list(in: try context())
-        #expect(report.routes.map(\.name) == ["checked", "item", "seeded", "start", "web", "welcome"] && report.worktree == "feat")
+        #expect(report.routes.map(\.name) == ["article", "checked", "item", "seeded", "start", "tour", "web", "welcome"])
+        #expect(report.worktree == "feat")
     }
 }

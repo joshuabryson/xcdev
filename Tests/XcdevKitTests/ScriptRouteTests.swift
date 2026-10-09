@@ -27,6 +27,7 @@ import XcdevTestSupport
         settings/about:
           description: "Tap through to About"
           run: ./scripts/about.sh
+          expect: "id:about"
     """
     static let command = "./scripts/seed.sh \"$XCD_PARAM_TITLE\""
     let seeded = OpenRequest.route(name: "seeded", values: ["title": "Two Words"])
@@ -39,11 +40,11 @@ import XcdevTestSupport
         return ctx
     }
 
-    func service(output: OutputFormat = .text) -> RouteService {
+    func service(output: OutputFormat = .text, arrival: FakeArrival = FakeArrival()) -> RouteService {
         let builds = BuildService(runner: fake, provisioner: worktree.provisioner, now: { Date(timeIntervalSince1970: 1_790_040_000) })
         let watcher = CrashWatcher(probe: FakeProbe(), locator: CrashReportLocator(directory: worktree.root + "/DiagnosticReports"),
                                    sleep: Instant.sleep)
-        return RouteService(apps: RunService(builds: builds, watcher: watcher, sleep: Instant.sleep), output: output)
+        return RouteService(apps: RunService(builds: builds, watcher: watcher, sleep: Instant.sleep), arrival: arrival, output: output)
     }
 
     var script: Invocation? { fake.calls.last { $0.argv[0] == "sh" } }
@@ -149,6 +150,54 @@ import XcdevTestSupport
         #expect(error?.code == .timeout && error?.message == "the script of route 'seeded' was stopped after 1m30s")
         #expect(error?.next == "raise deeplinks.routes.seeded.timeout in .xcdev.yml, or make the script faster")
         #expect(error?.details == ["script: \(Self.command)", "log: \(try #require(script?.outputFile))"])
+    }
+
+    /// A script route's `expect` is looked for once the script has exited 0. xcd has no process to watch, so only
+    /// the look counts, and there is no look before: xcd cannot know whether the script restarts the app.
+    @Test func aScriptRoutesExpectIsCheckedAfterTheScript() async throws {
+        defer { worktree.remove() }
+        var ctx = try context()
+        let arrival = FakeArrival(runner: fake)
+        let about = OpenRequest.route(name: "settings/about", values: [:])
+        let report = try await service(arrival: arrival).open(about, OpenOptions(), in: &ctx)
+        let run = try #require(fake.calls.firstIndex { $0.argv[0] == "sh" })
+        #expect(arrival.looks.map(\.target) == ["id:about"] && arrival.looks.map(\.timeout) == [.seconds(10)])
+        #expect(arrival.looks.map { $0.commandsBefore > run } == [true])               // after the script, not before it
+        #expect(report.check == OpenReport.Check(target: "id:about", outcome: .appeared, seconds: 0.6, reason: nil))
+        #expect(report.text.contains("\ncheck: id:about appeared after 0.6s\nlog: "))
+        let missing = FakeArrival([.success(.missing(onScreen: ["Home"], away: nil))])
+        let failed = try await service(arrival: missing).open(about, OpenOptions(), in: &ctx)
+        #expect(failed.failure?.code == .waitTimeout && failed.failure?.message == "the script ran, but id:about did not appear within 10.0s")
+    }
+
+    @Test func aScriptThatFailsIsNotChecked() async throws {
+        defer { worktree.remove() }
+        var ctx = try context()
+        fake.stub(["sh"], exitCode: 1)
+        let arrival = FakeArrival()
+        let svc = service(arrival: arrival)
+        let error = await #expect(throws: XcdError.self) { _ = try await svc.open(.route(name: "settings/about", values: [:]), OpenOptions(), in: &ctx) }
+        #expect(error?.code == .routeFailed && arrival.looks.isEmpty)
+    }
+
+    /// With no build, xcd does not know which app to look in. A route that promises a check says so loudly.
+    @Test func aCheckThatCannotKnowTheAppIsAFailure() async throws {
+        defer { worktree.remove() }
+        var ctx = try context()
+        let unbuilt = XcdError(.appNotBuilt, "no app has been built for iphone in this worktree, so xcd doesn't know which app to drive",
+                               next: "pass --bundle <id>, use --system for the Home Screen, or build first with `xcd build --device iphone`")
+        let report = try await service(arrival: FakeArrival([.failure(unbuilt)])).open(.route(name: "settings/about", values: [:]), OpenOptions(), in: &ctx)
+        #expect(report.failure?.code == .appNotBuilt)
+        #expect(report.failure?.message == "the script ran, but the arrival check could not run: " + unbuilt.message)
+        #expect(report.check?.outcome == .failed)
+    }
+
+    @Test func aScriptRoutesExpectIsSkippedOnAMac() async throws {
+        defer { worktree.remove() }
+        var ctx = try context()
+        let arrival = FakeArrival()
+        let report = try await service(arrival: arrival).open(.route(name: "settings/about", values: [:]), OpenOptions(device: "mac"), in: &ctx)
+        #expect(report.check?.outcome == .skipped && arrival.looks.isEmpty && report.failure == nil)
     }
 
     /// A script that opens another route must not hand its own values on.

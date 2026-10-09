@@ -11,6 +11,10 @@ enum RouteErrors {
                        next: known + "; for a link meant for another app, use `xcd sim open-url`")
     }
 
+    /// The note on a web link that went out with nothing to look where it landed.
+    static let uncheckedWebLink = "nothing checked where this link went: an https link opens in Safari unless the app's associated domains "
+        + "work on this simulator. Run `xcd ui wait <target>`, or give its route an `expect`"
+
     /// A `--cold` link after which no process of the app appeared.
     static func notStarted(_ url: String, _ product: AppProduct) -> XcdError {
         var next = "check that the app handles the link when it is not running, and read its log with `xcd logs`"

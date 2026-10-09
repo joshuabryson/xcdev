@@ -57,6 +57,17 @@ import Testing
             who: { default: "a b&c/é" }
     """
 
+    /// A value can leave an `expect` with nothing to look for: `label~{id}` with an empty id is `label~`, which is
+    /// no target. That is found before anything touches a device.
+    @Test func anExpectThatAValueLeavesEmptyIsRefused() throws {
+        let resolver = try resolver()
+        #expect(try resolver.resolve(.route(name: "item", values: ["id": "Milk"])).expect == "label~Milk")
+        let error = #expect(throws: XcdError.self) { _ = try resolver.resolve(.route(name: "item", values: ["id": ""])) }
+        #expect(error?.code == .usage)
+        #expect(error?.message == "route 'item' expects 'label~{id}', which names nothing with these values: 'label~'")
+        #expect(error?.next == "give the parameters it uses a value that is not empty")
+    }
+
     func resolver(_ yaml: String = RouteResolverTests.yaml) throws -> RouteResolver {
         RouteResolver(config: try ConfigLoader.parse(main: yaml))
     }

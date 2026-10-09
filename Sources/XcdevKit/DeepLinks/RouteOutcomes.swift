@@ -12,5 +12,13 @@ public enum AppArrival: String, Codable, Sendable, Equatable {
 
 /// How a route's arrival check ended.
 public enum CheckOutcome: String, Codable, Sendable, Equatable {
-    case appeared, inconclusive, skipped
+    case appeared
+    /// The element was on screen before the link was sent, so seeing it afterwards proves nothing.
+    case inconclusive
+    /// UI driving does not work on this device.
+    case skipped
+    /// The element did not appear in time: the command fails with `wait_timeout`.
+    case missing
+    /// The look could not be made: the command fails with the error that stopped it.
+    case failed
 }

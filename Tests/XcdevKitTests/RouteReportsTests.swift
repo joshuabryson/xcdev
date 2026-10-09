@@ -158,6 +158,34 @@ import Testing
         #expect(report.failure == nil)
     }
 
+    /// An element that never showed, and a check that could not run: the report still says what was sent, and the
+    /// failure is the check's.
+    @Test func aFailedCheckIsInTheReportAndIsTheFailure() throws {
+        var report = try report("item", ["id": "3F2A"])
+        report.app = OpenReport.App(state: .running, pid: 4312, bundleId: "dev.x.App", log: nil)
+        report.linkSent = true
+        report.check = OpenReport.Check(target: "id:item-detail", outcome: .missing, seconds: 10, reason: nil)
+        report.checkFailure = XcdError(.waitTimeout, "the link was sent, but id:item-detail did not appear within 10.0s", next: "run `xcd ui tree`")
+        #expect(report.text.hasSuffix("\ncheck: id:item-detail did not appear within 10.0s"))
+        #expect(report.failure?.code == .waitTimeout)
+        let json = Renderer.report(report, command: "open", format: .json)
+        #expect(json.contains(#""check":{"outcome":"missing","seconds":10,"target":"id:item-detail"}"#))
+        #expect(json.contains(#""error":{"code":"wait_timeout""#) && json.contains(#""ok":false"#) && !json.contains("checkFailure"))
+        report.check = OpenReport.Check(target: "id:item-detail", outcome: .failed, seconds: nil, reason: "the runner did not start")
+        #expect(report.text.hasSuffix("\ncheck: could not run (the runner did not start)"))
+        // A crash is the failure, whatever the check saw.
+        report.exitedAfter = 1
+        #expect(report.failure?.code == .appCrashed)
+    }
+
+    @Test func aNoteComesBeforeTheLog() throws {
+        var report = try report("item", ["id": "1"])
+        report.app = OpenReport.App(state: .started, pid: 9, bundleId: "dev.x.App", log: "/w/app.log")
+        report.note = "nothing checked where this link went"
+        #expect(report.text.hasSuffix("\nnote: nothing checked where this link went\nlog: /w/app.log"))
+        #expect(Renderer.report(report, command: "open", format: .json).contains(#""note":"nothing checked where this link went""#))
+    }
+
     @Test func aURLGivenDirectlyIsCalledALink() throws {
         var report = OpenReport(.direct("myapp://x"), device: "iphone", dryRun: false, worktree: "feat")
         report.deviceSummary = "iphone (iPhone 18 Pro, iOS 27.0)"

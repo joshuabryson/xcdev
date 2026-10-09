@@ -66,7 +66,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .appCrashed: return "The app crashed or exited during the crash window after launch, or a UI action ended it."
         case .elementNotFound: return "No element on screen matched the target within the timeout."
         case .elementNotHittable: return "The element exists but is off screen, disabled, or covered by a system alert or the keyboard, so it wasn't acted on."
-        case .waitTimeout: return "`xcd ui wait` gave up: the element didn't appear (or, with --gone, didn't go away)."
+        case .waitTimeout: return "`xcd ui wait` gave up: the element didn't appear (or, with --gone, didn't go away). Also a route's `expect` that didn't appear after `xcd open`."
         case .elementAmbiguous: return "More than one element matched the target; the error lists them with refs."
         case .staleRef: return "A ref from an earlier `xcd ui tree` no longer names one element; read the tree again."
         case .platformUnsupported: return "UI driving works on iPhone and iPad simulators running iOS 17 or later, and some hardware buttons exist only on some devices."
