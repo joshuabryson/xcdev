@@ -475,6 +475,26 @@ import XcdevTestSupport
         #expect(call("openurl")?.arguments.last == "https://example.com/item")
     }
 
+    /// A watchOS simulator opens no custom-scheme link: `simctl openurl` fails there for a scheme the installed,
+    /// running app registers, approved or not (seen on watchOS 11.5 and 27.0). The link is refused before the app
+    /// is started or stopped for it. Launch routes and web links are not affected.
+    @Test func aWatchAppIsNotSentACustomSchemeLink() async throws {
+        defer { worktree.remove() }
+        var ctx = try context()
+        try setUp(ctx, pids: [500], product: AppProduct(path: "/dd/Watch.app", bundleId: "dev.xcdev.Watch", executableName: "SampleApp",
+                                                        platform: "watchsimulator"))
+        let svc = service()
+        for options in [OpenOptions(), OpenOptions(cold: true), OpenOptions(preset: "fresh")] {
+            let error = await #expect(throws: XcdError.self) { _ = try await svc.open(item(), options, in: &ctx) }
+            #expect(error?.code == .platformUnsupported && error?.code.exitCode == 2)
+            #expect(error?.message == "a watchOS simulator does not open custom-scheme links, so a sampleapp: link cannot reach dev.xcdev.Watch")
+            #expect(error?.next == "reach this screen on the watch with a `launch` route or a `run` route, or open the link on another device with `--device <name>`")
+        }
+        #expect(steps.isEmpty)                                              // nothing was started, stopped, or approved
+        #expect(try await svc.open(.route(name: "start", values: [:]), OpenOptions(), in: &ctx).app?.state == .restarted)
+        #expect(try await svc.open(.route(name: "web", values: [:]), OpenOptions(), in: &ctx).linkSent == true)
+    }
+
     @Test func anAppThatIsNotInstalledOrNotBuiltSaysWhatToRun() async throws {
         defer { worktree.remove() }
         var ctx = try context()

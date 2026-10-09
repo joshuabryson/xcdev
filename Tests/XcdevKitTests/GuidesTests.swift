@@ -62,7 +62,8 @@ import Testing
         for state in [AppArrival.running, .started, .restarted, .startedByLink, .untouched] {
             #expect(guide.markdown.contains("`\(state.rawValue)`"), "the deeplinks guide doesn't explain app=\(state.rawValue)")
         }
-        let codes: [ErrorCode] = [.usage, .configInvalid, .appNotBuilt, .appCrashed, .waitTimeout, .routeFailed, .runnerFailed]
+        let codes: [ErrorCode] = [.usage, .configInvalid, .appNotBuilt, .platformUnsupported, .appCrashed, .waitTimeout, .routeFailed,
+                                  .runnerFailed]
         for code in codes {
             #expect(guide.markdown.contains("| `\(code.rawValue)` |"), "the deeplinks guide has no row for \(code.rawValue)")
         }

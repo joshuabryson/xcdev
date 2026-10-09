@@ -60,6 +60,7 @@ public struct RouteService: Sendable {
     func send(_ url: String, _ plan: OpenPlan, in ctx: inout WorktreeContext) async throws -> OpenReport {
         let app = try await apps.prepare(plan.requestedDevice, boot: true, in: &ctx)
         try RouteErrors.checkScheme(url, registeredBy: app.product)
+        try RouteErrors.checkPlatform(url, for: app.product)
         let running = try await app.host.runningPid(app.product)
         var delivered: Delivered
         if plan.cold, let host = app.host.launching(with: url) {

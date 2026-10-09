@@ -11,6 +11,16 @@ enum RouteErrors {
                        next: known + "; for a link meant for another app, use `xcd sim open-url`")
     }
 
+    /// Refuses a custom-scheme link for a watchOS app. A watchOS simulator opens none: `simctl openurl` fails there
+    /// for a scheme the installed, running app registers, with or without the approval (seen on watchOS 11.5 and
+    /// 27.0). The refusal comes before the app is started or stopped for a link that cannot arrive.
+    static func checkPlatform(_ url: String, for product: AppProduct) throws {
+        guard product.platform.hasPrefix("watch"), let scheme = LinkScheme.of(url), !LinkScheme.isWeb(scheme) else { return }
+        throw XcdError(.platformUnsupported,
+                       "a watchOS simulator does not open custom-scheme links, so a \(scheme): link cannot reach \(product.bundleId)",
+                       next: "reach this screen on the watch with a `launch` route or a `run` route, or open the link on another device with `--device <name>`")
+    }
+
     /// The note on a web link that went out with nothing to look where it landed.
     static let uncheckedWebLink = "nothing checked where this link went: an https link opens in Safari unless the app's associated domains "
         + "work on this simulator. Run `xcd ui wait <target>`, or give its route an `expect`"

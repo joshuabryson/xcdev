@@ -146,6 +146,12 @@ xcd ui tap "label:About" --device "$XCD_DEVICE"
 
 `xcd open --device mac` sends the link to this worktree's build of the app, in the background. The frontmost app does not change, and another worktree's copy of the app does not get the link. An https link is handed to the app as an opened URL (`onOpenURL`, `application(_:open:)`). It does not arrive as a universal-link user activity, so an app that only handles `NSUserActivity` will not see it.
 
+## Watch and Vision simulators
+
+- **An Apple Vision Pro simulator** takes links as an iPhone does, warm and cold.
+- **An Apple Watch simulator opens no custom-scheme link.** `xcd open` refuses one there with `platform_unsupported`, before it starts or stops the app. Reach the screen with a `launch` route or a `run` route instead.
+- The arrival check is skipped on both: it needs UI driving.
+
 ## When something fails
 
 Every failure ends with `next:`. Do what it says first.
@@ -155,6 +161,7 @@ Every failure ends with `next:`. Do what it says first.
 | `usage` | An unknown route, a missing or unknown parameter, a value outside `values`, or a scheme the built app does not register. | The error lists the route's parameters, or the schemes the app registers. |
 | `config_invalid` | A route in `.xcdev.yml` breaks a rule. | The error names the key. `xcd config explain deeplinks` documents it. |
 | `app_not_built` | There is no build to deliver to. `xcd open` never builds. | `xcd run`. |
+| `platform_unsupported` | A custom-scheme link for an app on a watchOS simulator, which opens none. | Use a `launch` or `run` route on the watch, or another device with `--device`. |
 | `app_crashed` | The app ended in the seconds after the delivery. | Read the crash report in the error. |
 | `wait_timeout` | The route's `expect` did not appear. | The error lists what is on screen. "The app is in the background" means the link opened somewhere else. |
 | `route_failed` | A script exited non-zero, or a `--cold` link did not start the app. | Read the script's log, or `xcd logs`. |

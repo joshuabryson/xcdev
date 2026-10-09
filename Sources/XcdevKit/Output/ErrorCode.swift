@@ -69,7 +69,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .waitTimeout: return "`xcd ui wait` gave up: the element didn't appear (or, with --gone, didn't go away). Also a route's `expect` that didn't appear after `xcd open`."
         case .elementAmbiguous: return "More than one element matched the target; the error lists them with refs."
         case .staleRef: return "A ref from an earlier `xcd ui tree` no longer names one element; read the tree again."
-        case .platformUnsupported: return "UI driving works on iPhone and iPad simulators running iOS 17 or later, and some hardware buttons exist only on some devices."
+        case .platformUnsupported: return "UI driving works on iPhone and iPad simulators running iOS 17 or later, some hardware buttons exist only on some devices, and a watchOS simulator opens no custom-scheme link."
         case .runnerFailed: return "The UI runner inside the simulator could not be built or started, or stopped answering."
         case .hookFailed: return "A hook from .xcdev.yml exited non-zero; the error names the hook and its log."
         case .routeFailed: return "A route's script failed, or its link did not start the app."
