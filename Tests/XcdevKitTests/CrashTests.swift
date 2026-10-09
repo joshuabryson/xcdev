@@ -8,16 +8,14 @@ import XcdevTestSupport
     let launchedAt = Date()
 
     /// The simulator the recorded report came from.
-    static let recordedSimulator = "C268DCFB-3E56-4C43-8947-B25ED3833F7E"
+    static let recordedSimulator = Fixture.crashSimulator
 
-    /// Writes the recorded report; with `simulator`, as a crash of that simulator's process instead.
+    /// Writes the recorded report, as a crash of a process in `simulator`; with nil, of one that ran on this Mac.
     func writeReport(named name: String = "SampleApp-2026-09-30-195619.ips", modified: Date? = nil,
-                     simulator: String? = nil) throws -> String {
+                     simulator: String? = recordedSimulator) throws -> String {
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let path = dir + "/" + name
-        let recorded = Fixture.string("crash-sim.ips")
-        let text = simulator.map { recorded.replacingOccurrences(of: Self.recordedSimulator, with: $0) } ?? recorded
-        try text.write(toFile: path, atomically: true, encoding: .utf8)
+        try Fixture.crashReport(in: simulator).write(toFile: path, atomically: true, encoding: .utf8)
         if let modified { try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: path) }
         return path
     }
@@ -110,8 +108,33 @@ import XcdevTestSupport
         let newer = try writeReport(named: "SampleApp-2026-09-30-195700.ips")
         let locator = CrashReportLocator(directory: dir)
         #expect(locator.find(processName: "SampleApp", since: launchedAt)?.path == newer)
-        #expect(locator.find(processName: "SampleApp", since: launchedAt, simulator: mine)?.path == own)
-        #expect(locator.find(processName: "SampleApp", since: launchedAt, simulator: "99999999-2222-3333-4444-555555555555") == nil)
+        #expect(locator.find(processName: "SampleApp", since: launchedAt, from: .simulator(mine))?.path == own)
+        #expect(locator.find(processName: "SampleApp", since: launchedAt, from: .simulator("99999999-2222-3333-4444-555555555555")) == nil)
+        #expect(locator.find(processName: "SampleApp", since: launchedAt, from: .mac) == nil)
+    }
+
+    /// A Mac app and a simulator's copy of it crash under one name. Each start takes only its own kind of report.
+    @Test func aMacProcessesReportIsToldFromASimulators() throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let onMac = try writeReport(named: "SampleApp-2026-09-30-195619.ips", simulator: nil)
+        let inSimulator = try writeReport(named: "SampleApp-2026-09-30-195700.ips")
+        let locator = CrashReportLocator(directory: dir)
+        #expect(locator.find(processName: "SampleApp", since: launchedAt, from: .mac)?.path == onMac)
+        #expect(locator.find(processName: "SampleApp", since: launchedAt, from: .simulator(Self.recordedSimulator))?.path == inSimulator)
+        #expect(locator.find(processName: "SampleApp", since: launchedAt)?.path == inSimulator)      // from anywhere: the newest
+        #expect(CrashReport.ranOnMac(reportText: Fixture.crashReport(in: nil)))
+        for other in [Fixture.string("crash-sim.ips"), "not an ips report", ""] { #expect(!CrashReport.ranOnMac(reportText: other)) }
+    }
+
+    /// A process that was never seen leaves only its name to go by, so the watcher is told where it ran.
+    @Test func theWatcherLooksForAReportFromWhereTheAppRan() async throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let path = try writeReport()
+        let watcher = watcher(FakeProbe())
+        #expect(try await watcher.report(processName: "SampleApp", pid: nil, since: launchedAt, from: .mac) == nil)
+        #expect(try await watcher.report(processName: "SampleApp", pid: nil, since: launchedAt,
+                                         from: .simulator(Self.recordedSimulator))?.path == path)
+        #expect(try await watcher.report(processName: "SampleApp", pid: nil, since: launchedAt)?.path == path)
     }
 
     @Test func realProbeSeesThisProcess() {

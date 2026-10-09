@@ -244,7 +244,7 @@ import XcdevTestSupport
         fake.stub(["open"]) { inv in
             try "Mac/MacApp.swift:9: Fatal error: crashed in init\n".write(toFile: inv.arguments[3], atomically: true, encoding: .utf8)
             try FileManager.default.createDirectory(atPath: crashDir, withIntermediateDirectories: true)
-            try Fixture.string("crash-sim.ips").write(toFile: crashDir + "/Mac-2026-09-30-195619.ips", atomically: true, encoding: .utf8)
+            try Fixture.crashReport(in: nil).write(toFile: crashDir + "/Mac-2026-09-30-195619.ips", atomically: true, encoding: .utf8)
             return ProcessOutput()
         }
         let report = try await service().launch(device: "mac", options: LaunchOptions(), in: &ctx)
@@ -253,6 +253,24 @@ import XcdevTestSupport
         #expect(report.pid == 46606 && report.crash?.path == crashDir + "/Mac-2026-09-30-195619.ips")
         #expect(report.appOutput == ["Mac/MacApp.swift:9: Fatal error: crashed in init"])
         #expect(try AppStateStore.load(ctx.paths).lastLaunch?.pid == 46606)
+    }
+
+    /// A simulator's copy of the app can crash under the same name at the same moment. That is not this start's crash.
+    @Test func aSimulatorsCrashIsNotTakenForTheMacAppsCrash() async throws {
+        defer { worktree.remove() }
+        _ = try setUp()
+        var ctx = try context()
+        try recordMacBuild(ctx)
+        fake.stub(["ps"])
+        fake.stub(["open"]) { _ in
+            try FileManager.default.createDirectory(atPath: crashDir, withIntermediateDirectories: true)
+            try Fixture.string("crash-sim.ips").write(toFile: crashDir + "/Mac-2026-09-30-195619.ips", atomically: true, encoding: .utf8)
+            return ProcessOutput()
+        }
+        let error = await #expect(throws: XcdError.self) {
+            try await service().launch(device: "mac", options: LaunchOptions(), in: &ctx)
+        }
+        #expect(error?.code == .subprocessFailed && error?.message == "Mac did not start within 5s")
     }
 
     @Test func aMacAppThatNeverStartsWithoutACrashReportFails() async throws {

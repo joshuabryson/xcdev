@@ -57,6 +57,9 @@ struct PreparedApp: Sendable {
     let target: BuildTarget
     let product: AppProduct
     let host: any AppHost
+
+    /// Where this app's process runs, and so where its crash reports come from.
+    var origin: CrashOrigin { target.device.map { .simulator($0.udid) } ?? .mac }
 }
 
 /// An app that has just been started: what recording the launch, watching it, and reporting it need.
@@ -179,7 +182,8 @@ public struct RunService: Sendable {
         var started: StartedApp
         if let pid = try await app.host.launch(app.product, arguments: plan.arguments, environment: plan.environment, logFile: appLog) {
             started = StartedApp(pid: pid, appLog: appLog, launchedAt: launchedAt)
-        } else if let crash = try await watcher.report(processName: app.product.executableName, pid: nil, since: launchedAt) {
+        } else if let crash = try await watcher.report(processName: app.product.executableName, pid: nil, since: launchedAt,
+                                                       from: app.origin) {
             // A Mac app that dies before `ps` sees it (e.g. a fatalError in App.init) still leaves its crash report.
             started = StartedApp(pid: crash.pid, appLog: appLog, launchedAt: launchedAt)
             started.crashedAtLaunch = .exited(after: 0, crash: crash)

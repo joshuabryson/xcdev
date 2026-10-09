@@ -82,14 +82,15 @@ extension UIService {
 
     /// The error for an action that left the app no longer running. The report is looked for by the built app's
     /// process name, for up to three seconds: it is written a moment after the crash. Another `--bundle` has no name
-    /// to look for.
+    /// to look for. Only a report from this worktree's simulator counts: another worktree's clone can run the same app.
     func crashed(during what: String, since: Date, _ options: UIOptions, in ctx: WorktreeContext) async -> XcdError {
         let device = try? supervisor.provisioner.deviceName(options.device, config: ctx.config)
         let product = device.flatMap { (try? AppStateStore.load(ctx.paths))?.builds[$0]?.product }
+        let origin = device.flatMap { ctx.state.devices[$0]?.udid }.map(CrashOrigin.simulator) ?? .anywhere
         var report: CrashReport?
         if let product, options.bundle == nil || options.bundle == product.bundleId {
             for _ in 0..<6 where report == nil {
-                report = crashes.find(processName: product.executableName, since: since)
+                report = crashes.find(processName: product.executableName, since: since, from: origin)
                 if report == nil { try? await supervisor.sleep(.milliseconds(500)) }
             }
         }

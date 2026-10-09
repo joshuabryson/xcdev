@@ -141,7 +141,7 @@ public struct RouteService: Sendable {
     /// so another worktree's copy of the app crashing is not this link's start. None for an app without a simulator.
     func simulatorCrash(of app: PreparedApp, since date: Date) -> CrashReport? {
         guard let udid = app.target.device?.udid else { return nil }
-        return apps.watcher.locator.find(processName: app.product.executableName, since: date, simulator: udid)
+        return apps.watcher.locator.find(processName: app.product.executableName, since: date, from: .simulator(udid))
     }
 
     /// The system started this run, so nothing captured what it printed. Its app log says so, which keeps

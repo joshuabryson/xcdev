@@ -13,33 +13,46 @@ public struct CrashReport: Codable, Sendable, Equatable {
     /// The faulting thread's first frames: "<image>  <symbol>", plus " (<file>:<line>)" when known.
     public let frames: [String]
 
-    /// `.ips` = one line of JSON header, then a JSON body.
     public static func parse(_ text: String, path: String) throws -> CrashReport {
-        struct Frame: Decodable { let symbol: String?; let imageIndex: Int?; let sourceFile: String?; let sourceLine: Int? }
-        struct Thread: Decodable { let triggered: Bool?; let frames: [Frame]? }
-        struct Image: Decodable { let name: String? }
-        struct BundleInfo: Decodable { let CFBundleIdentifier: String? }
-        struct Exception: Decodable { let type: String?; let signal: String? }
-        struct Termination: Decodable { let indicator: String? }
-        struct Body: Decodable {
-            let procName: String
-            let pid: Int32
-            let bundleInfo: BundleInfo?
-            let exception: Exception?
-            let termination: Termination?
-            let faultingThread: Int?
-            let threads: [Thread]?
-            let usedImages: [Image]?
-        }
-        guard let newline = text.firstIndex(of: "\n"),
-              let body = try? JSONDecoder().decode(Body.self, from: Data(text[text.index(after: newline)...].utf8)) else {
+        guard let body = IPSBody.read(text) else {
             throw XcdError(.internalError, "\(path) is not a readable .ips crash report")
         }
-        let threads = body.threads ?? []
-        let thread = body.faultingThread.flatMap { threads.indices.contains($0) ? threads[$0] : nil }
-            ?? threads.first { $0.triggered == true }
-        let images = body.usedImages ?? []
-        let frames = (thread?.frames ?? []).prefix(8).map { frame -> String in
+        let exception = body.exception?.type.map { type in body.exception?.signal.map { "\(type) (\($0))" } ?? type }
+        return CrashReport(path: path, processName: body.procName, pid: body.pid,
+                           bundleId: body.bundleInfo?.CFBundleIdentifier, exception: exception,
+                           termination: body.termination?.indicator, frames: body.frames)
+    }
+}
+
+/// What `CrashReport` reads from an `.ips` file: one line of JSON header, then this JSON body.
+private struct IPSBody: Decodable {
+    struct Frame: Decodable { let symbol: String?; let imageIndex: Int?; let sourceFile: String?; let sourceLine: Int? }
+    struct Thread: Decodable { let triggered: Bool?; let frames: [Frame]? }
+    struct Image: Decodable { let name: String? }
+    struct BundleInfo: Decodable { let CFBundleIdentifier: String? }
+    struct Exception: Decodable { let type: String?; let signal: String? }
+    struct Termination: Decodable { let indicator: String? }
+
+    let procName: String
+    let pid: Int32
+    let bundleInfo: BundleInfo?
+    let exception: Exception?
+    let termination: Termination?
+    let faultingThread: Int?
+    let threads: [Thread]?
+    let usedImages: [Image]?
+
+    static func read(_ text: String) -> IPSBody? {
+        guard let newline = text.firstIndex(of: "\n") else { return nil }
+        return try? JSONDecoder().decode(IPSBody.self, from: Data(text[text.index(after: newline)...].utf8))
+    }
+
+    /// The faulting thread's first eight frames.
+    var frames: [String] {
+        let threads = threads ?? []
+        let thread = faultingThread.flatMap { threads.indices.contains($0) ? threads[$0] : nil } ?? threads.first { $0.triggered == true }
+        let images = usedImages ?? []
+        return (thread?.frames ?? []).prefix(8).map { frame in
             let image = frame.imageIndex.flatMap { images.indices.contains($0) ? images[$0].name : nil } ?? "?"
             var line = "\(image)  \(frame.symbol ?? "???")"
             if let file = frame.sourceFile, let number = frame.sourceLine {
@@ -47,10 +60,23 @@ public struct CrashReport: Codable, Sendable, Equatable {
             }
             return line
         }
-        let exception = body.exception?.type.map { type in body.exception?.signal.map { "\(type) (\($0))" } ?? type }
-        return CrashReport(path: path, processName: body.procName, pid: body.pid,
-                           bundleId: body.bundleInfo?.CFBundleIdentifier, exception: exception,
-                           termination: body.termination?.indicator, frames: Array(frames))
+    }
+}
+
+/// Where a crashed process ran. Every simulator, and this Mac itself, write their crash reports to one folder.
+public enum CrashOrigin: Sendable, Equatable {
+    case anywhere
+    /// In the simulator with this UDID.
+    case simulator(String)
+    /// On this Mac itself, in no simulator.
+    case mac
+
+    func matches(reportText text: String) -> Bool {
+        switch self {
+        case .anywhere: return true
+        case .simulator(let udid): return CrashReport.ranIn(simulator: udid, reportText: text)
+        case .mac: return CrashReport.ranOnMac(reportText: text)
+        }
     }
 }
 
@@ -64,8 +90,8 @@ public struct CrashReportLocator: Sendable {
 
     /// The newest `<process>-*.ips` written since `since` (allowing 2s of clock slack) whose pid matches;
     /// any pid when `pid` is nil (the process died before its pid was seen). Every simulator, and a Mac build of the
-    /// same name, writes to this folder: with `simulator`, only a report of a process that ran in that simulator counts.
-    public func find(processName: String, pid: Int32? = nil, since: Date, simulator: String? = nil) -> CrashReport? {
+    /// same name, writes to this folder: `origin` narrows the search to reports of a process that ran there.
+    public func find(processName: String, pid: Int32? = nil, since: Date, from origin: CrashOrigin = .anywhere) -> CrashReport? {
         let fm = FileManager.default
         let names = (try? fm.contentsOfDirectory(atPath: directory)) ?? []
         for name in names.sorted(by: >) where name.hasPrefix(processName + "-") && name.hasSuffix(".ips") {
@@ -74,7 +100,7 @@ public struct CrashReportLocator: Sendable {
                   modified >= since.addingTimeInterval(-2),
                   let text = try? String(contentsOfFile: path, encoding: .utf8),
                   let report = try? CrashReport.parse(text, path: path), pid == nil || report.pid == pid,
-                  simulator.map({ CrashReport.ranIn(simulator: $0, reportText: text) }) ?? true else { continue }
+                  origin.matches(reportText: text) else { continue }
             return report
         }
         return nil
@@ -82,14 +108,27 @@ public struct CrashReportLocator: Sendable {
 }
 
 extension CrashReport {
+    /// Every simulator keeps its files, installed apps included, under a folder with this in its path.
+    static let simulatorDevices = "/CoreSimulator/Devices/"
+
+    /// The path of the crashed process as the `.ips` text gives it (`procPath`), with the home folder redacted. Nil
+    /// when the text has no readable one.
+    static func processPath(reportText text: String) -> String? {
+        struct Body: Decodable { let procPath: String? }
+        guard let newline = text.firstIndex(of: "\n") else { return nil }
+        return (try? JSONDecoder().decode(Body.self, from: Data(text[text.index(after: newline)...].utf8)))?.procPath
+    }
+
     /// Whether the `.ips` text is a crash of a process that ran in simulator `udid`: its `procPath` is inside that
     /// device's folder. The UDID identifies the device because the home folder is redacted in reports. False when
     /// the text has no readable `procPath`.
     static func ranIn(simulator udid: String, reportText text: String) -> Bool {
-        struct Body: Decodable { let procPath: String? }
-        guard let newline = text.firstIndex(of: "\n"),
-              let body = try? JSONDecoder().decode(Body.self, from: Data(text[text.index(after: newline)...].utf8)),
-              let path = body.procPath else { return false }
-        return path.contains("/CoreSimulator/Devices/\(udid)/")
+        processPath(reportText: text)?.contains("\(simulatorDevices)\(udid)/") ?? false
+    }
+
+    /// Whether the `.ips` text is a crash of a process that ran on this Mac itself: its `procPath` is in no
+    /// simulator's folder. False when the text has no readable `procPath`.
+    static func ranOnMac(reportText text: String) -> Bool {
+        processPath(reportText: text).map { !$0.contains(simulatorDevices) } ?? false
     }
 }

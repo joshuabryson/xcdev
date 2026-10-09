@@ -82,8 +82,14 @@ final class SentRequests: Sendable {
         #expect(none?.message == "the app stopped running during the tap (no crash report found)")
         #expect(none?.next == "see its last output with `xcd logs --app`, then start it again with `xcd run`")
 
-        // The build's process is "App", so its report is App-*.ips.
+        // Another worktree's clone can run the same app: its crash, in the folder every simulator shares, is not this one's.
         try Fixture.string("crash-sim.ips").write(toFile: reports + "/App-2026-10-04-191010.ips", atomically: true, encoding: .utf8)
+        let others = await #expect(throws: XcdError.self) { _ = try await service.tap("id:signIn", options, in: &ctx) }
+        #expect(others?.message == "the app stopped running during the tap (no crash report found)")
+
+        // The build's process is "App", so its report is App-*.ips, from this worktree's simulator.
+        let udid = try #require(ctx.state.devices["iphone"]?.udid)
+        try Fixture.crashReport(in: udid).write(toFile: reports + "/App-2026-10-04-191010.ips", atomically: true, encoding: .utf8)
         let crash = await #expect(throws: XcdError.self) { _ = try await service.tap("id:signIn", options, in: &ctx) }
         #expect(crash?.code == .appCrashed && crash?.message.hasPrefix("the app crashed during the tap: EXC_") == true, "\(String(describing: crash))")
         #expect(crash?.details.last == "report: \(reports)/App-2026-10-04-191010.ips" && (crash?.details.count ?? 0) > 1)
