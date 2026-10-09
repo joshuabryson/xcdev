@@ -14,7 +14,7 @@ struct OpenCommand: AsyncParsableCommand {
         The app is started if it is not running. Nothing is built or installed: run `xcd run` first.
         """)
     @Argument(help: ArgumentHelp("A route name, or a URL (anything with a `:` in it). After a route name: its parameters, each name=value.",
-                                 valueName: "route-or-url"))
+                                 valueName: "route-or-url"), completion: .routes)
     var arguments: [String] = []
     @Option(help: "Restart the app with this launch preset first. Replaces the route's own preset.",
             completion: .project { await $0.presets() }) var preset: String?

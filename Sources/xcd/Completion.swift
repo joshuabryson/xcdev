@@ -8,4 +8,6 @@ extension CompletionKind {
     }
 
     static let devices = project { await $0.devices() }
+    /// Route names for the first argument of `xcd open`.
+    static let routes = CompletionKind.custom { words, index, _ in await Completions.live().routes(words, at: index) }
 }

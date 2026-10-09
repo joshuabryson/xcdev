@@ -14,6 +14,10 @@ import XcdevTestSupport
       mac: { platform: macOS }
     presets:
       onboarding: { args: [-resetOnboarding, "YES"] }
+    deeplinks:
+      routes:
+        item: { description: "One item", url: "myapp://item?id={id}", params: { id: {} } }
+        settings/about: { description: "About", url: "myapp://settings/about" }
     """
 
     func completions(_ project: TempProject, from directory: String? = nil) -> Completions {
@@ -31,6 +35,22 @@ import XcdevTestSupport
         #expect(await completions.presets() == ["onboarding"])
     }
 
+    /// `xcd open` takes a route name first. What follows it is the route's parameters, which are not completed.
+    @Test func offersRouteNamesForTheFirstArgumentOfOpen() async throws {
+        let project = try TempProject.make(config: Self.config)
+        defer { project.remove() }
+        let completions = completions(project)
+        #expect(await completions.routes(["xcd", "open", ""], at: 2) == ["item", "settings/about"])
+        #expect(await completions.routes(["xcd", "open", "se"], at: 2) == ["item", "settings/about"])      // the shell narrows them
+        // Options and their values before the route are passed over.
+        #expect(await completions.routes(["xcd", "open", "--cold", "--device", "iphone", "--preset=onboarding", ""], at: 6)
+                == ["item", "settings/about"])
+        #expect(await completions.routes(["xcd", "open", "item", ""], at: 3).isEmpty)                     // a parameter
+        #expect(await completions.routes(["xcd", "open", "--dry-run", "item", "id=1", ""], at: 5).isEmpty)
+        #expect(await completions.routes(["xcd", "open", "--device", ""], at: 3).isEmpty)                 // an option's value
+        #expect(await completions.routes(["xcd", "open"], at: 2) == ["item", "settings/about"])           // nothing typed yet
+    }
+
     @Test func includesTheLocalConfig() async throws {
         let project = try TempProject.make(config: Self.config)
         defer { project.remove() }
@@ -43,6 +63,7 @@ import XcdevTestSupport
         defer { project.remove() }
         #expect(await completions(project).devices().isEmpty)
         #expect(await completions(project, from: project.base).presets().isEmpty)
+        #expect(await completions(project).routes(["xcd", "open", ""], at: 2).isEmpty)
     }
 
     @Test func offersThisProjectsWorktrees() async throws {

@@ -37,6 +37,27 @@ public struct Completions: Sendable {
         await config()?.presets?.keys.sorted() ?? []
     }
 
+    /// The options of `xcd open` that take a value, which is a word of its own unless it is written `--name=value`.
+    static let openOptionsWithValues: Set<String> = ["--preset", "--device", "--xcode", "--worktree"]
+
+    /// The project's route names, for the first argument of `xcd open`. `words` is the command
+    /// line and `index` the word being completed. What follows a route name is its parameters: nothing is offered.
+    public func routes(_ words: [String], at index: Int) async -> [String] {
+        guard let command = words.firstIndex(of: "open") else { return [] }
+        var takesValue = false
+        for word in words[..<min(index, words.count)].dropFirst(command + 1) {
+            if takesValue {
+                takesValue = false
+            } else if word.hasPrefix("-") {
+                takesValue = Self.openOptionsWithValues.contains(word)
+            } else {
+                return []               // an argument is already there: the route, or a link
+            }
+        }
+        if takesValue { return [] }     // the word being completed is an option's value
+        return await config()?.routes.keys.sorted() ?? []
+    }
+
     /// This project's worktrees, by name, from the registry.
     public func worktrees() async -> [String] {
         guard let location = await location(),
