@@ -48,6 +48,7 @@ An action on an element waits up to `--timeout` (default 2s; 10s for `wait`) for
 
 ## Things to know
 
+- **Getting to a screen.** When the project has routes, `xcd open <route>` goes there in one step, and it keeps working when the screens in between change. `xcd open` lists the routes, and `xcd guide deeplinks` explains them.
 - **System alerts** (permission prompts) are listed at the end of the tree, marked `system`. While one is up, nothing in the app can be acted on: tap one of the alert's buttons first.
 - **The keyboard** covers the lower part of the screen, and an element under it is refused. Scroll the element up with `xcd ui swipe up`, or dismiss the keyboard first: `xcd ui type "" --submit` presses Return, which closes it in most single-line fields (and submits the field), or tap the keyboard's own Return or Done key (`xcd ui tree --all` lists the keys).
 - **Off-screen elements** are not in the default tree. `xcd ui tree --all` lists them, marked `offscreen`. Swipe, then read the tree again.

@@ -84,7 +84,7 @@ public struct RouteResolver: Sendable {
         if let spec = config.routes[name] { return spec }
         guard !config.routes.isEmpty else {
             throw XcdError(.usage, "this project defines no routes, so there is no route '\(name)'",
-                           next: "add routes under `deeplinks:` in .xcdev.yml (`xcd config explain deeplinks`)")
+                           next: "add routes under `deeplinks:` in .xcdev.yml (`xcd guide deeplinks`)")
         }
         let close = Suggest.closest(to: name, in: config.routes.keys.sorted())
         throw XcdError(.usage, "no route named '\(name)'",

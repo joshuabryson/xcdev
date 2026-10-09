@@ -55,7 +55,7 @@ public struct RouteListReport: Reportable {
 
     public var text: String {
         guard !routes.isEmpty else {
-            return "no routes  add them under `deeplinks:` in .xcdev.yml (`xcd config explain deeplinks`)"
+            return "no routes  add them under `deeplinks:` in .xcdev.yml (`xcd guide deeplinks`)"
         }
         let count = "\(routes.count) route\(routes.count == 1 ? "" : "s")"
         return (rows + ["\(count)  open one with `xcd open <route> [name=value …]`"]).joined(separator: "\n")

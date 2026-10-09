@@ -20,7 +20,7 @@ import Testing
 
     @Test func anEmptyListSaysHowToAddRoutes() throws {
         let report = RouteListReport(config: try ConfigLoader.parse(main: "version: 1\nproject: A.xcodeproj\n"), worktree: "feat")
-        #expect(report.text == "no routes  add them under `deeplinks:` in .xcdev.yml (`xcd config explain deeplinks`)")
+        #expect(report.text == "no routes  add them under `deeplinks:` in .xcdev.yml (`xcd guide deeplinks`)")
         #expect(report.routes.isEmpty && report.failure == nil)
     }
 

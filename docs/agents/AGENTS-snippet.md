@@ -12,6 +12,9 @@ working in parallel never collide.
 - See the app: `xcd ui screenshot` prints the PNG's path; `xcd ui record start` / `xcd ui record stop` make a video.
   Set device state with `xcd sim open-url`, `xcd sim push`, `xcd sim privacy`, `xcd sim status-bar`, and friends
   (`xcd help sim`).
+- Go straight to a screen: `xcd open` lists the project's routes (links, launch arguments, and scripts that reach a
+  screen); `xcd open <route> name=value` opens one and checks that it arrived. `xcd guide deeplinks` shows how to add
+  routes.
 - Drive the app (iPhone/iPad simulators), once it is running in front: `xcd ui tree` lists elements with refs;
   `xcd ui tap id:<identifier>` (or `"label:<text>"`, `ref:e<N>` from the newest tree, `@x,y`);
   `xcd ui type <text> --into <target>`; `xcd ui swipe up`; `xcd ui wait <target>` to confirm what happened, or add

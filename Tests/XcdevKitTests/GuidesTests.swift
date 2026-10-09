@@ -47,10 +47,32 @@ import Testing
         }
     }
 
+    /// The guide names each kind of route, every key and flag, the script's variables, and every error `xcd open` gives.
+    @Test func deeplinksGuideCoversRoutesFlagsAndErrors() throws {
+        let guide = try Guides.guide("deeplinks")
+        #expect(guide.summary == "Open the app's links and routes")
+        for key in ["`url`", "`launch`", "`run`", "`params`", "`preset`", "`expect`", "`timeout`", "`vars`", "`values`", "`default`",
+                    "`optional`", "raw: true"] {
+            #expect(guide.markdown.contains(key), "the deeplinks guide doesn't mention \(key)")
+        }
+        for word in ["--cold", "--dry-run", "--device \"$XCD_DEVICE\"", "`XCD_ROUTE`", "`XCD_PARAM_<NAME>`", "`xcd sim open-url`",
+                     "onOpenURL", "CFBundleURLTypes", "applinks:", ".xcdev.local.yml", "`check: inconclusive`", "NSUserActivity"] {
+            #expect(guide.markdown.contains(word), "the deeplinks guide doesn't mention \(word)")
+        }
+        for state in [AppArrival.running, .started, .restarted, .startedByLink, .untouched] {
+            #expect(guide.markdown.contains("`\(state.rawValue)`"), "the deeplinks guide doesn't explain app=\(state.rawValue)")
+        }
+        let codes: [ErrorCode] = [.usage, .configInvalid, .appNotBuilt, .appCrashed, .waitTimeout, .routeFailed, .runnerFailed]
+        for code in codes {
+            #expect(guide.markdown.contains("| `\(code.rawValue)` |"), "the deeplinks guide has no row for \(code.rawValue)")
+        }
+    }
+
     @Test func listingAndUnknownTopic() throws {
         #expect(try GuideReport(topic: nil).text == """
-        setup  Set up xcd in a project
-        ui     See and drive the app's UI
+        deeplinks  Open the app's links and routes
+        setup      Set up xcd in a project
+        ui         See and drive the app's UI
         read one: xcd guide <topic>
         """)
         #expect(try GuideReport(topic: "setup").text.hasPrefix("# Set up xcd in a project\n"))

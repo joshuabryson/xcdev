@@ -143,7 +143,7 @@ import Testing
         let empty = try resolver("version: 1\nproject: A.xcodeproj\n")
         let none = #expect(throws: XcdError.self) { try empty.resolve(.route(name: "item", values: [:])) }
         #expect(none?.code == .usage && none?.message == "this project defines no routes, so there is no route 'item'")
-        #expect(none?.next == "add routes under `deeplinks:` in .xcdev.yml (`xcd config explain deeplinks`)")
+        #expect(none?.next == "add routes under `deeplinks:` in .xcdev.yml (`xcd guide deeplinks`)")
     }
 
     @Test func parameterMistakesShowTheRoutesParameters() throws {

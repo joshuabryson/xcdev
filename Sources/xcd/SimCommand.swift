@@ -68,7 +68,9 @@ struct SimCommand: AsyncParsableCommand {
     }
 
     struct OpenURL: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(commandName: "open-url", abstract: "Open a URL (deep link or universal link) on the device.")
+        static let configuration = CommandConfiguration(
+            commandName: "open-url", abstract: "Open a URL (deep link or universal link) on the device.",
+            discussion: "The URL goes to whatever app takes it. For a link of this project's own app use `xcd open`: it also starts the app, refuses a scheme the app does not register, and watches for a crash.")
         @Argument(help: "The URL, e.g. myapp://settings or https://example.com/item/1.") var url: String
         @OptionGroup var target: DeviceOption
         @OptionGroup var options: GlobalOptions

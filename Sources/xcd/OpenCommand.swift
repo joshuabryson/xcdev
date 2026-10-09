@@ -6,12 +6,15 @@ struct OpenCommand: AsyncParsableCommand {
         commandName: "open",
         abstract: "Open one of the project's routes, or a URL, in the app. With no argument, list the routes.",
         discussion: """
-        Routes are the links the app can open, described under `deeplinks:` in .xcdev.yml.
+        Routes are the ways into the app that the project describes under `deeplinks:` in .xcdev.yml: links, launch \
+        arguments, and scripts.
           xcd open                        list the routes and their parameters
           xcd open item id=42 tab=notes   open a route (quote a value that has spaces)
           xcd open 'myapp://item?id=42'   open a link no route describes, sent as given
         Quote a link that has ? or & in it.
-        The app is started if it is not running. Nothing is built or installed: run `xcd run` first.
+        The app is started if it is not running, on a simulator or on the Mac. Nothing is built or installed: run \
+        `xcd run` first. A route with `expect` is checked: xcd waits for that element after the delivery. \
+        `xcd guide deeplinks` explains routes.
         """)
     @Argument(help: ArgumentHelp("A route name, or a URL (anything with a `:` in it). After a route name: its parameters, each name=value.",
                                  valueName: "route-or-url"), completion: .routes)
