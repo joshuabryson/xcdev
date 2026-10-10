@@ -91,7 +91,7 @@ extension RunnerEngine {
 
     /// Enters the text: through the keyboard when one is up, else by pasting, which never calls `typeText`
     /// (it fails without a software keyboard). `--clear` selects everything first, so what follows replaces it.
-    /// Typing through the keyboard ends once the keyboard is back (`awaitKeyboard`).
+    /// Either way it ends once the keyboard is on screen (`awaitKeyboard`), unless a paste pressed no key.
     func entered(_ request: TypeRequest, keyboard: Bool, into focused: ActionResult) throws -> ActionResult {
         if request.clear { try device.pressKey("a", command: true) }
         if keyboard {
@@ -100,20 +100,23 @@ extension RunnerEngine {
             awaitKeyboard(request.scope)
         } else {
             try paste(request)
+            if request.clear || request.submit || !request.text.isEmpty { awaitKeyboard(request.scope) }
         }
         var result = focused
         result.method = keyboard ? "keyboard" : "paste"
         return result
     }
 
-    /// Seconds the keyboard gets to come back after typing through it: over twice what it took.
+    /// Seconds the keyboard gets to be on screen after the typing's keys: over twice what it took.
     static let keyboardReturn = 3.0
 
-    /// Waits up to `keyboardReturn` seconds for the keyboard to be on screen again. iOS can take the typing's keys
-    /// for a hardware keyboard's: it then minimizes the software keyboard, and brings it back about a second after
-    /// the typing has returned. A tree read in between would say that no keyboard is up, and a tap
-    /// would be judged against a screen about to change. Nothing with keyboard focus means the typing closed the
-    /// keyboard (Return in a single-line field), so none is coming back; nor is one when the app has left the screen.
+    /// Waits up to `keyboardReturn` seconds for the keyboard to be on screen. iOS can take the typing's keys for a
+    /// hardware keyboard's: it then minimizes the software keyboard, and brings it back about a second after the
+    /// typing has returned. A keyboard that iOS minimized when a hardware keyboard was attached can
+    /// stay down when a field is tapped: the text is then pasted, and the paste's key press brings the keyboard up
+    /// about a second later. A tree read in between would say that no keyboard is up, and a tap would
+    /// be aimed at a screen about to change. Nothing with keyboard focus means the typing closed the keyboard
+    /// (Return in a single-line field), so none is coming; nor is one when the app has left the screen.
     func awaitKeyboard(_ scope: ActionScope) {
         var scope = scope
         scope.timeout = Self.keyboardReturn
