@@ -10,7 +10,11 @@ extension SimCommand {
             static let configuration = CommandConfiguration(
                 commandName: "set",
                 abstract: "Put text or an image on the device's pasteboard.",
-                discussion: "An image goes through the UI runner, so it needs an iPhone or iPad simulator. There is no way to read an image back."
+                discussion: """
+                Text is read back, and text the simulator did not keep is an error: while Device Hub is open it syncs the Mac's \
+                clipboard with the simulator's pasteboard, and the simulator then drops what xcd sends. An image goes through the \
+                UI runner, so it needs an iPhone or iPad simulator. There is no way to read an image back.
+                """
             )
             @Option(help: "The text. A value starting with `-` is written `--text=-n`.") var text: String?
             @Option(help: "A PNG or JPEG file (iPhone and iPad simulators).", completion: .file()) var image: String?

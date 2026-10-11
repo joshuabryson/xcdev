@@ -51,8 +51,7 @@ struct DeviceStateIntegrationTests {
                 _ = try await svc.deviceState.statusBar(StatusBarOverrides(time: "9:41", batteryLevel: 100), device: nil, in: &ctx)
                 _ = try await svc.deviceState.appearance(.dark, device: nil, in: &ctx)
                 _ = try await svc.deviceState.location(Coordinate(latitude: 37.33, longitude: -122.03), device: nil, in: &ctx)
-                _ = try await svc.deviceState.setPasteboard(text: "hello pasteboard", device: nil, in: &ctx)
-                #expect(try await svc.deviceState.pasteboard(device: nil, in: &ctx).text == "hello pasteboard")
+                try await setsThePasteboardOrSaysThatDeviceHubHasIt(&ctx, svc)
                 _ = try await svc.deviceState.openURL("https://example.com", device: nil, in: &ctx)
                 _ = try await svc.deviceState.privacy(.reset, service: "all", bundle: nil, device: nil, in: &ctx)
                 _ = try await svc.deviceState.addMedia([shot.path], device: nil, in: &ctx)
@@ -63,6 +62,33 @@ struct DeviceStateIntegrationTests {
                 throw error
             }
         }
+    }
+
+    /// Device Hub starts syncing the Mac's clipboard with a simulator some tens of seconds after it boots, and from then
+    /// on the simulator drops text from simctl, which exits 0 all the same. So with Device Hub open the
+    /// text is set until it stops being kept, for up to two minutes, and then the failure has to say why. What the
+    /// pasteboard holds is never printed here: once the sync has started it is what the person at the Mac copied.
+    func setsThePasteboardOrSaysThatDeviceHubHasIt(_ ctx: inout WorktreeContext, _ svc: Services) async throws {
+        let deviceHub = try await runner.run(Invocation("/usr/bin/pgrep", ["-x", SimctlClient.deviceHubProcess])).succeeded
+        let deadline = Date().addingTimeInterval(deviceHub ? 120 : 0)
+        var kept = 0
+        repeat {
+            let text = "hello pasteboard \(kept)"
+            do {
+                _ = try await svc.deviceState.setPasteboard(text: text, device: nil, in: &ctx)
+            } catch let error as XcdError {
+                #expect(deviceHub, "the text was not kept, and Device Hub is not running: \(error)")
+                #expect(error.code == .simulatorFailed && error.message == "simctl reported success, but iphone's pasteboard does not hold the text")
+                #expect(error.next?.hasPrefix("Device Hub is open") == deviceHub, "\(error.next ?? "")")
+                return
+            }
+            kept += 1
+            if !deviceHub {
+                let roundTripped = try await svc.deviceState.pasteboard(device: nil, in: &ctx).text == text
+                #expect(roundTripped, "the pasteboard does not hold the text that was reported as set")
+            }
+            if Date() < deadline { try await Task.sleep(for: .seconds(3)) }
+        } while Date() < deadline
     }
 
     @Test(.timeLimit(.minutes(10))) func aRecordingSurvivesItsStarterAndShutdownFinishesIt() async throws {

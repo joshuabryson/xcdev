@@ -272,6 +272,7 @@ An action on an element waits up to `--timeout` (default 2s; 10s for `wait`) for
 - **The first `xcd ui` command** builds a small runner once per Xcode (about 30 seconds) and starts it on your simulator. On a brand-new simulator the start can take minutes. Later commands take about a second.
 - **`xcd test`** stops the runner when the test run includes UI tests, since both would drive the same device. The next `xcd ui` command starts it again.
 - **Device state** is set with `xcd sim`: `xcd sim open-url <url>`, `xcd sim push --alert <text>`, `xcd sim privacy grant photos`, `xcd sim pasteboard set --text <text>` or `--image <file>`, `xcd sim appearance dark`, `xcd sim text-size accessibility-large` (the Dynamic Type size).
+- **The pasteboard while Device Hub is open** is synced with the Mac's clipboard from some tens of seconds after the simulator boots, and from then on the simulator drops text that `xcd sim pasteboard set --text` sends. The command reads the pasteboard back, so it fails with `simulator_failed` and says so; it never reports text that is not there. To get text into a field, use `xcd ui type`. The pasteboard then holds what the person at the Mac copied, so read it with `xcd sim pasteboard get` only for text you put there.
 - **The app's files** are in a folder on this Mac: `xcd sim container` prints the path of its data container, so `ls "$(xcd sim container)/Documents"` lists what the app saved.
 - Add `--json` to any command for one JSON object: the tree's elements, or an action's `element`, `x`, `y`, and `tree`.
 

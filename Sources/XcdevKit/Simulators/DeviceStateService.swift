@@ -82,12 +82,15 @@ public struct DeviceStateService: Sendable {
         }
     }
 
+    /// simctl exits 0 for text the simulator did not keep, so the pasteboard is read back.
     public func setPasteboard(text: String, device: String?, in ctx: inout WorktreeContext) async throws -> DeviceStateReport {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("xcd-pasteboard-\(UUID().uuidString).txt").path
         try text.write(toFile: file, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(atPath: file) }
-        return try await run(device, &ctx, "set the pasteboard (\(text.count) characters)") {
-            try await $0.copyText(udid: $1, file: file)
+        let name = try provisioner.deviceName(device, config: ctx.config)
+        return try await run(device, &ctx, "set the pasteboard (\(text.count) characters)") { simctl, udid in
+            try await simctl.copyText(udid: udid, file: file)
+            guard try await simctl.pasteText(udid: udid) == text else { throw await simctl.textNotKept(by: name, udid: udid) }
         }
     }
 

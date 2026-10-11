@@ -93,14 +93,50 @@ import XcdevTestSupport
         #expect(last("addmedia") == nil)
     }
 
+    /// simctl exits 0 for text the simulator did not keep, so the pasteboard is read back before success is reported.
     @Test func thePasteboardRoundTripsText() async throws {
         defer { worktree.remove() }
         var (svc, ctx) = try setup()
-        _ = try await svc.setPasteboard(text: "hello", device: nil, in: &ctx)
+        let set = try await svc.setPasteboard(text: "copied", device: nil, in: &ctx)
+        #expect(set.text.hasPrefix("set the pasteboard (6 characters)  device=iphone  udid="))
         let input = try #require(last("pbcopy")?.inputFile)
         #expect(!FileManager.default.fileExists(atPath: input))            // the temporary file is deleted afterwards
+        #expect(worktree.runner.calls.suffix(2).map { $0.arguments.dropFirst().first } == ["pbcopy", "pbpaste"])
         let got = try await svc.pasteboard(device: nil, in: &ctx)
         #expect(got.text == "copied" && Renderer.report(got, command: "sim pasteboard get", format: .text) == "copied")
+    }
+
+    /// Seen on iOS 27.0 once Device Hub had started its pasteboard sync with the simulator: `simctl pbcopy` exited
+    /// 0, the simulator logged "Ignoring snapshot for com.apple.UIKit.pboard.general: the CoreDevice pasteboard stack
+    /// is in use", and its pasteboard went on holding what the Mac's clipboard had put there.
+    @Test func textTheSimulatorDidNotKeepIsAFailureThatSaysWhy() async throws {
+        defer { worktree.remove() }
+        var (svc, ctx) = try setup()
+        worktree.runner.stub(["xcrun", "simctl", "pbpaste"], stdout: "what the person at the Mac copied last")
+        worktree.runner.stub(["pgrep", "-x", "DeviceHub"], stdout: "10551\n")
+        let shared = await #expect(throws: XcdError.self) { _ = try await svc.setPasteboard(text: "hello", device: nil, in: &ctx) }
+        let udid = try #require(last("pbcopy")?.arguments.last)
+        #expect(shared?.code == .simulatorFailed && shared?.message == "simctl reported success, but iphone's pasteboard does not hold the text")
+        #expect(shared?.next == "Device Hub is open, and while it is, a simulator shares its pasteboard with the Mac's clipboard and drops text "
+            + "that simctl sends. To put text into a field, use `xcd ui type`. `xcrun devicectl device pasteboard copy --device \(udid) "
+            + "--file <file>` does set the pasteboard, and it replaces the Mac's clipboard with the same text, so ask the person at the Mac first")
+        // What the pasteboard holds instead may be the person's own, and is shown to nobody.
+        #expect(shared.map { ($0.message + ($0.next ?? "") + $0.details.joined()).contains("copied last") } == false)
+
+        worktree.runner.stub(["pgrep", "-x", "DeviceHub"], exitCode: 1)
+        let unexplained = await #expect(throws: XcdError.self) { _ = try await svc.setPasteboard(text: "hello", device: nil, in: &ctx) }
+        #expect(unexplained?.code == .simulatorFailed && unexplained?.message == shared?.message)
+        #expect(unexplained?.next == "run `xcd doctor`")
+    }
+
+    /// Not a character more or less: text that differs only by a newline at its end is not the text that was set.
+    @Test func textThatCameBackWithANewlineAddedIsNotTheTextThatWasSet() async throws {
+        defer { worktree.remove() }
+        var (svc, ctx) = try setup()
+        worktree.runner.stub(["pgrep", "-x", "DeviceHub"], exitCode: 1)
+        worktree.runner.stub(["xcrun", "simctl", "pbpaste"], stdout: "two\nlines\n")
+        #expect(try await svc.setPasteboard(text: "two\nlines\n", device: nil, in: &ctx).action == "set the pasteboard (10 characters)")
+        await #expect(throws: XcdError.self) { _ = try await svc.setPasteboard(text: "two\nlines", device: nil, in: &ctx) }
     }
 
     /// A link for this worktree's own app would stop at an "Open in …?" alert on a clone that never opened its scheme.
