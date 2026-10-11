@@ -25,7 +25,7 @@ extension UICommand {
 
     /// What every action takes besides its own arguments.
     struct ActionOptions: ParsableArguments {
-        @Flag(help: "Also print the tree as it is after the action; its refs replace the earlier ones.") var tree = false
+        @Flag(help: "Also print the tree as it is after the action. An element it lists keeps the ref it had.") var tree = false
         @Option(help: "How long to keep looking for the element, when the action names one, at most 120s (default: 2s).") var timeout: String?
         @OptionGroup var driving: DrivingOptions
 
@@ -49,7 +49,11 @@ extension UICommand {
     struct Tree: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "List the elements on screen, each with a ref (e1, e2, …) to act on.",
-            discussion: "Each listing replaces the refs of the one before it. An app that isn't in front is reported as such, with Springboard's elements."
+            discussion: """
+            An element keeps its ref from one listing to the next for as long as each lists it. A ref whose element the \
+            newest listing leaves out is refused (stale_ref), and its number is not used again. An app that isn't in front \
+            is reported as such, with Springboard's elements.
+            """
         )
         @Flag(help: "Include containers, keyboard keys, and off-screen elements.") var all = false
         @OptionGroup var driving: DrivingOptions
@@ -71,11 +75,11 @@ extension UICommand {
             The app must be running in front (`xcd run` or `xcd launch`; not needed with --system); a system alert over it \
             can be tapped too. While a system alert is up nothing in the app is tapped, and neither is an element under \
             the keyboard. When several elements match, the failure \
-            lists them as e1, e2, …: those become the refs, so `ref:e<N>` (or --index) picks one. \
+            lists them with their refs, so `e<N>` (or --index) picks one. \
             A tap that succeeds says where it landed, not what it did: check with --tree, `xcd ui wait`, or `xcd ui tree`.
             """
         )
-        @Argument(help: "What to tap, e.g. id:signInButton, \"label:Sign In\", ref:e4, or @120,300.") var target: String
+        @Argument(help: "What to tap, e.g. id:signInButton, \"label:Sign In\", e4 (a ref from the tree; ref:e4 too), or @120,300.") var target: String
         @OptionGroup var match: MatchOptions
         @OptionGroup var action: ActionOptions
         @OptionGroup var options: GlobalOptions

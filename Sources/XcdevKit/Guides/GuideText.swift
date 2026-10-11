@@ -239,10 +239,12 @@ A target is one argument. Quote it when it has spaces.
 | `id:<identifier>` | The accessibility identifier, exactly. Prefer this: it doesn't change with the app's language. |
 | `label:<text>` | The label, exactly. |
 | `label~<text>` | Part of the label, in any case. |
-| `ref:e<N>` | A row of the newest tree. |
+| `ref:e<N>`, or just `e<N>` | A row of the newest tree. |
 | `@x,y` | A point, in points (tap and long-press only). Nothing is checked: it taps whatever is there. |
 
-When several elements match, the error lists them as `e1`, `e2`, …. Those become the refs, so `ref:e2` picks one. `--role button` or `--index 0` also narrow a match. Refs are good until the next tree: `xcd ui tree`, an action with `--tree`, and an "ambiguous" error each replace them.
+When several elements match, the error lists them with their refs, so `e2` picks one. `--role button` or `--index 0` also narrow a match.
+
+An element keeps its ref from one tree to the next (`xcd ui tree`, or an action with `--tree`) for as long as each tree lists it. A ref whose element the newest tree does not list is refused with `stale_ref`. Its number is not used again, so an old ref never names another element.
 
 ## Actions
 
@@ -265,11 +267,12 @@ An action on an element waits up to `--timeout` (default 2s; 10s for `wait`) for
 - **System alerts** (permission prompts) are listed at the end of the tree, marked `system`. While one is up, nothing in the app can be acted on: tap one of the alert's buttons first.
 - **The keyboard** covers the lower part of the screen, and an element under it is refused. Scroll the element up with `xcd ui swipe up`, or dismiss the keyboard first: `xcd ui type "" --submit` presses Return, which closes it in most single-line fields (and submits the field), or tap the keyboard's own Return or Done key (`xcd ui tree --all` lists the keys).
 - **Off-screen elements** are not in the default tree. `xcd ui tree --all` lists them, marked `offscreen`. Swipe, then read the tree again.
-- **Typing** uses the software keyboard. If none comes up, the text is pasted instead, which replaces the device's pasteboard; the report says `by keyboard` or `by paste`. Check the field's value in the tree afterwards. With nothing focused there is nowhere to type, and the command fails: pass `--into <target>`.
+- **Typing** sends key presses to the field that has keyboard focus, with or without a keyboard on screen; the report says `by keyboard`. Only when no keyboard comes up and the simulator can't say what has focus is the text pasted instead, which replaces the device's pasteboard (`by paste`). Check the field's value in the tree afterwards. With nothing focused there is nowhere to type, and the command fails: pass `--into <target>`.
 - **A crash** during an action is reported as `app_crashed`, with the crash report when one was written.
 - **The first `xcd ui` command** builds a small runner once per Xcode (about 30 seconds) and starts it on your simulator. On a brand-new simulator the start can take minutes. Later commands take about a second.
 - **`xcd test`** stops the runner when the test run includes UI tests, since both would drive the same device. The next `xcd ui` command starts it again.
-- **Device state** is set with `xcd sim`: `xcd sim open-url <url>`, `xcd sim push --alert <text>`, `xcd sim privacy grant photos`, `xcd sim pasteboard set --text <text>` or `--image <file>`, `xcd sim appearance dark`.
+- **Device state** is set with `xcd sim`: `xcd sim open-url <url>`, `xcd sim push --alert <text>`, `xcd sim privacy grant photos`, `xcd sim pasteboard set --text <text>` or `--image <file>`, `xcd sim appearance dark`, `xcd sim text-size accessibility-large` (the Dynamic Type size).
+- **The app's files** are in a folder on this Mac: `xcd sim container` prints the path of its data container, so `ls "$(xcd sim container)/Documents"` lists what the app saved.
 - Add `--json` to any command for one JSON object: the tree's elements, or an action's `element`, `x`, `y`, and `tree`.
 
 ## When something fails
@@ -281,7 +284,7 @@ Every failure ends with `next:`. Do what it says first.
 | `element_not_found` | Nothing matched in time, or the app isn't in front. | Read `xcd ui tree`; the error names the closest labels and identifiers. |
 | `element_not_hittable` | It exists but is off screen, disabled, or covered. | Scroll it into view, or deal with the alert or keyboard over it. |
 | `element_ambiguous` | Several elements matched. | Pick one with `ref:e<N>`, `--index`, or `--role`. |
-| `stale_ref` | The ref is from an older tree. | Run `xcd ui tree` and use a new ref. |
+| `stale_ref` | The newest tree does not list the ref's element, or the element has gone since. | Run `xcd ui tree` and use a ref from it. |
 | `wait_timeout` | The element didn't appear (or go) in time. | The error lists what is on screen. Check the app did what you expected. |
 | `app_crashed` | The action ended the app. | Read the crash report in the error, fix the crash, then `xcd run`. |
 | `runner_failed` | The runner didn't start or stopped answering. | `xcd ui stop`, retry, then `xcd doctor`. |

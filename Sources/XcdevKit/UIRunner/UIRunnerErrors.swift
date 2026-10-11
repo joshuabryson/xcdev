@@ -67,13 +67,18 @@ enum UIRunnerErrors {
 
     static func ambiguous(_ failure: RunnerFailure, target: String, _: Duration) -> XcdError {
         XcdError(.elementAmbiguous, "\(failure.candidates.count) elements match \(target)",
-                 next: "pick one: pass `ref:eN` from the list (these refs replace any refs from an earlier tree), "
-                     + "`--index <n>` (0 is the first), or `--role <role>`",
+                 next: "pick one: pass `ref:eN` (or just `eN`) from the list, `--index <n>` (0 is the first), or `--role <role>`",
                  details: UIText.rows(failure.candidates))
     }
 
-    static func staleRef(_: RunnerFailure, target: String, _: Duration) -> XcdError {
-        XcdError(.staleRef, "\(target) no longer names one element on screen", next: "run `xcd ui tree` and use a ref from it")
+    /// A ref that is in no table is from an earlier tree (or was never given out); one that is has lost its element.
+    static func staleRef(_ failure: RunnerFailure, target: String, _: Duration) -> XcdError {
+        guard failure.message == RunnerEngine.unknownRef else {
+            return XcdError(.staleRef, "\(target) no longer names one element on screen", next: "run `xcd ui tree` and use a ref from it")
+        }
+        return XcdError(.staleRef, "\(target) is not a ref of the latest tree",
+                        next: "a ref lasts while each new tree lists its element; run `xcd ui tree` and use a ref from it, "
+                            + "or aim with `id:` or `label:`, which need no tree")
     }
 
     static func waitTimeout(_ failure: RunnerFailure, target: String, timeout: Duration) -> XcdError {

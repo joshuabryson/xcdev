@@ -26,9 +26,9 @@ it gives each git worktree its own simulator clones and DerivedData, so parallel
 | Install, launch, stop | `xcd install`, `xcd launch`, `xcd terminate` |
 | Simulator | `xcd sim boot`, `xcd sim open`, `xcd sim erase` |
 | Screenshot or video | `xcd ui screenshot`, `xcd ui record start` … `xcd ui record stop` (each prints the file's path; read it) |
-| Read and drive the UI (iPhone/iPad) | Launch the app first (`xcd run` or `xcd launch`; not needed with `--system`). `xcd ui tree` lists what is on screen with refs; `xcd ui tap <target>`; `xcd ui type <text> --into <target> [--clear] [--submit]`; `xcd ui swipe up\|down\|left\|right [--on <target>]`; `xcd ui long-press <target>`; `xcd ui wait <target> [--gone]`; `xcd ui button home`; `xcd ui rotate landscape-left`. A target is `id:<identifier>`, `"label:<text>"`, `"label~<part>"`, `ref:e<N>`, or `@x,y` (tap and long-press only). Read `xcd guide ui` before the first time |
+| Read and drive the UI (iPhone/iPad) | Launch the app first (`xcd run` or `xcd launch`; not needed with `--system`). `xcd ui tree` lists what is on screen with refs; `xcd ui tap <target>`; `xcd ui type <text> --into <target> [--clear] [--submit]`; `xcd ui swipe up\|down\|left\|right [--on <target>]`; `xcd ui long-press <target>`; `xcd ui wait <target> [--gone]`; `xcd ui button home`; `xcd ui rotate landscape-left`. A target is `id:<identifier>`, `"label:<text>"`, `"label~<part>"`, `ref:e<N>` (or just `e<N>`), or `@x,y` (tap and long-press only). Read `xcd guide ui` before the first time |
 | Go straight to a screen | `xcd open` lists the project's routes; `xcd open <route> [name=value …]` opens one (a link, launch arguments, or the project's script) and checks that it arrived; `xcd open '<url>'` sends any link the app handles; `--cold` lets the link start the app. Read `xcd guide deeplinks` before adding routes |
-| Device state | `xcd sim open-url <url>`, `xcd sim push --alert <text>`, `xcd sim privacy grant photos`, `xcd sim status-bar --time 9:41`, `xcd sim appearance dark`, `xcd sim location <lat>,<lon>`, `xcd sim pasteboard set --text <s>` (or `--image <file>`), `xcd sim addmedia <file>` |
+| Device state | `xcd sim open-url <url>`, `xcd sim push --alert <text>`, `xcd sim privacy grant photos`, `xcd sim status-bar --time 9:41`, `xcd sim appearance dark`, `xcd sim text-size <size>` (Dynamic Type), `xcd sim location <lat>,<lon>`, `xcd sim pasteboard set --text <s>` (or `--image <file>`), `xcd sim addmedia <file>`; `xcd sim container` prints the folder of the app's data on this Mac |
 | Context for scripts | `xcd context` (prints XCD_* variables) |
 | Explain a config key | `xcd config explain <key>` |
 | Fix simulators or worktrees | `xcd doctor`, then `xcd doctor --fix` (read the problems first: it may restart CoreSimulator, which shuts down every agent's simulators) |
@@ -39,8 +39,8 @@ it gives each git worktree its own simulator clones and DerivedData, so parallel
   `$XCD_MEDIA_DIR` in scripts). Screenshot sizes are pixels; divide by the reported scale for points.
 - Driving loop: `xcd ui tree` (see), an action such as `xcd ui tap …` or `xcd ui type …` (act), then verify: add
   `--tree` to the action, or run `xcd ui wait …`. An action that reports success can still have done nothing, so
-  always verify. Refs are only good until the next tree (`xcd ui tree`, an action with `--tree`, or an "ambiguous"
-  failure, whose numbered candidates become the refs).
+  always verify. An element keeps its ref while each new tree (`xcd ui tree`, or an action with `--tree`) lists it; a
+  ref whose element the newest tree leaves out is refused, and never names another element.
 - Actions and `xcd ui wait` act on the app in front and any system alert over it; when the app isn't in front they
   fail, saying so (`xcd launch` or `xcd run` fixes that). While a system alert is up nothing in the app can be acted
   on, and neither can an element under the keyboard: deal with the alert or keyboard first.

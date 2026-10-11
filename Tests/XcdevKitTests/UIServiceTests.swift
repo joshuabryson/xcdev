@@ -114,10 +114,18 @@ import XcdevTestSupport
         failure.withLock { $0 = RunnerFailure(code: RunnerFailure.Code.ambiguous, message: "2 elements match", candidates: [Self.element, Self.element]) }
         let ambiguous = await error("label:Delete")
         #expect(ambiguous?.code == .elementAmbiguous && ambiguous?.details.count == 2)
-        #expect(ambiguous?.next?.contains("`ref:eN`") == true && ambiguous?.next?.contains("replace any refs from an earlier tree") == true)
+        #expect(ambiguous?.next == "pick one: pass `ref:eN` (or just `eN`) from the list, `--index <n>` (0 is the first), or `--role <role>`")
 
         failure.withLock { $0 = RunnerFailure(code: RunnerFailure.Code.staleRef, message: "that ref no longer names one element on screen") }
-        #expect(await error("ref:e9")?.next == "run `xcd ui tree` and use a ref from it")
+        let gone = await error("ref:e9")
+        #expect(gone?.code == .staleRef && gone?.message == "ref:e9 no longer names one element on screen")
+        #expect(gone?.next == "run `xcd ui tree` and use a ref from it")
+        // A ref of an earlier tree, as an agent that kept one would give it: the answer says why it is refused.
+        failure.withLock { $0 = RunnerFailure(code: RunnerFailure.Code.staleRef, message: RunnerEngine.unknownRef) }
+        let unknown = await error("e5")
+        #expect(unknown?.code == .staleRef && unknown?.message == "e5 is not a ref of the latest tree")
+        #expect(unknown?.next == "a ref lasts while each new tree lists its element; run `xcd ui tree` and use a ref from it, "
+                + "or aim with `id:` or `label:`, which need no tree")
 
         failure.withLock { $0 = RunnerFailure(code: RunnerFailure.Code.internal, message: "the tap failed", issues: ["Failed to tap"]) }
         let inner = await error("id:x")

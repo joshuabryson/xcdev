@@ -14,7 +14,13 @@ public struct TargetParseFailure: Error, Sendable, Equatable {
 }
 
 public enum TargetParser {
-    public static let forms = "id:<identifier>, label:<text>, label~<part of the label>, ref:e<N> (from `xcd ui tree`), or @x,y"
+    public static let forms = "id:<identifier>, label:<text>, label~<part of the label>, ref:e<N> or just e<N> (from `xcd ui tree`), or @x,y"
+
+    /// Whether `text` is a ref as `xcd ui tree` prints it: "e12".
+    static func isRef(_ text: String) -> Bool {
+        let digits = text.dropFirst()
+        return text.hasPrefix("e") && !digits.isEmpty && digits.allSatisfy({ $0.isNumber }) && Int(digits) != nil
+    }
 
     public static func parse(_ text: String) -> Result<TargetSpec, TargetParseFailure> {
         let failure = Result<TargetSpec, TargetParseFailure>.failure(TargetParseFailure(message: "'\(text)' is not a target"))
@@ -31,13 +37,9 @@ public enum TargetParser {
         if let value = rest("id:") { return .success(.id(value)) }
         if let value = rest("label:") { return .success(.label(value)) }
         if let value = rest("label~") { return .success(.labelContains(value)) }
-        if let value = rest("ref:") {
-            guard value.hasPrefix("e"), value.count > 1 else { return failure }
-            let digits = String(value.dropFirst())
-            guard !digits.isEmpty && digits.allSatisfy({ $0.isNumber }) && Int(digits) != nil else { return failure }
-            return .success(.ref(value))
-        }
-        return failure
+        if let value = rest("ref:") { return isRef(value) ? .success(.ref(value)) : failure }
+        // A ref alone, as the tree's first column has it. Nothing else a target can be looks like one.
+        return isRef(text) ? .success(.ref(text)) : failure
     }
 }
 

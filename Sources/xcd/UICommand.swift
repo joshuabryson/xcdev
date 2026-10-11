@@ -6,7 +6,7 @@ struct UICommand: AsyncParsableCommand {
         commandName: "ui",
         abstract: "See and drive the simulator: the element tree, taps, typing, swipes, waits, screenshots, and recordings.",
         discussion: """
-        A target is one of: id:<identifier>, label:<text>, label~<part of the label>, ref:e<N> (from the newest tree), \
+        A target is one of: id:<identifier>, label:<text>, label~<part of the label>, ref:e<N> or just e<N> (from the newest tree), \
         or @x,y (points; tap and long-press only). The app is the one from the last build; --bundle picks another, \
         --system the Home Screen. Actions and wait act on the app and any system alert over it, so the app must be \
         running in front: start it with `xcd run` or `xcd launch` first (not needed with --system, button, or rotate). \

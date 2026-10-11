@@ -24,7 +24,7 @@ extension RunnerEngine {
         if scene.appAway { return .retry(appAwayFailure(scene)) }
         switch TargetMatcher.match(query.target, role: query.role, index: query.index, in: scene.nodes, refs: refs) {
         case .staleRef:
-            return .stop(Self.staleRef)
+            return .stop(staleRef(query.target))
         case .ambiguous(let found):
             return .stop(ambiguous(found, in: scene))
         case .none:

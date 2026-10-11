@@ -30,6 +30,7 @@ struct UIRunnerIntegrationTests {
             try await readsTheSampleScreen(&ctx, svc)
             try await tapsAndWaits(&ctx, svc)
             try await refusesWhatCannotBeTapped(&ctx, svc)
+            try await findsTheAppsFilesAndSetsTheTextSize(&ctx, svc)
 
             let nowFront = try await frontmostMacApp()
             #expect(nowFront == front, "driving the simulator changed the frontmost Mac app from \(front) to \(nowFront)")
@@ -335,8 +336,17 @@ extension UIRunnerIntegrationTests {
         #expect(try await svc.ui.wait("id:welcome", gone: false, options, in: &ctx).element?.label == "Welcome back")
 
         let gear = try await element("gearButton", &ctx, svc)
-        _ = try await svc.ui.tap("ref:\(try #require(gear.ref))", options, in: &ctx)
+        let counter = try await element("tapCount", &ctx, svc)
+        _ = try await svc.ui.tap(try #require(gear.ref), options, in: &ctx)                  // a ref as the tree prints it, with no `ref:`
         #expect(try await svc.ui.wait("label:taps: 1", gone: false, options, in: &ctx).element?.identifier == "tapCount")
+        // The next tree lists the gear again, so it keeps its ref. The counter's label changed, which makes it a new
+        // element to the table: it gets a number no element has had, and its old ref names nothing.
+        let after = try await svc.ui.tree(all: false, options, in: &ctx).tree.elements
+        #expect(after.first { $0.identifier == "gearButton" }?.ref == gear.ref, "the gear was \(gear.ref ?? "-")")
+        let recounted = try #require(after.first { $0.identifier == "tapCount" }?.ref)
+        #expect(recounted != counter.ref && !after.contains { $0.ref == counter.ref }, "the counter was \(counter.ref ?? "-"), now \(recounted)")
+        let old = await #expect(throws: XcdError.self) { _ = try await svc.ui.tap(try #require(counter.ref), options, in: &ctx) }
+        #expect(old?.code == .staleRef && old?.message == "\(counter.ref ?? "") is not a ref of the latest tree", "\(old?.message ?? "no error")")
         // A point tap lands where the tree says the element is.
         let point = try await svc.ui.tap("@\(gear.frame.midX),\(gear.frame.midY)", options, in: &ctx)
         #expect(point.element == nil && point.x == gear.frame.midX && point.y == gear.frame.midY)
@@ -350,10 +360,37 @@ extension UIRunnerIntegrationTests {
         let disabled = await #expect(throws: XcdError.self) { _ = try await svc.ui.tap("id:disabledButton", options, in: &ctx) }
         #expect(disabled?.code == .elementNotHittable)
         let stale = await #expect(throws: XcdError.self) { _ = try await svc.ui.tap("ref:e999", options, in: &ctx) }
-        #expect(stale?.code == .staleRef)
+        #expect(stale?.code == .staleRef && stale?.message == "ref:e999 is not a ref of the latest tree")
         let never = await #expect(throws: XcdError.self) { _ = try await svc.ui.wait("id:nope", gone: false, options, in: &ctx) }
         #expect(never?.code == .waitTimeout)
         #expect(try await element("tapCount", &ctx, svc).label == "taps: 2", "a refused tap changed the screen")
+    }
+
+    /// `xcd sim container` and `xcd sim text-size`, on the clone the sample app is running on.
+    func findsTheAppsFilesAndSetsTheTextSize(_ ctx: inout WorktreeContext, _ svc: Services) async throws {
+        let data = try await svc.deviceState.container(nil, bundle: nil, device: nil, in: &ctx)
+        var isFolder: ObjCBool = false
+        #expect(FileManager.default.fileExists(atPath: try #require(data.path), isDirectory: &isFolder) && isFolder.boolValue, "\(data.text)")
+        #expect(data.container == "data" && data.text == data.path && data.bundleId == "dev.xcdev.SampleApp")
+        #expect(try await svc.deviceState.container("app", bundle: nil, device: nil, in: &ctx).path?.hasSuffix("/SampleApp.app") == true)
+        #expect(try await svc.deviceState.container("groups", bundle: nil, device: nil, in: &ctx).groups == [:])
+        let missing = await #expect(throws: XcdError.self) {
+            _ = try await svc.deviceState.container(nil, bundle: "dev.xcdev.NotInstalled", device: nil, in: &ctx)
+        }
+        #expect(missing?.code == .simulatorFailed && missing?.next?.contains("`xcd install`") == true, "\(missing?.message ?? "no error")")
+
+        let before = try await svc.deviceState.textSize(nil, device: nil, in: &ctx)
+        #expect(before.size == "large" && !before.changed, "a new clone starts at large: \(before.text)")
+        let height = try await element("emailField", &ctx, svc).frame.h
+        let set = try await svc.deviceState.textSize("accessibility-large", device: nil, in: &ctx)
+        #expect(set.size == "accessibility-large" && set.changed, "\(set.text)")
+        // The running app is told at once: its field is taller.
+        let grown = try await element("emailField", &ctx, svc).frame.h
+        #expect(grown > height, "the field was \(height) pt tall and is \(grown) pt")
+        // simctl prints this name back as `extra-Small`; the report has the name the command takes.
+        #expect(try await svc.deviceState.textSize("extra-small", device: nil, in: &ctx).size == "extra-small")
+        _ = try await svc.deviceState.textSize("large", device: nil, in: &ctx)
+        #expect(try await element("emailField", &ctx, svc).frame.h == height)
     }
 
     /// Waits for the Photos prompt. On a brand-new clone its first appearance waits for the photo library to be set

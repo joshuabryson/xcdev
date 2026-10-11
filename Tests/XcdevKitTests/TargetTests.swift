@@ -8,19 +8,21 @@ import Testing
         #expect(TargetParser.parse("label:Sign In") == .success(.label("Sign In")))
         #expect(TargetParser.parse("label~welc") == .success(.labelContains("welc")))
         #expect(TargetParser.parse("ref:e12") == .success(.ref("e12")))
+        #expect(TargetParser.parse("e12") == .success(.ref("e12")))                  // as `xcd ui tree` prints it
         #expect(TargetParser.parse("@120,300.5") == .success(.point(x: 120, y: 300.5)))
         #expect(TargetParser.parse("label:a:b") == .success(.label("a:b")))          // only the first colon splits
     }
 
     @Test func rejectsWhatIsNotATarget() {
-        for bad in ["signIn", "id:", "label:", "label~", "ref:12", "ref:e", "@1", "@a,b", "@1,2,3", "", "@nan,1", "@1,inf", "@infinity,2", "ref:e-1", "ref:e+1", "ref:e1.0"] {
+        for bad in ["signIn", "id:", "label:", "label~", "ref:12", "ref:e", "@1", "@a,b", "@1,2,3", "", "@nan,1", "@1,inf", "@infinity,2", "ref:e-1", "ref:e+1", "ref:e1.0",
+                    "e", "E3", "e-1", "e1.0", "e 3", "e3x", "12"] {
             guard case .failure(let failure) = TargetParser.parse(bad) else {
                 Issue.record("'\(bad)' parsed")
                 continue
             }
             #expect(failure.message.contains("is not a target"))
         }
-        #expect(TargetParser.forms == "id:<identifier>, label:<text>, label~<part of the label>, ref:e<N> (from `xcd ui tree`), or @x,y")
+        #expect(TargetParser.forms == "id:<identifier>, label:<text>, label~<part of the label>, ref:e<N> or just e<N> (from `xcd ui tree`), or @x,y")
     }
 
     func nodes() -> [FlatNode] {

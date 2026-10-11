@@ -54,7 +54,7 @@ import XcdevTestSupport
         #expect(keyboard?.message == "id:x is covered by the keyboard" && keyboard?.next?.contains("keyboard") == true)
     }
 
-    @Test func anAmbiguousReplyNumbersItsCandidatesAndSaysTheyReplaceEarlierRefs() async throws {
+    @Test func anAmbiguousReplyListsItsCandidatesWithTheirRefs() async throws {
         var one = UIServiceTests.element
         one.ref = "e1"
         var two = UIServiceTests.element
@@ -63,7 +63,8 @@ import XcdevTestSupport
                                        target: "label:Sign In")
         #expect(error?.code == .elementAmbiguous && error?.details.count == 2)
         #expect(error?.details[0].hasPrefix("e1") == true && error?.details[1].hasPrefix("e2") == true)
-        #expect(error?.next?.contains("`ref:eN`") == true && error?.next?.contains("replace any refs from an earlier tree") == true)
+        // The refs of an earlier tree stay as they were, so nothing is said about them.
+        #expect(error?.next?.contains("`ref:eN`") == true && error?.next?.contains("earlier tree") == false)
     }
 
     @Test func suggestionsCompareTheTargetsTextWithoutItsPrefix() async throws {

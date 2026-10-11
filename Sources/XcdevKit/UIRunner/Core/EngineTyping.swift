@@ -13,10 +13,9 @@ extension RunnerEngine {
     static let noKeyboard = RunnerFailure(code: "no_keyboard", message: "no keyboard is on screen")
     static let nothingFocused = RunnerFailure(code: RunnerFailure.Code.nothingFocused, message: "nothing has keyboard focus")
 
-    /// How text can be entered: through the keyboard on screen, by pasting into the element that has keyboard focus,
-    /// or not at all.
+    /// How text can be entered: as keys, by pasting, or not at all.
     enum TextEntry {
-        case keyboard, paste, nowhere
+        case keys, paste, nowhere
     }
 
     public func enterText(_ request: TypeRequest) -> Result<ActionResult, RunnerFailure> {
@@ -36,8 +35,8 @@ extension RunnerEngine {
         case .success(.nowhere):
             return .failure(Self.nothingFocused)
         case .success(let entry):
-            let keyboard = entry == .keyboard
-            return performed("typing", { Int((self.device.now() - start) * 1000) }, { try self.entered(request, keyboard: keyboard, into: focused) })
+            let keys = entry == .keys
+            return performed("typing", { Int((self.device.now() - start) * 1000) }, { try self.entered(request, keys: keys, into: focused) })
                 .flatMap { finished($0, scope, what: "typing", appWasRunning: true) }
         }
     }
@@ -53,9 +52,12 @@ extension RunnerEngine {
     }
 
     /// How text can be entered, looking for a keyboard for up to `keyboardWait` seconds. An app that isn't in front is
-    /// a failure. The one-time tip card over a new simulator's keyboard is dismissed on the way. With no keyboard, the
-    /// text is pasted, unless the last look says that nothing has keyboard focus: a paste then goes nowhere, and
-    /// XCTest reports no problem with it, so it would pass for typing that worked.
+    /// a failure. The one-time tip card over a new simulator's keyboard is dismissed on the way. With a keyboard up
+    /// the text goes in as keys. With none, what the last look says about keyboard focus decides. An element has it:
+    /// keys still reach it, as a hardware keyboard's would; iOS keeps the keyboard minimized while it takes one to be
+    /// attached, and a field can have an input view of its own. None has it: there is nowhere to type,
+    /// and a paste would go nowhere without XCTest reporting a problem. The device can't say: the text is
+    /// pasted, since XCTest fails a `typeText` when nothing has focus.
     func textEntry(_ scope: ActionScope) -> Result<TextEntry, RunnerFailure> {
         var scope = scope
         scope.timeout = Self.keyboardWait
@@ -71,9 +73,11 @@ extension RunnerEngine {
             return .done(.success(ActionResult(element: nil, x: nil, y: nil, ms: elapsedMs())))
         }
         switch found {
-        case .success: return .success(.keyboard)
+        case .success: return .success(.keys)
         case .failure(let failure) where failure.code != Self.noKeyboard.code: return .failure(failure)
-        case .failure: return .success(focus == false ? .nowhere : .paste)
+        case .failure:
+            guard let focus else { return .success(.paste) }
+            return .success(focus ? .keys : .nowhere)
         }
     }
 
@@ -89,21 +93,20 @@ extension RunnerEngine {
         return scene.nodes.first { $0.role == "button" && $0.label == "Continue" && TreeBuilder.isOnScreen($0, screen: scene.screen) }
     }
 
-    /// Enters the text: through the keyboard when one is up, else by pasting, which never calls `typeText`
-    /// (it fails without a software keyboard). `--clear` selects everything first, so what follows replaces it.
-    /// Either way it ends once the keyboard is on screen (`awaitKeyboard`), unless a paste pressed no key.
-    func entered(_ request: TypeRequest, keyboard: Bool, into focused: ActionResult) throws -> ActionResult {
+    /// Enters the text: as keys in one `typeText` call, or by pasting, which never calls `typeText`. `--clear` selects
+    /// everything first, so what follows replaces it. Either way it ends once the keyboard is on screen
+    /// (`awaitKeyboard`), unless no key was pressed: there was nothing to type, clear, or submit.
+    func entered(_ request: TypeRequest, keys: Bool, into focused: ActionResult) throws -> ActionResult {
         if request.clear { try device.pressKey("a", command: true) }
-        if keyboard {
+        if keys {
             let text = (request.clear ? Keys.delete : "") + request.text + (request.submit ? "\n" : "")
             if !text.isEmpty { try device.typeText(text) }
-            awaitKeyboard(request.scope)
         } else {
             try paste(request)
-            if request.clear || request.submit || !request.text.isEmpty { awaitKeyboard(request.scope) }
         }
+        if request.clear || request.submit || !request.text.isEmpty { awaitKeyboard(request.scope) }
         var result = focused
-        result.method = keyboard ? "keyboard" : "paste"
+        result.method = keys ? "keyboard" : "paste"
         return result
     }
 
@@ -113,7 +116,7 @@ extension RunnerEngine {
     /// Waits up to `keyboardReturn` seconds for the keyboard to be on screen. iOS can take the typing's keys for a
     /// hardware keyboard's: it then minimizes the software keyboard, and brings it back about a second after the
     /// typing has returned. A keyboard that iOS minimized when a hardware keyboard was attached can
-    /// stay down when a field is tapped: the text is then pasted, and the paste's key press brings the keyboard up
+    /// stay down when a field is tapped, and the next key press, the text's own or a paste's Command-V, brings it up
     /// about a second later. A tree read in between would say that no keyboard is up, and a tap would
     /// be aimed at a screen about to change. Nothing with keyboard focus means the typing closed the keyboard
     /// (Return in a single-line field), so none is coming; nor is one when the app has left the screen.

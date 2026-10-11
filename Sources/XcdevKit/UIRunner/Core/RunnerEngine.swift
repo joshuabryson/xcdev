@@ -40,8 +40,11 @@ public protocol DeviceDriving: AnyObject {
 /// Handles the runner's requests. One instance lives for the runner's life and holds the ref table.
 public final class RunnerEngine {
     let device: DeviceDriving
-    /// Refs of the last tree returned.
+    /// Refs of the last tree returned, and of the candidates an ambiguous target listed since.
     public private(set) var refs: [String: RefSignature] = [:]
+    /// The number of the last ref given out. A number is never given to a second element, so a ref from an earlier
+    /// tree either still names its element or is in no table.
+    private var lastRef = 0
     /// Seconds between polls while looking for an element.
     static let pollInterval = 0.1
     public var runnerBundleId = ""
@@ -125,17 +128,32 @@ public final class RunnerEngine {
         timeout.isNaN ? 0 : min(max(timeout, 0), 120)
     }
 
-    /// Gives the displayed elements fresh refs and replaces the ref table.
-    func elements(of scene: Scene, all: Bool) -> [TreeElement] {
+    /// The elements at `indices`, each with its ref, and the table of those refs. An element that is in the ref
+    /// table keeps the ref it has there; any other gets the next number.
+    func withRefs(_ indices: [Int], in scene: Scene) -> (elements: [TreeElement], table: [String: RefSignature]) {
+        var known: [RefSignature: String] = [:]
+        for (ref, signature) in refs { known[signature] = ref }
         var table: [String: RefSignature] = [:]
-        let shown = TreeBuilder.displayed(scene.nodes, screen: scene.screen, all: all)
-        let elements = shown.enumerated().map { number, index -> TreeElement in
-            let ref = "e\(number + 1)"
-            table[ref] = scene.nodes[index].signature
+        let elements = indices.map { index -> TreeElement in
+            let signature = scene.nodes[index].signature
+            // Taken out, so that a second element with the same signature can't get the same ref.
+            let ref = known.removeValue(forKey: signature) ?? nextRef()
+            table[ref] = signature
             return TreeBuilder.element(scene.nodes[index], ref: ref, screen: scene.screen)
         }
-        refs = table
-        return elements
+        return (elements, table)
+    }
+
+    func nextRef() -> String {
+        lastRef += 1
+        return "e\(lastRef)"
+    }
+
+    /// Gives the displayed elements their refs and replaces the ref table with them.
+    func elements(of scene: Scene, all: Bool) -> [TreeElement] {
+        let listed = withRefs(TreeBuilder.displayed(scene.nodes, screen: scene.screen, all: all), in: scene)
+        refs = listed.table
+        return listed.elements
     }
 
     func seen(_ scene: Scene) -> [String] {
@@ -191,19 +209,24 @@ public final class RunnerEngine {
         }
     }
 
-    static let staleRef = RunnerFailure(code: RunnerFailure.Code.staleRef, message: "that ref no longer names one element on screen")
+    /// What a ref that is in no table is told. xcd reads these words to say what to do next.
+    public static let unknownRef = "that ref is not in the latest tree"
 
-    /// The failure for several matches. The refs become exactly the candidates, each with its own, so `ref:eN` can pick one.
-    func ambiguous(_ found: [Int], in scene: Scene) -> RunnerFailure {
-        var table: [String: RefSignature] = [:]
-        var candidates: [TreeElement] = []
-        for (number, index) in found.enumerated() {
-            let ref = "e\(number + 1)"
-            table[ref] = scene.nodes[index].signature
-            candidates.append(TreeBuilder.element(scene.nodes[index], ref: ref, screen: scene.screen))
+    /// The failure for a ref that does not name one element now. Its element is gone or no longer unique; or the ref
+    /// is not in the table at all: the latest tree does not list its element, or it was never given out.
+    func staleRef(_ target: TargetSpec) -> RunnerFailure {
+        if case .ref(let name) = target, refs[name] == nil {
+            return RunnerFailure(code: RunnerFailure.Code.staleRef, message: Self.unknownRef)
         }
-        refs = table
-        return RunnerFailure(code: RunnerFailure.Code.ambiguous, message: "\(found.count) elements match", candidates: candidates)
+        return RunnerFailure(code: RunnerFailure.Code.staleRef, message: "that ref no longer names one element on screen")
+    }
+
+    /// The failure for several matches. Each candidate has a ref, so `ref:eN` can pick one: the ref it already has, or
+    /// a new one that is added to the table.
+    func ambiguous(_ found: [Int], in scene: Scene) -> RunnerFailure {
+        let listed = withRefs(found, in: scene)
+        refs.merge(listed.table) { _, new in new }
+        return RunnerFailure(code: RunnerFailure.Code.ambiguous, message: "\(found.count) elements match", candidates: listed.elements)
     }
 
     public func wait(_ request: TargetRequest) -> Result<ActionResult, RunnerFailure> {
@@ -239,7 +262,7 @@ public final class RunnerEngine {
             return .success(found.first { TreeBuilder.isOnScreen(scene.nodes[$0], screen: scene.screen) })
         case .staleRef:
             // A ref that was never issued is unknown; one that was issued and no longer matches is gone.
-            if case .ref(let name) = request.target, !request.gone || refs[name] == nil { return .failure(Self.staleRef) }
+            if case .ref(let name) = request.target, !request.gone || refs[name] == nil { return .failure(staleRef(request.target)) }
             return .success(nil)
         case .none:
             return .success(nil)

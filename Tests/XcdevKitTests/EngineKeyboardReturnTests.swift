@@ -108,43 +108,64 @@ import XcdevTestSupport
         return (engine, device)
     }
 
-    /// Seen on iOS 27.0 with Device Hub's keyboard attached: the keyboard came up 1.0 s after the paste's
-    /// Command-V had returned, while the next command's tap was on its way to where a button had been.
-    @Test func pastingWaitsForTheKeyboardItsKeyPressBringsUp() throws {
+    /// Seen on iOS 27.0 with Device Hub's keyboard attached: the field had focus and no keyboard, and the keyboard
+    /// came up 1.0 s after a key press had returned, while the next command's tap was on its way to where a button
+    /// had been. The key press was a paste's Command-V then; the text's own keys are a key press too.
+    @Test func typingIntoAFieldWhoseKeyboardIsMinimizedWaitsForTheKeyboardItsKeysBringUp() throws {
         let (engine, device) = makeMinimized(keyboardUpAfter: 1.05)
         let result = try engine.enterText(typing.type("hi", into: nil)).get()
-        #expect(result.method == "paste" && device.events == ["pasteboard \"hi\"", "key cmd-\"v\""])
+        #expect(result.method == "keyboard" && device.events == ["type \"hi\""] && device.pasteboardText == nil)
         // The next command must not meet a screen that the keyboard is about to change.
         #expect(try engine.tree(Self.treeRequest).get().keyboard)
         #expect((2400...2700).contains(result.ms), "1.5 s looking for a keyboard, then the wait for this one: \(result.ms) ms")
     }
 
-    /// A field with an input view of its own has no keyboard to come. The wait ends as it does after typing.
-    @Test func aPasteThatNoKeyboardFollowsIsGivenUpOnAfterThreeSeconds() throws {
+    /// A field with an input view of its own has no keyboard to come. The wait ends as it does when a keyboard stays away.
+    @Test func typingIntoAFieldThatNeverGetsAKeyboardIsGivenUpOnAfterThreeSeconds() throws {
         let (engine, device) = typing.base.make(EngineTypingTests.reportingFocus(on: "email", EngineActionsTests.app))
         let result = try engine.enterText(typing.type("hi", into: nil, tree: true)).get()
-        #expect(result.method == "paste" && device.events == ["pasteboard \"hi\"", "key cmd-\"v\""] && result.tree?.keyboard == false)
-        #expect((4200...4600).contains(result.ms), "1.5 s before the paste and 3 s after it: \(result.ms) ms")
+        #expect(result.method == "keyboard" && device.events == ["type \"hi\""] && result.tree?.keyboard == false)
+        #expect((4200...4600).contains(result.ms), "1.5 s before the typing and 3 s after it: \(result.ms) ms")
+    }
+
+    /// On a device that can't say what has focus the text is pasted, and the paste's key press can bring a keyboard up
+    /// just the same. With no word on focus the wait can't end early.
+    @Test func aPasteIsWaitedAfterAsTypingIs() throws {
+        let (engine, device) = typing.base.make(Self.minimizedUnknown)
+        var up: Double?
+        device.onGesture = { device in up = device.clock + 1.05 }
+        device.onPause = { device in
+            guard let due = up, device.clock >= due else { return }
+            device.app = Self.shownUnknown
+            up = nil
+        }
+        let result = try engine.enterText(typing.type("hi", into: nil)).get()
+        #expect(result.method == "paste" && device.events == ["pasteboard \"hi\"", "key cmd-\"v\""])
+        #expect(try engine.tree(Self.treeRequest).get().keyboard && (2400...2700).contains(result.ms), "\(result.ms) ms")
+        // And when no keyboard follows, for the wait's three seconds.
+        let (pasting, plain) = typing.base.make()
+        let given = try pasting.enterText(typing.type("hi", into: nil, tree: true)).get()
+        #expect(given.method == "paste" && plain.events == ["pasteboard \"hi\"", "key cmd-\"v\""] && given.tree?.keyboard == false)
+        #expect((4200...4600).contains(given.ms), "1.5 s before the paste and 3 s after it: \(given.ms) ms")
     }
 
     /// Return can end the editing. Nothing has keyboard focus then, so no keyboard is coming.
-    @Test func aPasteThatEndsTheEditingIsNotWaitedAfter() throws {
+    @Test func typingThatEndsTheEditingOfAFieldWithNoKeyboardIsNotWaitedAfter() throws {
         let (engine, device) = makeMinimized(keyboardUpAfter: nil)
-        let pressed = device.onGesture
-        device.onGesture = { device in
-            pressed?(device)
-            if device.events.last == "key " + "\r".debugDescription { device.app = EngineTypingTests.reportingFocus(on: nil, EngineActionsTests.app) }
-        }
+        device.onGesture = { $0.app = EngineTypingTests.reportingFocus(on: nil, EngineActionsTests.app) }
         let result = try engine.enterText(typing.type("hi", into: nil, submit: true)).get()
-        #expect(result.method == "paste" && device.events == ["pasteboard \"hi\"", "key cmd-\"v\"", "key " + "\r".debugDescription])
-        #expect(device.clock < 1.6, "waited \(device.clock) s; looking for a keyboard before the paste takes 1.5")
+        #expect(result.method == "keyboard" && device.events == ["type " + "hi\n".debugDescription])
+        #expect(device.clock < 1.6, "waited \(device.clock) s; looking for a keyboard before the typing takes 1.5")
     }
 
-    /// With nothing to paste, clear, or submit, no key is pressed, so no keyboard is coming.
-    @Test func aPasteThatPressesNoKeyIsNotWaitedAfter() throws {
+    /// With nothing to type, clear, or submit, no key is pressed, so no keyboard is coming: by keys or by paste.
+    @Test func anEntryThatPressesNoKeyIsNotWaitedAfter() throws {
         let (engine, device) = makeMinimized(keyboardUpAfter: nil)
         let result = try engine.enterText(typing.type("", into: nil)).get()
-        #expect(result.method == "paste" && device.events.isEmpty)
-        #expect(device.clock < 1.6, "waited \(device.clock) s; looking for a keyboard before the paste takes 1.5")
+        #expect(result.method == "keyboard" && device.events.isEmpty)
+        #expect(device.clock < 1.6, "waited \(device.clock) s; looking for a keyboard takes 1.5")
+        let (pasting, plain) = typing.base.make()
+        #expect(try pasting.enterText(typing.type("", into: nil)).get().method == "paste" && plain.events.isEmpty)
+        #expect(plain.clock < 1.6, "waited \(plain.clock) s; looking for a keyboard takes 1.5")
     }
 }

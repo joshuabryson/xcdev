@@ -251,7 +251,7 @@ extension DeepLinksConfigTests {
         #expect(issues("    a: { description: d, run: ./a.sh, timeout: soon }")
                 == ["deeplinks.routes.a.timeout: 'soon' is not a duration like \"30s\", \"5m\", or \"1h\""])
         #expect(issues("    a: { description: d, run: ./a.sh, timeout: 90s }").isEmpty)
-        for bad in ["item-detail", "ref:e3", "@10,20", "id:", "label"] {
+        for bad in ["item-detail", "ref:e3", "e3", "@10,20", "id:", "label"] {
             #expect(issues("    a: { description: d, url: \"x://y\", expect: \"\(bad)\" }")
                     == ["deeplinks.routes.a.expect: '\(bad)' is not an `id:<identifier>`, `label:<text>`, or `label~<part>` target"])
         }

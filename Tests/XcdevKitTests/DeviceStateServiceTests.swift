@@ -131,6 +131,59 @@ import XcdevTestSupport
         #expect(last("openurl")?.arguments.last == "https://example.com")
     }
 
+    @Test func theTextSizeIsSetOrRead() async throws {
+        defer { worktree.remove() }
+        var (svc, ctx) = try setup()
+        worktree.runner.stub(["xcrun", "simctl", "ui"], stdout: "accessibility-large\n")
+        let set = try await svc.textSize("accessibility-large", device: nil, in: &ctx)
+        #expect(set.text.hasPrefix("set text size to accessibility-large  device=iphone  udid=") && set.changed)
+        // The size is set, then read back: the report says what the device has now.
+        let sizes = worktree.runner.calls.filter { $0.arguments.dropFirst().first == "ui" }.map { $0.arguments.dropFirst(3).joined(separator: " ") }
+        #expect(sizes == ["content_size accessibility-large", "content_size"])
+        let calls = worktree.runner.calls.count
+        let read = try await svc.textSize(nil, device: nil, in: &ctx)
+        #expect(read.text.hasPrefix("text size is accessibility-large  device=iphone  udid=") && !read.changed)
+        #expect(read.size == "accessibility-large" && last("ui")?.arguments.last == "content_size")
+        // A size simctl does not know is refused before the clone is booted.
+        let before = worktree.runner.calls.count
+        let bad = await #expect(throws: XcdError.self) { _ = try await svc.textSize("huge", device: nil, in: &ctx) }
+        #expect(bad?.code == .usage && bad?.message == "'huge' is not a text size" && worktree.runner.calls.count == before)
+        #expect(bad?.next == "use one of: " + SimctlClient.textSizes.joined(separator: ", "))
+        #expect(before > calls)
+    }
+
+    @Test func theContainerIsTheBuiltAppsDataFolderUnlessAnotherIsNamed() async throws {
+        defer { worktree.remove() }
+        var (svc, ctx) = try setup()
+        worktree.runner.stub(["xcrun", "simctl", "get_app_container"]) { invocation in
+            let kind = invocation.arguments.last ?? ""
+            let groups = "group.dev.xcdev.shared\t/G/shared\ngroup.dev.xcdev.other\t/G/other\n"
+            return ProcessOutput(exitCode: 0, stdout: kind == "groups" ? groups : "/C/\(kind)\n", stderr: "")
+        }
+        let unbuilt = await #expect(throws: XcdError.self) { _ = try await svc.container(nil, bundle: nil, device: nil, in: &ctx) }
+        #expect(unbuilt?.code == .appNotBuilt && last("get_app_container") == nil)
+        try built(ctx)
+        let data = try await svc.container(nil, bundle: nil, device: nil, in: &ctx)
+        #expect(data.path == "/C/data" && data.container == "data" && data.bundleId == "dev.xcdev.App" && data.groups == nil)
+        #expect(Renderer.report(data, command: "sim container", format: .text) == "/C/data")     // the path alone, for `$(…)`
+        #expect(last("get_app_container")?.arguments.suffix(2) == ["dev.xcdev.App", "data"])
+        let app = try await svc.container("app", bundle: "other.app", device: nil, in: &ctx)
+        #expect(app.path == "/C/app" && last("get_app_container")?.arguments.suffix(2) == ["other.app", "app"])
+        #expect(try await svc.container("group.dev.xcdev.shared", bundle: nil, device: nil, in: &ctx).path == "/C/group.dev.xcdev.shared")
+        let groups = try await svc.container("groups", bundle: nil, device: nil, in: &ctx)
+        #expect(groups.path == nil && groups.groups == ["group.dev.xcdev.shared": "/G/shared", "group.dev.xcdev.other": "/G/other"])
+        #expect(groups.text == "group.dev.xcdev.other\t/G/other\ngroup.dev.xcdev.shared\t/G/shared")
+    }
+
+    @Test func anAppWithNoAppGroupsSaysSo() async throws {
+        defer { worktree.remove() }
+        var (svc, ctx) = try setup()
+        worktree.runner.stub(["xcrun", "simctl", "get_app_container"])
+        try built(ctx)
+        let groups = try await svc.container("groups", bundle: nil, device: nil, in: &ctx)
+        #expect(groups.groups == [:] && groups.text == "dev.xcdev.App has no app groups")
+    }
+
     @Test func aMacDeviceHasNoSimulator() async throws {
         defer { worktree.remove() }
         var (svc, ctx) = try setup()

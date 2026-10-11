@@ -280,7 +280,9 @@ import XcdevTestSupport
         #expect(device.events == ["type \"hi\""] && result.element == nil && result.x == nil && result.method == "keyboard")
     }
 
-    @Test func withNoKeyboardTheTextIsPastedAndTypeTextIsNeverCalled() throws {
+    /// A device that can't say what has keyboard focus (`focused` is nil on every element): XCTest fails a `typeText`
+    /// when nothing has focus, and nothing here can tell, so the text is pasted.
+    @Test func withNoKeyboardAndNoWordOnFocusTheTextIsPastedAndTypeTextIsNeverCalled() throws {
         let (engine, device) = base.make()                                  // tapping brings up no keyboard
         let result = try engine.enterText(type("hi")).get()
         #expect(device.events == ["tap 201,175", "pasteboard \"hi\"", "key cmd-\"v\""])
@@ -316,16 +318,21 @@ import XcdevTestSupport
         #expect(failure.code == RunnerFailure.Code.nothingFocused && device.events == ["tap 201,314"])
     }
 
-    @Test func withNoKeyboardTheTextIsPastedIntoTheFieldThatHasFocus() throws {
+    /// A field can have keyboard focus with no keyboard on screen: iOS keeps the keyboard minimized while it takes a
+    /// hardware keyboard to be attached, and a field can have an input view of its own. The text goes in
+    /// as a hardware keyboard's keys would, and the device's pasteboard is left alone.
+    @Test func withNoKeyboardTheTextIsTypedIntoTheFieldThatHasFocus() throws {
         let (engine, device) = base.make(Self.reportingFocus(on: nil, EngineActionsTests.app))
         device.onGesture = { device in                                      // the tap gives the field focus; no keyboard comes up
             if device.events.last == "tap 201,175" { device.app = Self.reportingFocus(on: "email", EngineActionsTests.app) }
         }
         let result = try engine.enterText(type("hi")).get()
-        #expect(device.events == ["tap 201,175", "pasteboard \"hi\"", "key cmd-\"v\""] && result.method == "paste")
-        // Focus that came from an earlier tap counts too.
-        #expect(try engine.enterText(type("more", into: nil)).get().method == "paste")
-        #expect(device.events.suffix(2) == ["pasteboard \"more\"", "key cmd-\"v\""])
+        #expect(device.events == ["tap 201,175", "type \"hi\""] && result.method == "keyboard" && device.pasteboardText == nil)
+        #expect(result.ms >= 1400, "it looked for a keyboard for 1.5 s first: \(result.ms) ms")
+        // Focus that came from an earlier tap counts too, and clearing and Return go with the text as they do with a keyboard up.
+        device.events = []
+        #expect(try engine.enterText(type("more", into: nil, clear: true, submit: true)).get().method == "keyboard")
+        #expect(device.events == ["key cmd-\"a\"", "type " + "\u{8}more\n".debugDescription] && device.pasteboardText == nil)
     }
 
     /// The keyboard is proof enough: what it types into is not looked for.

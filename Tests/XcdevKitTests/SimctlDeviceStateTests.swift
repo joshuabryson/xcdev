@@ -45,6 +45,42 @@ import XcdevTestSupport
                 == "xcrun simctl io U recordVideo --codec=h264 /m/r.mp4")
     }
 
+    @Test func textSizeAndTheAppContainerPassTheExactArguments() async throws {
+        fake.stub(["xcrun", "simctl", "ui", "U", "content_size"], stdout: "large\n")
+        fake.stub(["xcrun", "simctl", "get_app_container"], stdout: "/Sims/U/data/Containers/Data/Application/A1\n")
+        try await client.setTextSize(udid: "U", "accessibility-large")
+        #expect(try await client.textSize(udid: "U") == "large")
+        #expect(try await client.container(udid: "U", bundleId: "b.id", "data") == "/Sims/U/data/Containers/Data/Application/A1")
+        #expect(fake.commandLines == [
+            "xcrun simctl ui U content_size accessibility-large",
+            "xcrun simctl ui U content_size",
+            "xcrun simctl get_app_container U b.id data",
+        ])
+        #expect(SimctlClient.textSizes.count == 12 && SimctlClient.textSizes.first == "extra-small"
+                && SimctlClient.textSizes.last == "accessibility-extra-extra-extra-large")
+        // Seen on Xcode 27.0: simctl takes `extra-small` and `small`, and prints them back with a capital.
+        fake.stub(["xcrun", "simctl", "ui", "U", "content_size"], stdout: "extra-Small\n")
+        #expect(try await client.textSize(udid: "U") == "extra-small")
+    }
+
+    @Test func aContainerSimctlCannotFindSaysWhatToCheck() async throws {
+        fake.stub(["xcrun", "simctl", "get_app_container"], exitCode: 2, stderr: LinkDeliveryTests.notInstalled)
+        let error = await #expect(throws: XcdError.self) { _ = try await client.container(udid: "U", bundleId: "b.id", "data") }
+        #expect(error?.code == .simulatorFailed && error?.message == "the simulator has no data container for b.id")
+        #expect(error?.next == "install the app on this clone first (`xcd install` or `xcd run`), or name another app with --bundle <id>")
+        // Seen on Xcode 27.0: for an app group the installed app does not have, simctl prints its usage and exits 117.
+        fake.stub(["xcrun", "simctl", "get_app_container"], exitCode: 117, stderr: """
+        Print the path of the installed app's container
+        Usage: simctl get_app_container <device> <app bundle identifier> [<container>]
+        """)
+        let group = await #expect(throws: XcdError.self) {
+            _ = try await client.container(udid: "U", bundleId: "b.id", "group.b.shared")
+        }
+        #expect(group?.message == "the simulator has no group.b.shared container for b.id")
+        #expect(group?.next == "the app must be installed on this clone (`xcd install` or `xcd run`) and have that app group; "
+                + "`xcd sim container groups` lists the groups it has")
+    }
+
     /// Seen on a freshly booted clone: Safari was slow to launch, so simctl gave up with exit 60.
     static let timedOut = """
     An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=60):

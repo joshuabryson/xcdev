@@ -9,7 +9,7 @@ extension UICommand {
             abstract: "Press and hold an element or a point.",
             discussion: "Like `xcd ui tap`, held for --duration. Check what it did with --tree, `xcd ui wait`, or `xcd ui tree`."
         )
-        @Argument(help: "What to press, e.g. id:photo, \"label:Message\", ref:e4, or @120,300.") var target: String
+        @Argument(help: "What to press, e.g. id:photo, \"label:Message\", e4 (a ref from the tree), or @120,300.") var target: String
         @Option(help: "How long to hold, from 0.1s to 20s (default: 1s).") var duration: String?
         @OptionGroup var match: MatchOptions
         @OptionGroup var action: ActionOptions
@@ -30,8 +30,9 @@ extension UICommand {
             abstract: "Type text into a field.",
             discussion: """
             With --into the field is tapped first; without it the text goes to whatever has keyboard focus. \
-            When no software keyboard comes up, the text is pasted instead, which replaces the device's pasteboard; the \
-            report says which (`by keyboard` or `by paste`). Typing that succeeds is not proof the field took the text: \
+            The text is sent as key presses, with or without a keyboard on screen (`by keyboard` in the report). Only \
+            when no keyboard comes up and the simulator can't say what has keyboard focus is it pasted instead, which \
+            replaces the device's pasteboard (`by paste`). Typing that succeeds is not proof the field took the text: \
             check its value with --tree or `xcd ui tree`. Text starting with `-` goes after `--`.
             """
         )
