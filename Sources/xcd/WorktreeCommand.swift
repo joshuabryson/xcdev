@@ -19,7 +19,7 @@ struct WorktreeCommand: AsyncParsableCommand {
         func run() async throws {
             try await Emit.run("wt create", options) { services in
                 let ctx = try await services.open(worktree: options.worktree)
-                let (state, created) = try await services.worktrees.create(name: name, from: from, in: ctx)
+                let (state, created) = try await services.worktrees.createRecordingBase(name: name, from: from, in: ctx)
                 return WorktreeCreateReport(worktree: state, created: created)
             }
         }

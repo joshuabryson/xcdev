@@ -35,9 +35,13 @@ public struct WorktreeState: Codable, Sendable, Equatable {
     public var devices: [String: ProvisionedDevice]
     public var status: Status
     public var createdAt: Date
+    /// The ref this worktree's work is measured against, recorded by `xcd worktree create` when it makes the
+    /// branch. Absent for the main checkout, a reused branch, and state written before this.
+    public var base: String?
 
     public init(id: String, name: String, project: String, projectRoot: String, path: String, branch: String?,
-                xcode: XcodeInstall?, devices: [String: ProvisionedDevice], status: Status, createdAt: Date) {
+                xcode: XcodeInstall?, devices: [String: ProvisionedDevice], status: Status, createdAt: Date,
+                base: String? = nil) {
         self.id = id
         self.name = name
         self.project = project
@@ -48,6 +52,7 @@ public struct WorktreeState: Codable, Sendable, Equatable {
         self.devices = devices
         self.status = status
         self.createdAt = createdAt
+        self.base = base
     }
 }
 
