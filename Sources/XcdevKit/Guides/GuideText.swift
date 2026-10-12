@@ -205,6 +205,7 @@ If the project has a `.swiftlint.yml` that would let SwiftLint search `.xcdev/`,
 | `commands` | Project commands, run as `xcd <name>`. | The project has scripts agents should run with the worktree's context. |
 | `hooks` | Scripts run at `post-worktree-create`, `pre-build`, `post-launch`, and `pre-worktree-remove`. | Worktrees need bootstrapping, code generation, or permissions after launch. |
 | `deeplinks` | The links the app can open, by name (`routes`), and text they share (`vars`). `xcd open` lists and opens them (`xcd guide deeplinks`). | The app handles links or launch arguments that take an agent straight to a screen. |
+| `lint` | The project's linter (`tool`), or its own lint command (`run`). `xcd lint` runs it on the Swift files a change touched. | The project uses SwiftLint or has a lint script, or to say it has no linter (`tool: none`). |
 
 Per-machine overrides go in `.xcdev.local.yml`, which is merged over `.xcdev.yml`.
 """#

@@ -58,6 +58,7 @@ public enum ConfigLoader {
         issues += settingIssues(config)
         issues += commandIssues(config.commands ?? [:])
         issues += DeepLinksValidation.issues(config)
+        issues += QualityValidation.issues(config)
         return issues
     }
 
@@ -109,11 +110,7 @@ public enum ConfigLoader {
         var issues: [ConfigIssue] = []
         for (name, spec) in commands.sorted(by: { $0.key < $1.key }) {
             let path = "commands.\(name)"
-            if name.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) == nil {
-                issues.append(ConfigIssue(path: path, message: "'\(name)' is not a valid command name (use letters, digits, '.', '_' or '-')"))
-            } else if BuiltinCommands.reservedNames.contains(name) {
-                issues.append(ConfigIssue(path: path, message: "'\(name)' is a built-in xcd command, so `xcd \(name)` would never run this; rename it"))
-            }
+            if let problem = nameProblem(name) { issues.append(ConfigIssue(path: path, message: problem)) }
             if spec.run.trimmingCharacters(in: .whitespaces).isEmpty {
                 issues.append(ConfigIssue(path: path + ".run", message: "must not be empty"))
             }
@@ -127,6 +124,19 @@ public enum ConfigLoader {
             }
         }
         return issues
+    }
+
+    /// What is wrong with a project command's name, or nil. A name that a config section took over says where the
+    /// script goes now.
+    static func nameProblem(_ name: String) -> String? {
+        if name.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) == nil {
+            return "'\(name)' is not a valid command name (use letters, digits, '.', '_' or '-')"
+        }
+        guard BuiltinCommands.reservedNames.contains(name) else { return nil }
+        if BuiltinCommands.sectionNames.contains(name) {
+            return "'\(name)' is a built-in xcd command; move this script to `\(name): { run: … }`"
+        }
+        return "'\(name)' is a built-in xcd command, so `xcd \(name)` would never run this; rename it"
     }
 
     /// `node` with every mapping key as plain text. The decoder finds a key by its text read as YAML, so a quoted

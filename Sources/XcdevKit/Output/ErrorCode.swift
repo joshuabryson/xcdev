@@ -24,6 +24,9 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
     case runnerFailed = "runner_failed"
     case hookFailed = "hook_failed"
     case routeFailed = "route_failed"
+    case lintFailed = "lint_failed"
+    case notConfigured = "not_configured"
+    case toolMissing = "tool_missing"
     case xcodeMissing = "xcode_missing"
     case xcodeRuntimeMismatch = "xcode_runtime_mismatch"
     case runtimeMissing = "runtime_missing"
@@ -38,13 +41,14 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
     public var exitCode: Int32 {
         switch self {
         case .buildFailed, .testFailed, .appCrashed, .elementNotFound, .elementNotHittable, .waitTimeout, .hookFailed,
-             .routeFailed:
+             .routeFailed, .lintFailed:
             return 1
         case .usage, .notInProject, .configMissing, .configInvalid, .deviceUnknown,
-             .deviceTypeUnknown, .worktreeNotFound, .worktreeDirty, .appNotBuilt, .elementAmbiguous, .staleRef, .platformUnsupported:
+             .deviceTypeUnknown, .worktreeNotFound, .worktreeDirty, .appNotBuilt, .elementAmbiguous, .staleRef, .platformUnsupported,
+             .notConfigured:
             return 2
         case .xcodeMissing, .xcodeRuntimeMismatch, .runtimeMissing, .cloneFailed, .simulatorFailed,
-             .subprocessFailed, .timeout, .doctorProblems, .internalError, .runnerFailed:
+             .subprocessFailed, .timeout, .doctorProblems, .internalError, .runnerFailed, .toolMissing:
             return 3
         }
     }
@@ -73,6 +77,9 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .runnerFailed: return "The UI runner inside the simulator could not be built or started, or stopped answering."
         case .hookFailed: return "A hook from .xcdev.yml exited non-zero; the error names the hook and its log."
         case .routeFailed: return "A route's script failed, or its link did not start the app."
+        case .lintFailed: return "`xcd lint` showed a finding the linter marks as an error, or the project's lint command exited non-zero."
+        case .notConfigured: return "The command needs a section of .xcdev.yml that the project does not have; `next:` gives the lines to add."
+        case .toolMissing: return "The linter that .xcdev.yml names is not installed, or its `path` names nothing."
         case .xcodeMissing: return "The Xcode that .xcdev.yml or --xcode asks for isn't installed."
         case .xcodeRuntimeMismatch: return "A simulator runtime is newer than the selected Xcode supports."
         case .runtimeMissing: return "No installed simulator runtime matches the device's runtime setting."

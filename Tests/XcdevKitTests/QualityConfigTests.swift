@@ -1,0 +1,107 @@
+import Foundation
+import Testing
+@testable import XcdevKit
+
+@Suite struct QualityConfigTests {
+    /// A config whose `lint:` section holds `lines`, each written as it stands under the key (indented two spaces).
+    static func config(_ lines: String) -> String {
+        "version: 1\nproject: App.xcodeproj\nlint:\n\(lines)\n"
+    }
+
+    /// What the loader says about a `lint:` section, one line per problem. Empty when it loads.
+    func issues(_ lines: String) -> [String] {
+        do {
+            _ = try ConfigLoader.parse(main: Self.config(lines))
+            return []
+        } catch {
+            return (error as? XcdError)?.details ?? ["\(error)"]
+        }
+    }
+
+    @Test func aNamedToolLoadsWithItsPathAndArguments() throws {
+        let config = try ConfigLoader.parse(main: Self.config("  tool: swiftlint\n  path: tools/swiftlint\n  args: [\"--strict\"]"))
+        #expect(config.lint == LintConfig(tool: .swiftlint, path: "tools/swiftlint", args: ["--strict"]))
+        #expect(config.lintSetup == .swiftlint(path: "tools/swiftlint", args: ["--strict"]))
+    }
+
+    @Test func aProjectsOwnCommandLoads() throws {
+        let config = try ConfigLoader.parse(main: Self.config("  run: ./scripts/lint.sh --quiet"))
+        #expect(config.lintSetup == .command("./scripts/lint.sh --quiet"))
+    }
+
+    @Test func theSectionHasThreeStates() throws {
+        let absent = try ConfigLoader.parse(main: "version: 1\nproject: App.xcodeproj\n")
+        #expect(absent.lintSetup == .absent)
+        #expect(try ConfigLoader.parse(main: Self.config("  tool: none")).lintSetup == .off)
+        #expect(try ConfigLoader.parse(main: Self.config("  tool: swiftlint")).lintSetup == .swiftlint(path: nil, args: []))
+    }
+
+    @Test func aSectionHasExactlyOneOfToolAndRun() {
+        #expect(issues("  tool: swiftlint\n  run: ./lint.sh") == ["lint: has tool and run; a section has exactly one of them"])
+        #expect(issues("  args: [\"--strict\"]") == ["lint: needs one of tool or run",
+                                                   "lint.args: is only read with a tool other than none"])
+        #expect(issues("  {}") == ["lint: needs one of tool or run"])
+    }
+
+    @Test func pathAndArgsGoWithAToolThatRuns() {
+        #expect(issues("  tool: none\n  path: tools/swiftlint") == ["lint.path: is only read with a tool other than none"])
+        #expect(issues("  run: ./lint.sh\n  args: [\"-x\"]") == ["lint.args: is only read with a tool other than none"])
+    }
+
+    @Test func anEmptyRunOrPathIsRefused() {
+        #expect(issues("  run: \"  \"") == ["lint.run: must not be empty"])
+        #expect(issues("  tool: swiftlint\n  path: \"\"") == ["lint.path: must not be empty"])
+    }
+
+    @Test func argumentsXcdSetsItselfAreRefused() {
+        #expect(issues("  tool: swiftlint\n  args: [\"--strict\", \"--reporter\", \"xcode\", \"--no-cache\", \"--baseline=old.json\"]")
+                == ["lint.args: xcd sets these itself, so they can't be given: --reporter, --no-cache, --baseline"])
+        #expect(issues("  tool: swiftlint\n  args: [\"--strict\", \"--config\", \"ci/.swiftlint.yml\", \"--lenient\"]").isEmpty)
+    }
+
+    @Test func anUnknownToolIsRefused() {
+        #expect(issues("  tool: swiftformat") == ["lint.tool: must be one of: swiftlint, none"])
+    }
+
+    @Test func theLocalFileSetsAPathForThisMac() throws {
+        let config = try ConfigLoader.parse(main: Self.config("  tool: swiftlint"), local: "lint:\n  path: /opt/tools/swiftlint\n")
+        #expect(config.lintSetup == .swiftlint(path: "/opt/tools/swiftlint", args: []))
+    }
+
+    @Test func lintIsASectionAndTheFormatKeyIsKeptForLater() {
+        #expect(!ConfigSchema.reservedTopLevelKeys.contains("lint"))
+        let error = #expect(throws: XcdError.self) {
+            try ConfigLoader.parse(main: "version: 1\nproject: App.xcodeproj\nformat: { tool: swiftformat }\n")
+        }
+        #expect(error?.details == ["format: is reserved for a future version of xcd and not supported yet"])
+    }
+
+    @Test func aProjectCommandNamedLintIsSentToTheSection() {
+        let error = #expect(throws: XcdError.self) {
+            try ConfigLoader.parse(main: "version: 1\nproject: App.xcodeproj\ncommands:\n  lint: { run: ./scripts/lint.sh }\n  build: { run: make }\n")
+        }
+        #expect(error?.details == [
+            "commands.build: 'build' is a built-in xcd command, so `xcd build` would never run this; rename it",
+            "commands.lint: 'lint' is a built-in xcd command; move this script to `lint: { run: … }`",
+        ])
+    }
+
+    @Test func configExplainDescribesTheKeys() throws {
+        #expect(try ConfigExplainReport(key: "lint.tool").text == """
+        lint.tool (string)
+        The linter `xcd lint` runs: swiftlint, or none for a project that has no linter.
+        allowed: swiftlint, none
+        example:
+          lint:
+            tool: swiftlint
+        """)
+        #expect(try ConfigExplainReport(key: "lint").text.hasSuffix("keys: lint.tool, lint.path, lint.args, lint.run"))
+        #expect(try ConfigExplainer.explain("lint.args").type == "list of strings")
+    }
+
+    @Test func theNewErrorCodesHaveTheirExitCodes() {
+        #expect(ErrorCode.lintFailed.rawValue == "lint_failed" && ErrorCode.lintFailed.exitCode == 1)
+        #expect(ErrorCode.notConfigured.rawValue == "not_configured" && ErrorCode.notConfigured.exitCode == 2)
+        #expect(ErrorCode.toolMissing.rawValue == "tool_missing" && ErrorCode.toolMissing.exitCode == 3)
+    }
+}
