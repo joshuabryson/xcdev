@@ -77,7 +77,7 @@ import Testing
     /// The guide names each scope, says which findings to leave alone, and has a row for every way lint can fail to run.
     @Test func qualityGuideCoversTheScopesTheResultAndTheErrors() throws {
         let guide = try Guides.guide("quality")
-        #expect(guide.summary == "Lint the code you changed")
+        #expect(guide.summary == "Format and lint the code you changed")
         for word in ["`xcd lint`", "xcd lint --files", "xcd lint --all", "--base <ref>", "tool: swiftlint", #"run: ./scripts/lint.sh "$@""#,
                      "`.swiftlint.yml`", "`.xcdev.local.yml`", "`xcd doctor --fix`", "`xcd config explain lint`", "(lint.tool is none)",
                      "older findings"] {
@@ -95,10 +95,29 @@ import Testing
         #expect(try Guides.guide("setup").markdown.contains("`lint.tool`"))
     }
 
+    /// The same guide for `xcd format`: the order of the two commands, each scope and the check, what is left alone,
+    /// and a row for the way it fails.
+    @Test func qualityGuideCoversFormatBesideLint() throws {
+        let guide = try Guides.guide("quality")
+        for word in ["`xcd format`", "xcd format --files", "xcd format --all", "xcd format --check", "tool: swiftformat", "swift-format (Apple's, inside Xcode)",
+                     #"run: ./scripts/format.sh "$@""#, #"check: ./scripts/format.sh --dry "$@""#, "`.swiftformat`", "`.swift-format`",
+                     "`xcd config explain format`", "(format.tool is none)", "format: nothing to reformat", "has Windows line endings (CRLF)"] {
+            #expect(guide.markdown.contains(word), "the quality guide doesn't mention \(word)")
+        }
+        // What an agent would otherwise get wrong: linting before formatting, reformatting code the change did not
+        // touch, committing a reformat unread, and reformatting a whole file with other line endings unasked.
+        for advice in ["Run `xcd format` first, then `xcd lint`", "Older code that is not in the project's format is left alone",
+                       "Read the diff before you commit it", "ask the user first", "numbered in the file as it is now"] {
+            #expect(guide.markdown.contains(advice), "the quality guide doesn't say: \(advice)")
+        }
+        #expect(guide.markdown.contains("| `\(ErrorCode.formatFailed.rawValue)` |"))
+        #expect(try Guides.guide("setup").markdown.contains("`format.tool`"))
+    }
+
     @Test func listingAndUnknownTopic() throws {
         #expect(try GuideReport(topic: nil).text == """
         deeplinks  Open the app's links and routes
-        quality    Lint the code you changed
+        quality    Format and lint the code you changed
         setup      Set up xcd in a project
         ui         See and drive the app's UI
         read one: xcd guide <topic>

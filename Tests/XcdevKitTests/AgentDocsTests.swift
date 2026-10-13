@@ -34,6 +34,15 @@ import Testing
         #expect(text.contains("`xcd lint") && text.contains("`xcd guide quality`"), "\(file) doesn't mention xcd lint and its guide")
     }
 
+    /// An agent that has never seen the project finds `xcd format` from each of these, before `xcd lint`.
+    @Test(arguments: ["docs/agents/AGENTS-snippet.md", "skills/xcdev/SKILL.md", "README.md", "docs/agents/guides/quality.md"])
+    func theDocsPointAtFormatBeforeLint(_ file: String) throws {
+        let text = try String(contentsOfFile: Self.repo + "/" + file, encoding: .utf8)
+        let format = try #require(text.range(of: "xcd format"), "\(file) doesn't mention xcd format")
+        let lint = try #require(text.range(of: "xcd lint"))
+        #expect(format.lowerBound < lint.lowerBound, "\(file) names xcd lint before xcd format")
+    }
+
     @Test func theSkillHasFrontMatter() throws {
         let text = try String(contentsOfFile: Self.repo + "/skills/xcdev/SKILL.md", encoding: .utf8)
         #expect(text.hasPrefix("---\nname: xcdev\ndescription: "))

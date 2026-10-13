@@ -34,6 +34,7 @@ xcd build && xcd test && xcd run
 xcd ui screenshot         # a PNG of the simulator in .xcdev-media/<worktree>/<branch>/
 xcd ui tree               # what is on screen; then xcd ui tap, type, swipe, and wait drive it
 xcd open                  # the project's routes: links and scripts that take the app straight to a screen
+xcd format                # put the lines this worktree's change touched in the project's format
 xcd lint                  # the lint findings this worktree's change introduced, with the project's own linter
 xcd help                  # every command, project command, and plugin
 ```
@@ -44,8 +45,9 @@ xcd help                  # every command, project command, and plugin
 - `xcd guide ui` teaches the see, act, verify loop for driving the app in the simulator.
 - `xcd guide deeplinks` shows how to describe the app's links, launch arguments, and navigation scripts as routes,
   which `xcd open` lists and opens.
-- `xcd guide quality` covers `xcd lint`, which runs the project's linter on the Swift files a change touched and
-  shows only the findings the change introduced.
+- `xcd guide quality` covers `xcd format` and `xcd lint`, which run the project's formatter and linter on the Swift
+  code a change touched: only the changed lines are reformatted, and only the findings the change introduced are
+  shown.
 - `skills/xcdev/SKILL.md` is an agent skill, and `docs/agents/AGENTS-snippet.md` is a snippet for a project's
   `AGENTS.md`, that teach agents to use `xcd`.
 - Every failure ends with a `next:` line, and `--json` prints one JSON object per command.

@@ -13,7 +13,7 @@ Use this guide when a project has no `.xcdev.yml`, or when the user wants to cha
 
 Commit `.xcdev.yml`. `xcd init` adds `.xcdev/` (per-worktree build state) and `.xcdev.local.yml` (per-machine overrides) to `.gitignore`.
 
-One of the decisions is `lint.tool`: which linter `xcd lint` runs. `xcd init` recommends SwiftLint when the project has a `.swiftlint.yml`, and `none` when it has not, so that taking the defaults never turns on a linter nobody chose. Either way `init` writes a `lint:` section, and the choice is the user's. `xcd guide quality` covers linting.
+Two of the decisions are `lint.tool` and `format.tool`: which linter `xcd lint` runs, and which formatter `xcd format` runs. `xcd init` recommends SwiftLint when the project has a `.swiftlint.yml`, and a formatter when the project has that formatter's config file (`.swiftformat` for SwiftFormat, `.swift-format` for Apple's swift-format) and not the other's. Otherwise it recommends `none`, so that taking the defaults never turns on a tool nobody chose. Either way `init` writes a `lint:` and a `format:` section, and the choices are the user's. `xcd guide quality` covers both commands.
 
 If the project has a `.swiftlint.yml` that would let SwiftLint search `.xcdev/`, `xcd init` also adds `.xcdev` to its `excluded` list and says so; commit that change too. SwiftLint searches hidden folders, so without the entry every build that runs it also lints the build folder and the package checkouts, which can add minutes. When `xcd init` reports this as a `warning:` instead, it left the file alone: add the entry by hand, or run `xcd doctor --fix`. A project that starts using SwiftLint later gets the same message as a `note:` in the output of `xcd build`, `xcd run`, and `xcd test`.
 
