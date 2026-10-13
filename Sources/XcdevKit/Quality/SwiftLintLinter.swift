@@ -69,12 +69,8 @@ public struct SwiftLintLinter: Sendable {
     /// One SwiftLint run on `contents` (path to the file's bytes, copied as they are) in a scratch folder of its
     /// own, which is removed afterwards, also when the run fails or the command is interrupted.
     func run(on contents: [String: Data]) async throws -> SwiftLintRun {
-        let folder = try LintFolder.create()
-        let cleanup = interrupts.addCleanup { folder.remove() }
-        defer {
-            interrupts.removeCleanup(cleanup)
-            folder.remove()
-        }
+        let folder = try LintFolder.create(removedBy: interrupts)
+        defer { folder.remove() }
         for (path, data) in contents { try folder.write(data, to: path) }
         try folder.copyConfig(from: worktreeRoot, for: Array(contents.keys), args: tool.args)
         return try await tool.lint(folder)

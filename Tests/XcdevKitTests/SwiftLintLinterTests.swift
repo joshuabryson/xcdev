@@ -155,6 +155,22 @@ import XcdevTestSupport
         #expect(goneAtOnce.value == [true])
     }
 
+    /// Ctrl-C before or while a folder is filled: the linter's folders go through its `Interrupts`, so nothing more
+    /// is written and SwiftLint is not started on half a folder.
+    @Test func ctrlCBeforeTheFolderIsFilledStartsNoSwiftLint() async throws {
+        let (project, _) = try project()
+        defer { project.remove() }
+        let interrupts = Interrupts(report: { _ in /* the handler's line is not what this test reads */ })
+        swiftlint.install(on: fake)
+        let runner = RoutingRunner(fake: fake, realExecutables: ["git"])
+        let linter = SwiftLintLinter(tool: SwiftLintTool(runner: runner, executable: "/opt/homebrew/bin/swiftlint", args: []),
+                                     worktreeRoot: project.root, interrupts: interrupts)
+        _ = interrupts.handle(SIGINT)                                        // what Ctrl-C runs, minus the exit
+        let error = await #expect(throws: XcdError.self) { _ = try await linter.lint([changed("Sources/App/A.swift")], against: nil) }
+        #expect(error?.message.hasPrefix("xcd was interrupted") == true)
+        #expect(swiftlint.runs.isEmpty)
+    }
+
     @Test func theFoldersAreGoneAfterwardsAndAlsoWhenSwiftLintFails() async throws {
         let (project, fork) = try project()
         defer { project.remove() }

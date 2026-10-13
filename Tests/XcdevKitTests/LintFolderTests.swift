@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import XcdevTestSupport
 @testable import XcdevKit
 
 /// The scratch folder SwiftLint runs in: copies of the files in scope and of the lint config.
@@ -49,6 +50,86 @@ import Testing
         folder.remove()
         #expect(!FileManager.default.fileExists(atPath: folder.root))
         folder.remove()                                                      // a second time is harmless
+    }
+
+    /// Ctrl-C ends xcd while the folder is being filled: the handler removes the folder, and a write that comes after
+    /// must not bring it back, since xcd exits before anything could remove it again.
+    @Test func afterAnInterruptTheFolderIsGoneAndNothingIsWrittenToIt() throws {
+        let interrupts = Interrupts(report: { _ in /* the handler's line is not what this test reads */ })
+        let folder = try LintFolder.create(removedBy: interrupts)
+        defer { folder.remove() }
+        try folder.write(Data("let a = 1\n".utf8), to: "Sources/App/A.swift")
+        _ = interrupts.handle(SIGINT)                                        // what Ctrl-C runs, minus the exit
+        #expect(!FileManager.default.fileExists(atPath: folder.root))
+        let error = #expect(throws: XcdError.self) { try folder.write(Data("let b = 2\n".utf8), to: "Sources/App/B.swift") }
+        #expect(error?.message == "xcd was interrupted, so nothing more was written to its lint folder")
+        #expect(!FileManager.default.fileExists(atPath: folder.root))
+    }
+
+    /// A write under way when Ctrl-C comes: the handler waits for it before it removes the folder, so the write cannot
+    /// land in a folder that is already gone and bring it back. The file written here is a pipe nobody reads yet,
+    /// which holds the write open with no clock. The handler's wait is what reads the pipe.
+    @Test(.timeLimit(.minutes(1))) func theHandlerWaitsForAWriteThatIsUnderWay() throws {
+        let worktree = try Worktree([:])
+        let parent = worktree.base + "/tmp"
+        try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
+        let pipe = Shared<Int32>(-1)
+        let written = DispatchSemaphore(value: 0)
+        let waits = Counter()
+        let interrupts = Interrupts(report: { _ in /* the handler's line is not what this test reads */ }, sleep: { _ in
+            guard waits.increment() == 1 else { return }
+            Self.drain(pipe.value)
+            written.wait()
+        })
+        let folder = try LintFolder.create(removedBy: interrupts, under: parent)
+        defer { folder.remove() }
+        #expect(mkfifo(folder.root + "/Held.swift", 0o600) == 0)
+        let wrote = Shared<Bool?>(nil)
+        Thread.detachNewThread {
+            let whole = (try? folder.write(Data(count: 1 << 20), to: "Held.swift")) != nil      // more than a pipe holds
+            wrote.set(whole)
+            written.signal()
+        }
+        pipe.set(open(folder.root + "/Held.swift", O_RDONLY))               // returns once the write has the pipe open
+        defer { close(pipe.value) }
+        _ = interrupts.handle(SIGINT)                                        // what Ctrl-C runs, minus the exit
+        #expect(waits.value >= 1)
+        if waits.value == 0 {                                                // not waited for: let the write end anyway
+            Self.drain(pipe.value)
+            written.wait()
+        }
+        #expect(wrote.value == true)
+        #expect(!FileManager.default.fileExists(atPath: folder.root))
+    }
+
+    /// Reads the pipe until its writer closes it.
+    static func drain(_ pipe: Int32) {
+        var buffer = [UInt8](repeating: 0, count: 65_536)
+        while read(pipe, &buffer, buffer.count) > 0 { /* what was written is not read here */ }
+    }
+
+    /// An interrupt that came first: the folder is never made, so there is nothing to leave behind.
+    @Test func onceInterruptedNoFolderIsMade() throws {
+        let worktree = try Worktree([:])
+        let parent = worktree.base + "/tmp"
+        try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
+        let interrupts = Interrupts(report: { _ in /* the handler's line is not what this test reads */ })
+        _ = interrupts.handle(SIGINT)
+        #expect(throws: XcdError.self) { _ = try LintFolder.create(removedBy: interrupts, under: parent) }
+        #expect(try FileManager.default.contentsOfDirectory(atPath: parent).isEmpty)
+    }
+
+    /// A folder that was removed in the ordinary way is no longer the handler's to remove.
+    @Test func removingTheFolderTakesItOffTheHandlersList() throws {
+        let worktree = try Worktree([:])
+        let parent = worktree.base + "/tmp"
+        try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
+        let interrupts = Interrupts(report: { _ in /* the handler's line is not what this test reads */ })
+        let folder = try LintFolder.create(removedBy: interrupts, under: parent)
+        folder.remove()
+        try FileManager.default.createDirectory(atPath: folder.root, withIntermediateDirectories: true)   // something else's now
+        _ = interrupts.handle(SIGINT)
+        #expect(FileManager.default.fileExists(atPath: folder.root))
     }
 
     @Test func theConfigInTheRootAndOnTheWayToEachFileIsCopied() throws {
