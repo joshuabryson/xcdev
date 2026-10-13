@@ -279,6 +279,22 @@ extension FormatIntegrationTests {
         #expect(try read(path, project).contains("    } else {\n"))
     }
 
+    /// A `format.path` that names a script which prints a line of its own and then runs the real swift-format. The
+    /// answer for a file's changed lines has that line in front of the file's first line: xcd writes none of it.
+    @Test func aFormatPathScriptThatPrintsALineOfItsOwnChangesNoFileHandedOverByLines() async throws {
+        let project = try project(.appleSwiftFormat)
+        defer { project.remove() }
+        try project.write("#!/bin/sh\necho formatting\nexec xcrun swift-format \"$@\"\n", to: "tools/chatty-format")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: project.root + "/tools/chatty-format")
+        try project.write("version: 1\nproject: Package.swift\nformat:\n  tool: swift-format\n  path: tools/chatty-format\n", to: ".xcdev.yml")
+        try project.write(Self.changed, to: "Sources/App/Login.swift")
+        let report = try await format(FormatOptions(), project)
+        #expect(report.failure?.code == .formatFailed && report.changed.isEmpty, "\(report.text)")
+        #expect(report.failed.map(\.message) == ["Sources/App/Login.swift: the formatter changed lines other than lines 2, 5, 9, "
+            + "which it was given, so the file was left as it was"])
+        #expect(try read("Sources/App/Login.swift", project) == Self.changed)
+    }
+
     /// Apple's swift-format prints a file without its byte order mark, and a `String` drops it: xcd keeps it.
     @Test(arguments: FormatterKind.allCases)
     func aFileThatStartsWithAByteOrderMarkKeepsItAndIsFormattedOnItsChangedLine(_ kind: FormatterKind) async throws {

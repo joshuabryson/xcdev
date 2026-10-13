@@ -21,6 +21,14 @@ public struct LineRange: Sendable, Equatable, Encodable {
     }
 }
 
+extension [LineRange] {
+    /// How a result names lines of a file: `line 12` for one line, else `lines 88-91, 120`.
+    var named: String {
+        let one = count == 1 && first?.first == first?.last
+        return "line\(one ? "" : "s") " + map(\.text).joined(separator: ", ")
+    }
+}
+
 /// How much of a file a change touched.
 public enum ChangedPart: Sendable, Equatable {
     /// Every line: the fork point has no such file.

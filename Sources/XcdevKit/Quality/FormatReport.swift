@@ -17,9 +17,8 @@ public struct FormatReport: Reportable {
 
         /// `Sources/App/Session.swift  lines 88-91, 120`. One line is `line 12`, and a file with none to name stands alone.
         var text: String {
-            guard let lines, let first = lines.first else { return file }
-            let one = lines.count == 1 && first.first == first.last
-            return "\(file)  line\(one ? "" : "s") " + lines.map(\.text).joined(separator: ", ")
+            guard let lines, !lines.isEmpty else { return file }
+            return "\(file)  " + lines.named
         }
     }
 

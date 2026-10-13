@@ -16,7 +16,7 @@ extension ConfigSchema {
     static let format: SchemaNode = .object("The project's formatter, which `xcd format` runs on the Swift code a change touched. It has exactly one of tool and run. The formatter's own rules stay in its own file (.swiftformat or .swift-format).", [
         SchemaField("tool", .string("The formatter `xcd format` runs: swift-format (Apple's, which ships inside Xcode), swiftformat (Nick Lockwood's SwiftFormat), or none for a project that has no formatter.", allowed: FormatConfig.Tool.allCases.map(\.rawValue)),
                     example: "format:\n  tool: swiftformat"),
-        SchemaField("path", .string("Where the tool's executable is: an absolute path, or one relative to the worktree root. A path that differs per Mac belongs in .xcdev.local.yml. Only with a tool other than none."),
+        SchemaField("path", .string("Where the tool's executable is: an absolute path, or one relative to the worktree root. A path that differs per Mac belongs in .xcdev.local.yml. The executable must print the formatted file on standard output and nothing else: a script that prints a line of its own would have that line written into the files it formats whole. Only with a tool other than none."),
                     default: "swift-format: the one in the worktree's Xcode. swiftformat: the first in PATH, then /opt/homebrew/bin, then /usr/local/bin",
                     example: "format:\n  tool: swiftformat\n  path: tools/swiftformat"),
         SchemaField("args", .stringList("Extra arguments for the tool, placed after xcd's own. The formatter's rules belong in its own file, not here. Only with a tool other than none."),

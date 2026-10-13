@@ -69,7 +69,15 @@ struct FileFormatter: Sendable {
         file.transcript = answer.transcript
         guard let given = answer.text else { return failed(file, answer.said) }
         file.said = answer.said
-        guard let formatted = Self.change(given, to: text) else { return file }
+        return take(given, for: ranges, of: source, file)
+    }
+
+    /// What becomes of `file` with the formatter's text for it: left as it is when the answer changes nothing, listed
+    /// as one that could not be processed when an answer for `ranges` changed a line outside them, and written
+    /// otherwise. An answer for a whole file, with no ranges, has nothing to be held against.
+    func take(_ answer: String, for ranges: [LineRange]?, of source: Source, _ file: FormattedFile) -> FormattedFile {
+        guard let formatted = Self.change(answer, to: source.text) else { return file }
+        if let ranges, !Self.holds(formatted, linesOutside: ranges, of: source.text) { return failed(file, [Self.reachedPast(ranges)]) }
         return write(formatted, over: source, file)
     }
 
@@ -128,5 +136,47 @@ struct FileFormatter: Sendable {
         let more = named.count - Self.mostLines
         file.failure = Array(named.prefix(Self.mostLines)) + (more > 0 ? ["\(file.path): \(more) more line\(more == 1 ? " is" : "s are") in the log"] : [])
         return file
+    }
+}
+
+// MARK: An answer for ranges
+
+extension FileFormatter {
+    /// What is said of a file whose answer changed a line outside the ranges the formatter was given.
+    static func reachedPast(_ ranges: [LineRange]) -> String {
+        "the formatter changed lines other than \(ranges.named), which it was given, so the file was left as it was"
+    }
+
+    /// A line as `LineDiff` reads it: its bytes with its line ending.
+    typealias Line = ArraySlice<UInt8>
+
+    /// Whether `answer`, a formatter's text for `text` handed over with `ranges`, holds every line of `text` outside
+    /// the ranges, byte for byte and in order: the lines before the first range are its first lines, the lines after
+    /// the last range are its last, and the lines between two ranges stand between them as one unbroken run. What
+    /// stands in place of a range may be more lines, fewer, or none. A run between two ranges is taken where it
+    /// first stands after the run before it, which leaves the most room for the runs that follow.
+    static func holds(_ answer: String, linesOutside ranges: [LineRange], of text: String) -> Bool {
+        let kept = runs(outside: ranges, of: LineDiff.lines(of: text))
+        var rest = LineDiff.lines(of: answer)[...]
+        guard let first = kept.first, let last = kept.last, rest.starts(with: first) else { return false }
+        rest = rest.dropFirst(first.count)
+        for run in kept.dropFirst().dropLast() where !run.isEmpty {
+            guard let found = rest.firstRange(of: run) else { return false }
+            rest = rest[found.upperBound...]
+        }
+        return kept.count == 1 ? rest.isEmpty : rest.count >= last.count && rest.suffix(last.count).elementsEqual(last)
+    }
+
+    /// The runs of `lines` that lie outside `ranges`, in order: the lines before the first range, between each two,
+    /// and after the last. There is one more run than there are ranges, and a run can have no lines.
+    static func runs(outside ranges: [LineRange], of lines: [Line]) -> [ArraySlice<Line>] {
+        var runs: [ArraySlice<Line>] = []
+        var start = 0
+        for range in ranges {
+            let end = min(max(range.first - 1, start), lines.count)
+            runs.append(lines[start..<end])
+            start = min(max(range.last, end), lines.count)
+        }
+        return runs + [lines[start...]]
     }
 }

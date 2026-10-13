@@ -94,7 +94,7 @@ format:
   tool: swiftformat        # swiftformat, swift-format (Apple's, inside Xcode), or none
 ```
 
-The rules stay in each tool's own file: `.swiftlint.yml`, `.swiftformat`, or `.swift-format`. A path to a tool that differs per Mac goes in `.xcdev.local.yml`, as `lint: { path: … }` or `format: { path: … }`. Apple's swift-format needs no install, and with no `.swift-format` file it indents with 2 spaces.
+The rules stay in each tool's own file: `.swiftlint.yml`, `.swiftformat`, or `.swift-format`. A path to a tool that differs per Mac goes in `.xcdev.local.yml`, as `lint: { path: … }` or `format: { path: … }`. A script named as `format.path` must print the formatted file and nothing else. Apple's swift-format needs no install, and with no `.swift-format` file it indents with 2 spaces.
 
 A project whose tool xcd does not know names its own command instead:
 
