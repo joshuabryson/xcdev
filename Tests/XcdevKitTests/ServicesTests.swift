@@ -27,6 +27,16 @@ import XcdevTestSupport
         #expect(host.targets.currentDirectory == "/cwd")
     }
 
+    /// `xcd format` runs with what `xcd lint` runs with, so its copies for a formatter's standard input are removed
+    /// by the same handler.
+    @Test func formatIsGivenWhatLintIsGiven() {
+        let services = Services(runner: FakeProcessRunner(), globalPaths: GlobalPaths(base: "/h"), currentDirectory: "/cwd",
+                                environment: ["PATH": "/custom/bin:/usr/bin"], output: .json, interrupts: Interrupts())
+        let host = services.format.host
+        #expect(host.currentDirectory == "/cwd" && host.output == .json && host.interrupts === services.interrupts)
+        #expect(host.locator.folders == services.lint.host.locator.folders && services.format.atOnce == 8)
+    }
+
     @Test func uiServicesShareTheLauncherAndTransport() {
         let detached = FakeDetachedProcesses()
         let transport = FakeRunnerTransport()

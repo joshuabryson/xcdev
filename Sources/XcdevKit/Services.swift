@@ -90,6 +90,7 @@ public struct Services: Sendable {
                     interrupts: interrupts, output: output)
     }
     public var lint: LintService { LintService(quality) }
+    public var format: FormatService { FormatService(quality) }
     public var externalCommands: ExternalCommands { ExternalCommands(services: self) }
     public var help: HelpService { HelpService(services: self) }
     public var logs: LogService { LogService(runner: runner, provisioner: provisioner) }

@@ -12,7 +12,7 @@ struct Xcd: AsyncParsableCommand {
         subcommands: [BuildCommand.self, TestCommand.self, RunCommand.self, LogsCommand.self, CleanCommand.self,
                       InstallCommand.self, UninstallCommand.self, LaunchCommand.self, TerminateCommand.self, OpenCommand.self,
                       WorktreeCommand.self, SimCommand.self, UICommand.self, ConfigCommand.self, ContextCommand.self, InitCommand.self,
-                      GuideCommand.self, DoctorCommand.self, PruneCommand.self, LintCommand.self]
+                      GuideCommand.self, DoctorCommand.self, PruneCommand.self, LintCommand.self, FormatCommand.self]
     )
 
     /// Built-in commands as `xcd help` lists them, from the command tree.
