@@ -56,7 +56,7 @@ import XcdevTestSupport
         defer { project.remove() }
         let before = try files(project.root)
         let report = try await service.plan(from: project.root + "/SampleApp.xcodeproj")
-        #expect(report.decisions.map(\.key) == ["devices.default", "devices.ipad", "devices.watch", "lint.tool"])
+        #expect(report.decisions.map(\.key) == ["devices.default", "devices.ipad", "devices.watch", "lint.tool", "format.tool"])
         #expect(report.xcode == "none found (install Xcode from https://developer.apple.com/xcode/)")
         #expect(!report.configExists)
         #expect(try files(project.root) == before)

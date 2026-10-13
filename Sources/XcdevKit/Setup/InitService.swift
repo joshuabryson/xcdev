@@ -12,7 +12,8 @@ public struct InitService: Sendable {
     /// Searched for Swift packages Xcode already resolved, when the project files don't say enough.
     public let xcodeDerivedData: String
     let now: @Sendable () -> Date
-    /// Finds the linter, to say in its decision whether it is installed. By default it finds nothing.
+    /// Finds the linter and the formatters, to say in their decisions whether they are installed. By default it
+    /// finds nothing.
     public var locator = ToolLocator(environment: [:], extraFolders: [])
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, discovery: XcodeDiscovery? = nil,
@@ -32,7 +33,9 @@ public struct InitService: Sendable {
         InitScratch.removeStale(in: globalPaths.cacheDirectory, now: now())
         let location = try await WorktreeLocator(runner: runner).locate(from: directory)
         let root = location.worktreeRoot
-        var plan = try await makePlan(location, container: nil).adding(await quality.lintDecision(in: root))
+        var plan = try await makePlan(location, container: nil)
+        plan = plan.adding(await quality.lintDecision(in: root))
+            .adding(await quality.formatDecision(in: root, developerDir: plan.selectedXcode?.developerDir))
         let exists = configExists(root)
         if let note = swiftLintNote(in: root, configExists: exists) { plan = plan.noting(note) }
         return InitPlanReport(plan: plan, root: root, configExists: exists)
@@ -64,7 +67,9 @@ public struct InitService: Sendable {
         }
         let plan = try await makePlan(location, container: answers["project"])
         let linter = try QualityInit.chosen(answers, from: await quality.lintDecision(in: root))
-        let generated = try QualityInit.adding(linter, to: plan.config(answers: answers.filter { $0.key != QualityInit.lintKey }))
+        let formatter = try QualityInit.chosen(answers, from: await quality.formatDecision(in: root, developerDir: plan.selectedXcode?.developerDir))
+        let rest = answers.filter { !QualityInit.keys.contains($0.key) }
+        let generated = try QualityInit.adding(lint: linter, format: formatter, to: plan.config(answers: rest))
         try generated.yaml.write(toFile: path, atomically: true, encoding: .utf8)
         let added = try Gitignore.ensure([".xcdev/", ConfigLoader.localFileName, ".xcdev-media/"], in: root)
         var report = InitReport(status: .written, path: path, summary: generated.summary, gitignoreAdded: added)

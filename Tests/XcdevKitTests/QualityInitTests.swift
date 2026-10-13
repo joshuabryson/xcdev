@@ -14,8 +14,13 @@ extension InitServiceTests {
         return ToolLocator(environment: ["PATH": project.base + "/bin"], extraFolders: [])
     }
 
+    /// The decision `xcd init --plan` shows for `key`.
+    func decision(_ key: String, _ service: InitService, _ project: TempProject) async throws -> InitDecision {
+        try #require(try await service.plan(from: project.root).decisions.first { $0.key == key })
+    }
+
     func lintDecision(_ service: InitService, _ project: TempProject) async throws -> InitDecision {
-        try #require(try await service.plan(from: project.root).decisions.last)
+        try await decision("lint.tool", service, project)
     }
 
     @Test func aProjectWithASwiftLintConfigIsAskedWhetherToUseIt() async throws {
@@ -56,14 +61,14 @@ extension InitServiceTests {
         let (project, service) = try setup()
         defer { project.remove() }
         let none = try await service.write(answers: [:], force: false, from: project.root)
-        #expect(try String(contentsOfFile: project.root + "/.xcdev.yml", encoding: .utf8).hasSuffix("\nlint:\n  tool: none\n"))
+        #expect(try String(contentsOfFile: project.root + "/.xcdev.yml", encoding: .utf8).contains("\nlint:\n  tool: none\n"))
         #expect(try ConfigLoader.load(worktreeRoot: project.root, projectRoot: project.root).lintSetup == .off)
-        #expect(none.summary.last == "lint: none")
+        #expect(none.summary.contains("lint: none"))
 
         try project.write("included:\n  - App\n", to: ".swiftlint.yml")
         let found = try await service.write(answers: [:], force: true, from: project.root)
         #expect(try ConfigLoader.load(worktreeRoot: project.root, projectRoot: project.root).lintSetup == .swiftlint(path: nil, args: []))
-        #expect(found.summary.last == "lint: swiftlint")
+        #expect(found.summary.contains("lint: swiftlint"))
         #expect(found.text.contains("\nlint: swiftlint\n"))
     }
 
@@ -87,7 +92,7 @@ extension InitServiceTests {
     @Test func initOnAConfigWithoutTheSectionSaysHowToAddIt() async throws {
         let (project, service) = try setup()
         defer { project.remove() }
-        try project.write("version: 1\nproject: SampleApp.xcodeproj\n", to: ".xcdev.yml")
+        try project.write("version: 1\nproject: SampleApp.xcodeproj\nformat:\n  tool: none\n", to: ".xcdev.yml")
         let report = try await service.write(answers: [:], force: false, from: project.root)
         #expect(report.status == .unchanged)
         #expect(report.warnings == ["`xcd lint` is not set up: add `lint: { tool: swiftlint }` to .xcdev.yml, or "
@@ -97,7 +102,7 @@ extension InitServiceTests {
         #expect(try await service.write(answers: [:], force: false, from: project.root).warnings
                 == ["`xcd lint` is not set up: .swiftlint.yml found: run `xcd doctor --fix`, or add `lint: { tool: swiftlint }` to .xcdev.yml"])
 
-        try project.write("version: 1\nproject: SampleApp.xcodeproj\nlint:\n  tool: none\n", to: ".xcdev.yml")
+        try project.write("version: 1\nproject: SampleApp.xcodeproj\nlint:\n  tool: none\nformat:\n  tool: none\n", to: ".xcdev.yml")
         #expect(try await service.write(answers: [:], force: false, from: project.root).warnings.isEmpty)
     }
 }
