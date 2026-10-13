@@ -184,14 +184,13 @@ import XcdevTestSupport
     @Test func aPinnedXcodeWinsOverTheConfigsInTheCheck() async throws {
         let named = try projectNaming(true)
         defer { named.project.remove() }
-        let pinned = XcodeInstall(path: "/Applications/Xcode-27.app", version: "27.0", build: "27A1")
+        let pinned = XcodeInstall(path: try named.project.standInXcode("Pinned", version: "27.0"), version: "27.0", build: "27A1")
         let state = WorktreeState(id: "id", name: "main", project: "App", projectRoot: named.project.root, path: named.project.root,
                                   branch: nil, xcode: pinned, devices: [:], status: .ready, createdAt: Date(timeIntervalSince1970: 1_790_040_000))
         try WorktreeStateStore.save(state, WorktreePaths(root: named.project.root))
         let report = await quality.doctor(named.project).run(fix: false, checks: [named.check], from: named.project.root)
         #expect(report.problems.map(\.message) == ["the selected Xcode has no swift-format"])
-        #expect(lookedForSwiftFormat?.environment
-                == ["DEVELOPER_DIR": "/Applications/Xcode-27.app/Contents/Developer"])
+        #expect(lookedForSwiftFormat?.environment == ["DEVELOPER_DIR": pinned.developerDir])
     }
 
     /// The `project` check already says the config's Xcode is not installed, so this one says nothing about it.

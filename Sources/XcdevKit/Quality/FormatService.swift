@@ -97,8 +97,7 @@ extension FormatService {
         guard !target.files.isEmpty else { return report.nothingInScope(under: target.paths.prefixes) }
         let root = ctx.location.worktreeRoot
         let place = FormatterLocator(tools: host.locator, runner: host.runner)
-        let developerDir = try await place.developerDir(for: named.kind, path: named.path, pinned: ctx.xcode?.developerDir,
-                                                        spec: ctx.config.xcode)
+        let developerDir = try await place.developerDir(for: named.kind, path: named.path, pinned: ctx.xcode, spec: ctx.config.xcode)
         guard let executable = await place.locate(named.kind, path: named.path, worktreeRoot: root, developerDir: developerDir) else {
             throw FormatterLocator.missing(named.kind, path: named.path)
         }

@@ -17,14 +17,26 @@ public struct FormatterLocator: Sendable {
     }
 
     /// The Xcode whose swift-format `xcrun` is asked for, shared by `xcd format` and `xcd doctor` so they look in the
-    /// same one: the worktree's (`pinned` is its developer directory, from `--xcode` or the pin), else the one the
-    /// config names (`spec`), found as a build finds it but not pinned. Nil when `xcrun` should answer for the
-    /// selected Xcode, and when no Xcode is involved: SwiftFormat, or a `format.path`. Throws when `spec` names an
-    /// Xcode that is not installed.
-    public func developerDir(for kind: FormatterKind, path: String?, pinned: String?, spec: String?) async throws -> String? {
-        if let pinned { return pinned }
-        guard kind == .appleSwiftFormat, path == nil, let spec else { return nil }
+    /// same one: the worktree's (`pinned`), else the one the config names (`spec`), found as a build finds it but not
+    /// pinned. Nil when `xcrun` should answer for the selected Xcode, and when no Xcode is involved: SwiftFormat, or
+    /// a `format.path`. Throws when the pinned Xcode is no longer there, and when `spec` names an Xcode that is not
+    /// installed.
+    public func developerDir(for kind: FormatterKind, path: String?, pinned: XcodeInstall?, spec: String?) async throws -> String? {
+        guard kind == .appleSwiftFormat, path == nil else { return nil }
+        if let pinned {
+            guard Disk.exists(pinned.path) else { throw Self.gone(pinned) }
+            return pinned.developerDir
+        }
+        guard let spec else { return nil }
         return try await discovery.resolve(spec: spec).developerDir
+    }
+
+    /// The error for a worktree whose pinned Xcode is no longer there. `xcd doctor --fix` unpins it. Without this,
+    /// `xcrun` finds no swift-format in an Xcode that is gone, and the error for that points at `format.tool` in the
+    /// config the project shares, which is not what is wrong.
+    static func gone(_ pinned: XcodeInstall) -> XcdError {
+        XcdError(.xcodeMissing, "the worktree's Xcode is gone: it is pinned to \(pinned.path), which no longer exists",
+                 next: "run `xcd doctor --fix`, which unpins it")
     }
 
     /// The formatter's executable, or nil when there is none. `path` is `format.path`, and with it the answer is

@@ -66,9 +66,10 @@ extension FormatProject {
         try project.change()
         try project.nameXcode(try project.standInXcode("Named", version: "27.0"))
         var ctx = try await project.context()
-        ctx.state.xcode = XcodeInstall(path: "/Applications/Xcode-27.app", version: "27.0", build: "27A1")
+        let pinned = try project.standInXcode("Pinned", version: "27.0")
+        ctx.state.xcode = XcodeInstall(path: pinned, version: "27.0", build: "27A1")
         _ = try await project.service(formatters, path: "/nowhere").format(FormatOptions(), in: ctx)
-        #expect(project.xcrunCall?.environment == ["DEVELOPER_DIR": "/Applications/Xcode-27.app/Contents/Developer"])
+        #expect(project.xcrunCall?.environment == ["DEVELOPER_DIR": pinned + "/Contents/Developer"])
         #expect(!project.lookedForAnXcode)
     }
 

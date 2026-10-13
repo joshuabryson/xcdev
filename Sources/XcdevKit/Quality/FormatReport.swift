@@ -107,7 +107,7 @@ public struct FormatReport: Reportable {
         }
         if !failed.isEmpty {
             return XcdError(.formatFailed, "\(QualityHeadline.count(failed.count, "file")) could not be formatted",
-                            next: "fix what the formatter says about \(failed.count == 1 ? "it" : "them") and run `xcd format` again")
+                            next: "each file's line says why; put that right, then run `xcd format` again")
         }
         guard check, !changed.isEmpty else { return nil }
         return XcdError(.formatFailed, "\(QualityHeadline.count(changed.count, "file")) need\(changed.count == 1 ? "s" : "") formatting",

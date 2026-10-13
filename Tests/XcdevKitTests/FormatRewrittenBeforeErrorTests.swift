@@ -3,6 +3,22 @@ import Testing
 import XcdevTestSupport
 @testable import XcdevKit
 
+extension FormatProject {
+    /// The usual change, and D.swift as a third file in scope, with blanks at the end of its line.
+    func changeThreeFiles() throws {
+        try change()
+        try project.write("let d = 1   \n", to: "Sources/App/D.swift")
+    }
+
+    /// The service with `formatters`, running `atOnce` of them at a time: with 1, the files go one after the other,
+    /// in their order.
+    func service(_ formatters: FakeFormatters, atOnce: Int) -> FormatService {
+        var service = service(formatters)
+        service.atOnce = atOnce
+        return service
+    }
+}
+
 /// An error that ends `xcd format` after files were rewritten says which ones: the result
 /// that would have listed them is never printed. Git is real. A formatter "that cannot be started" is a runner that
 /// throws what the real one throws when a launch fails, so nothing here waits on a clock.
@@ -24,12 +40,10 @@ import XcdevTestSupport
     @Test func aFormatterThatCannotBeStartedForALaterFileNamesTheFilesAlreadyRewritten() async throws {
         let project = try FormatProject()
         defer { project.project.remove() }
-        try project.change()
-        try project.project.write("let d = 1   \n", to: "Sources/App/D.swift")
+        try project.changeThreeFiles()
         let ctx = try await project.context()
         let formatters = FakeFormatters()
-        var service = project.service(formatters)
-        service.atOnce = 1                                                           // one file after the other, in their order
+        let service = project.service(formatters, atOnce: 1)
         failLaunch(for: "Sources/App/C.swift", in: project)
         let error = await #expect(throws: XcdError.self) { _ = try await service.format(FormatOptions(), in: ctx) }
 
@@ -50,8 +64,7 @@ import XcdevTestSupport
         defer { project.project.remove() }
         try project.change()
         let ctx = try await project.context()
-        var service = project.service(FakeFormatters())
-        service.atOnce = 2
+        let service = project.service(FakeFormatters(), atOnce: 2)
         let failed = DispatchSemaphore(value: 0)
         failLaunch(for: "Sources/App/C.swift", in: project) { failed.signal() }
         project.fake.stub(["swiftformat", "stdin", "--stdin-path", project.root + "/Sources/App/A.swift"]) { _ in
@@ -70,8 +83,7 @@ import XcdevTestSupport
         try project.change()
         let changed = try project.read("Sources/App/A.swift")
         let ctx = try await project.context()
-        var service = project.service(FakeFormatters())
-        service.atOnce = 1
+        let service = project.service(FakeFormatters(), atOnce: 1)
         failLaunch(for: "Sources/App/C.swift", in: project)
         let checked = await #expect(throws: XcdError.self) { _ = try await service.format(FormatOptions(check: true), in: ctx) }
         #expect(checked?.code == .subprocessFailed && checked?.details.count == 1 && checked?.next != nil)

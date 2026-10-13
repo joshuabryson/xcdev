@@ -61,11 +61,11 @@ import Testing
         log: /w/.xcdev/logs/20261012-181500-format.log
         Sources/App/LoginView.swift  lines 40-47
         Sources/App/Broken.swift:2:10: error: expected ')' to end parameter clause
-        next: fix what the formatter says about it and run `xcd format` again
+        next: each file's line says why; put that right, then run `xcd format` again
         """)
         let only = self.report(check: true, failed: [Self.broken, Self.broken])
         #expect(text(only).hasPrefix("format: 2 files could not be formatted  tool=swiftformat"))
-        #expect(only.failure?.next == "fix what the formatter says about them and run `xcd format` again")
+        #expect(only.failure?.next == "each file's line says why; put that right, then run `xcd format` again")
     }
 
     @Test func notesComeAfterTheFirstLineWithTheLog() {

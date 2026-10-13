@@ -19,6 +19,11 @@ enum Disk {
         return below.sorted().filter { isRegularFile(path + "/" + $0) }
     }
 
+    /// Whether something is at `path`. A link is followed, so one that leads nowhere is not there.
+    static func exists(_ path: String) -> Bool {
+        access(path, F_OK) == 0
+    }
+
     static func isRegularFile(_ path: String) -> Bool {
         (try? URL(fileURLWithPath: path).resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
     }
