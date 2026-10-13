@@ -25,6 +25,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
     case hookFailed = "hook_failed"
     case routeFailed = "route_failed"
     case lintFailed = "lint_failed"
+    case formatFailed = "format_failed"
     case notConfigured = "not_configured"
     case toolMissing = "tool_missing"
     case xcodeMissing = "xcode_missing"
@@ -41,7 +42,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
     public var exitCode: Int32 {
         switch self {
         case .buildFailed, .testFailed, .appCrashed, .elementNotFound, .elementNotHittable, .waitTimeout, .hookFailed,
-             .routeFailed, .lintFailed:
+             .routeFailed, .lintFailed, .formatFailed:
             return 1
         case .usage, .notInProject, .configMissing, .configInvalid, .deviceUnknown,
              .deviceTypeUnknown, .worktreeNotFound, .worktreeDirty, .appNotBuilt, .elementAmbiguous, .staleRef, .platformUnsupported,
@@ -78,8 +79,9 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .hookFailed: return "A hook from .xcdev.yml exited non-zero; the error names the hook and its log."
         case .routeFailed: return "A route's script failed, or its link did not start the app."
         case .lintFailed: return "`xcd lint` showed a finding the linter marks as an error, or the project's lint command exited non-zero."
+        case .formatFailed: return "`xcd format --check` found code the formatter would change, the formatter could not process a file, or the project's format command exited non-zero."
         case .notConfigured: return "The command needs a section of .xcdev.yml that the project does not have; `next:` gives the lines to add."
-        case .toolMissing: return "The linter that .xcdev.yml names is not installed, or its `path` names nothing."
+        case .toolMissing: return "The linter or formatter that .xcdev.yml names is not installed, or its `path` names nothing."
         case .xcodeMissing: return "The Xcode that .xcdev.yml or --xcode asks for isn't installed."
         case .xcodeRuntimeMismatch: return "A simulator runtime is newer than the selected Xcode supports."
         case .runtimeMissing: return "No installed simulator runtime matches the device's runtime setting."

@@ -119,8 +119,9 @@ public enum ConfigSchema {
         ]), example: "ui:\n  media:\n    dir: \".xcdev-media/{worktree}/{branch}\"\n  record:\n    maxDuration: 10m"),
         SchemaField("deeplinks", deeplinks, example: "deeplinks:\n  vars:\n    base: \"myapp://app\"\n  routes:\n    settings:\n      description: \"Open settings\"\n      url: \"{base}/settings\""),
         SchemaField("lint", lint, example: "lint:\n  tool: swiftlint\n  args: [\"--strict\"]"),
+        SchemaField("format", format, example: "format:\n  tool: swiftformat"),
     ])
 
     /// Top-level keys defined later. Present keys get a clear "not supported yet" error.
-    public static let reservedTopLevelKeys = ["format", "debug"]
+    public static let reservedTopLevelKeys = ["debug"]
 }

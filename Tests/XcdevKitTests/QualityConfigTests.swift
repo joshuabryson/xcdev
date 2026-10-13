@@ -3,20 +3,23 @@ import Testing
 @testable import XcdevKit
 
 @Suite struct QualityConfigTests {
-    /// A config whose `lint:` section holds `lines`, each written as it stands under the key (indented two spaces).
-    static func config(_ lines: String) -> String {
-        "version: 1\nproject: App.xcodeproj\nlint:\n\(lines)\n"
+    /// A config whose `lint:` section (or `section`) holds `lines`, each written as it stands under the key
+    /// (indented two spaces).
+    static func config(_ lines: String, section: String = "lint") -> String {
+        "version: 1\nproject: App.xcodeproj\n\(section):\n\(lines)\n"
     }
 
-    /// What the loader says about a `lint:` section, one line per problem. Empty when it loads.
-    func issues(_ lines: String) -> [String] {
+    /// What the loader says about a section that holds `lines`, one line per problem. Empty when it loads.
+    static func issues(_ lines: String, section: String) -> [String] {
         do {
-            _ = try ConfigLoader.parse(main: Self.config(lines))
+            _ = try ConfigLoader.parse(main: config(lines, section: section))
             return []
         } catch {
             return (error as? XcdError)?.details ?? ["\(error)"]
         }
     }
+
+    func issues(_ lines: String) -> [String] { Self.issues(lines, section: "lint") }
 
     @Test func aNamedToolLoadsWithItsPathAndArguments() throws {
         let config = try ConfigLoader.parse(main: Self.config("  tool: swiftlint\n  path: tools/swiftlint\n  args: [\"--strict\"]"))
@@ -68,20 +71,16 @@ import Testing
         #expect(config.lintSetup == .swiftlint(path: "/opt/tools/swiftlint", args: []))
     }
 
-    @Test func lintIsASectionAndTheFormatKeyIsKeptForLater() {
-        #expect(!ConfigSchema.reservedTopLevelKeys.contains("lint"))
-        let error = #expect(throws: XcdError.self) {
-            try ConfigLoader.parse(main: "version: 1\nproject: App.xcodeproj\nformat: { tool: swiftformat }\n")
-        }
-        #expect(error?.details == ["format: is reserved for a future version of xcd and not supported yet"])
+    @Test func lintAndFormatAreSections() {
+        #expect(!ConfigSchema.reservedTopLevelKeys.contains("lint") && !ConfigSchema.reservedTopLevelKeys.contains("format"))
+        #expect(BuiltinCommands.sectionNames == ["lint", "format"])
     }
 
-    @Test func aProjectCommandNamedLintIsSentToTheSection() {
-        let error = #expect(throws: XcdError.self) {
-            try ConfigLoader.parse(main: "version: 1\nproject: App.xcodeproj\ncommands:\n  lint: { run: ./scripts/lint.sh }\n  build: { run: make }\n")
-        }
-        #expect(error?.details == [
+    @Test func aProjectCommandNamedLikeASectionIsSentToTheSection() {
+        let commands = "  lint: { run: ./scripts/lint.sh }\n  build: { run: make }\n  format: { run: ./scripts/format.sh }"
+        #expect(Self.issues(commands, section: "commands") == [
             "commands.build: 'build' is a built-in xcd command, so `xcd build` would never run this; rename it",
+            "commands.format: 'format' is a built-in xcd command; move this script to `format: { run: … }`",
             "commands.lint: 'lint' is a built-in xcd command; move this script to `lint: { run: … }`",
         ])
     }

@@ -13,6 +13,7 @@ public struct XcdevConfig: Codable, Sendable, Equatable {
     public var ui: UISettings?
     public var deeplinks: DeepLinksConfig?
     public var lint: LintConfig?
+    public var format: FormatConfig?
 
     public struct Schemes: Codable, Sendable, Equatable {
         public var app: String?

@@ -13,7 +13,7 @@ import Testing
             run: ./scripts/seed.sh
             needs: [device, build]
             timeout: 10m
-          format: { run: swift-format }
+          tidy: { run: swift-format }
         hooks:
           post-worktree-create: ./scripts/bootstrap.sh
           pre-build: swiftgen
@@ -24,8 +24,8 @@ import Testing
         #expect(seed.run == "./scripts/seed.sh")
         #expect(seed.needsDevice && seed.needsBuild)
         #expect(seed.timeoutDuration == .seconds(600))
-        #expect(config.commands?["format"]?.timeoutDuration == .seconds(1800))
-        #expect(config.commands?["format"]?.needsDevice == false)
+        #expect(config.commands?["tidy"]?.timeoutDuration == .seconds(1800))
+        #expect(config.commands?["tidy"]?.needsDevice == false)
         #expect(config.hooks?.command(for: .preBuild) == "swiftgen")
         #expect(config.hooks?.command(for: .postWorktreeCreate) == "./scripts/bootstrap.sh")
         #expect(config.hooks?.command(for: .postLaunch) == "./scripts/grant-permissions.sh")

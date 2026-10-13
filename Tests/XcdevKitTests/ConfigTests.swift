@@ -55,7 +55,7 @@ import Testing
 
     @Test func reservedKeyIsExplained() {
         let error = #expect(throws: XcdError.self) {
-            try ConfigLoader.parse(main: "version: 1\nproject: A.xcodeproj\nformat: {}\n")
+            try ConfigLoader.parse(main: "version: 1\nproject: A.xcodeproj\ndebug: {}\n")
         }
         #expect(error?.details.first?.contains("reserved for a future version") == true)
     }

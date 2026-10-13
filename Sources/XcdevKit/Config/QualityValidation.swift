@@ -1,6 +1,6 @@
 import Foundation
 
-/// The cross-field checks on `lint:`. Each issue names the key it is about.
+/// The cross-field checks on `lint:` and `format:`. Each issue names the key it is about.
 enum QualityValidation {
     /// SwiftLint arguments xcd sets itself, or that would change what its run means.
     static let swiftLintOwned = [
@@ -9,11 +9,47 @@ enum QualityValidation {
         "--use-script-input-files", "--use-script-input-file-lists",
     ]
 
+    /// What xcd sets itself for each formatter: the range, where the text comes from and goes, and how much is said.
+    static let formatterOwned: [FormatterKind: [String]] = [
+        .appleSwiftFormat: ["--lines", "--offsets", "-i", "--in-place", "-r", "--recursive", "-p", "--parallel", "--assume-filename"],
+        .swiftFormat: [
+            "--line-range", "--stdin-path", "--output", "--filelist", "--lint", "--dry-run", "--report", "--reporter", "--cache",
+            "--quiet", "--verbose", "--script-input", "--linerange", "--stdinpath", "--dryrun", "--scriptinput",
+        ],
+    ]
+
+    /// Arguments with which a formatter exits 0 and prints something that is not the file (its version, its help, a
+    /// list of its rules), which xcd would write over the file, and SwiftFormat's `--strict`, with which it fails on
+    /// every file it reformats. `--rules` with nothing after it lists the rules, so the rules are named in .swiftformat.
+    static let formatterMisused: [FormatterKind: [String]] = [
+        .appleSwiftFormat: ["--version", "--help", "-h"],
+        .swiftFormat: ["--version", "--help", "--options", "--rules", "--ruleinfo", "--rule-info", "--inferoptions", "--infer-options", "--strict"],
+    ]
+
     static func issues(_ config: XcdevConfig) -> [ConfigIssue] {
-        guard let lint = config.lint else { return [] }
+        lintIssues(config.lint) + formatIssues(config.format)
+    }
+
+    static func lintIssues(_ lint: LintConfig?) -> [ConfigIssue] {
+        guard let lint else { return [] }
         let runs = lint.tool != nil && lint.tool != .off
         return ToolSectionCheck(section: "lint", hasTool: lint.tool != nil, toolRuns: runs, path: lint.path,
                                 args: lint.args, run: lint.run, owned: swiftLintOwned).issues()
+    }
+
+    /// `format:` has one more key than `lint:`: `check`, which is read only beside `run`.
+    static func formatIssues(_ format: FormatConfig?) -> [ConfigIssue] {
+        guard let format else { return [] }
+        let kind = format.tool?.kind
+        var section = ToolSectionCheck(section: "format", hasTool: format.tool != nil, toolRuns: kind != nil, path: format.path,
+                                       args: format.args, run: format.run, owned: kind.flatMap { formatterOwned[$0] } ?? [])
+        section.misused = kind.flatMap { formatterMisused[$0] } ?? []
+        var issues = section.issues()
+        if let check = format.check {
+            if format.run == nil { issues.append(section.issue("check", "is only read with run")) }
+            if section.isBlank(check) { issues.append(section.issue("check", "must not be empty")) }
+        }
+        return issues
     }
 }
 
@@ -28,6 +64,8 @@ struct ToolSectionCheck {
     let run: String?
     /// The tool's arguments that xcd sets itself.
     let owned: [String]
+    /// The tool's arguments that make its run something xcd cannot use.
+    var misused: [String] = []
 
     func issue(_ key: String, _ message: String) -> ConfigIssue {
         ConfigIssue(path: key.isEmpty ? section : section + "." + key, message: message)
@@ -50,11 +88,15 @@ struct ToolSectionCheck {
         toolRuns && run == nil ? [] : [issue(key, "is only read with a tool other than none")]
     }
 
-    /// The arguments in `args` that xcd sets itself, written alone or as `--name=value`.
+    /// The arguments in `args` that xcd sets itself, and the ones that would change what the run gives xcd, each
+    /// written alone or as `--name=value`.
     func ownedIssues(_ args: [String]) -> [ConfigIssue] {
         let names = args.map { String($0.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).first ?? "") }
-        let found = names.filter(owned.contains)
-        guard !found.isEmpty else { return [] }
-        return [issue("args", "xcd sets these itself, so they can't be given: \(found.joined(separator: ", "))")]
+        let refusals = [(owned, "xcd sets these itself, so they can't be given"),
+                        (misused, "these make the tool give xcd something other than the formatted file, so they can't be given")]
+        return refusals.compactMap { list, why in
+            let found = names.filter(list.contains)
+            return found.isEmpty ? nil : issue("args", "\(why): \(found.joined(separator: ", "))")
+        }
     }
 }
