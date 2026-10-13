@@ -39,6 +39,15 @@ public struct TempProject: Sendable {
         try contents.write(toFile: path, atomically: true, encoding: .utf8)
     }
 
+    /// A folder that `XcodeDiscovery.readInstall` takes for an Xcode, named `name` under the temporary folder.
+    public func standInXcode(_ name: String, version: String) throws -> String {
+        let path = base + "/" + name + ".app"
+        let info = ["CFBundleIdentifier": "com.apple.dt.Xcode", "CFBundleShortVersionString": version]
+        try write("", to: "Contents/Info.plist", in: path)
+        try (info as NSDictionary).write(to: URL(fileURLWithPath: path + "/Contents/Info.plist"))
+        return URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
     public static func git(_ args: [String], in directory: String) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")

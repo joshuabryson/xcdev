@@ -5,13 +5,7 @@ import XcdevTestSupport
 
 extension FormatProject {
     /// A folder that `XcodeDiscovery.readInstall` takes for an Xcode, named `name` under the project's temporary folder.
-    func standInXcode(_ name: String, version: String) throws -> String {
-        let path = project.base + "/" + name + ".app"
-        let info = ["CFBundleIdentifier": "com.apple.dt.Xcode", "CFBundleShortVersionString": version]
-        try project.write("", to: "Contents/Info.plist", in: path)
-        try (info as NSDictionary).write(to: URL(fileURLWithPath: path + "/Contents/Info.plist"))
-        return URL(fileURLWithPath: path).standardizedFileURL.path
-    }
+    func standInXcode(_ name: String, version: String) throws -> String { try project.standInXcode(name, version: version) }
 
     /// The project's config with `xcode:` set, which a worktree opened afterwards reads.
     func nameXcode(_ spec: String, formatter: String = FormatProject.appleSwiftFormat) throws {

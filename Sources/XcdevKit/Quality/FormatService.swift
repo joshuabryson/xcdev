@@ -97,8 +97,9 @@ extension FormatService {
         guard !target.files.isEmpty else { return report.nothingInScope(under: target.paths.prefixes) }
         let root = ctx.location.worktreeRoot
         let place = FormatterLocator(tools: host.locator, runner: host.runner)
-        guard let executable = await place.locate(named.kind, path: named.path, worktreeRoot: root,
-                                          developerDir: try await developerDir(for: named, in: ctx)) else {
+        let developerDir = try await place.developerDir(for: named.kind, path: named.path, pinned: ctx.xcode?.developerDir,
+                                                        spec: ctx.config.xcode)
+        guard let executable = await place.locate(named.kind, path: named.path, worktreeRoot: root, developerDir: developerDir) else {
             throw FormatterLocator.missing(named.kind, path: named.path)
         }
         let started = host.now()
@@ -114,15 +115,6 @@ extension FormatService {
         report.log = transcript.isEmpty ? nil : writeLog(transcript, in: ctx)
         report.seconds = host.now().timeIntervalSince(started)
         return report
-    }
-
-    /// The Xcode whose swift-format `xcrun` is asked for: the override or the pin, else the one the config names, found
-    /// as a build finds it but not pinned. Nil when `xcrun` should answer for the selected Xcode, and when no Xcode is
-    /// involved: SwiftFormat, or a `format.path`.
-    func developerDir(for named: Named, in ctx: WorktreeContext) async throws -> String? {
-        if let xcode = ctx.xcode { return xcode.developerDir }
-        guard named.kind == .appleSwiftFormat, named.path == nil, let spec = ctx.config.xcode else { return nil }
-        return try await XcodeDiscovery(runner: host.runner).resolve(spec: spec).developerDir
     }
 
     /// `file` formatted, or listed as one that could not be processed when git cannot say which of its lines changed.

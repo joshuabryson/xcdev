@@ -144,6 +144,67 @@ import XcdevTestSupport
         #expect(await quality.doctor(project).run(fix: false, checks: [check], from: project.root).problems.isEmpty)
     }
 
+    /// The `xcrun` call that looked for swift-format: doctor's own `simctl list` is another.
+    var lookedForSwiftFormat: Invocation? { quality.shared.fake.calls.first { $0.argv.contains("--find") } }
+
+    /// A project whose config says `xcode:` the folder `named`, with nothing pinned, and which Xcode has swift-format:
+    /// an `xcrun` that carries the named Xcode's developer directory finds it, and any other finds none.
+    func projectNaming(_ named: Bool) throws -> (project: TempProject, check: QualityToolsCheck, developerDir: String) {
+        let project = try quality.setup(Self.base + "format:\n  tool: swift-format\n")
+        let xcode = try project.standInXcode("Named", version: "27.0")
+        try project.write(Self.base + "format:\n  tool: swift-format\nxcode: \"\(xcode)\"\n", to: ".xcdev.yml")
+        let tool = project.base + "/swift-format"
+        try project.write("#!/bin/sh\n", to: "swift-format", in: project.base)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool)
+        let dir = xcode + "/Contents/Developer"
+        quality.shared.fake.stub(["xcrun", "--find", "swift-format"]) { call in
+            let found = named && call.environment["DEVELOPER_DIR"] == dir
+            return ProcessOutput(exitCode: found ? 0 : 72, stdout: found ? tool + "\n" : "", stderr: "")
+        }
+        return (project, QualityToolsCheck(locator: try quality.locator(project, installed: false)), dir)
+    }
+
+    /// `xcd format` takes swift-format from the Xcode the config names when nothing is pinned, so doctor does too.
+    @Test func theXcodeTheConfigNamesIsWhereSwiftFormatIsLookedForWhenNothingIsPinned() async throws {
+        let named = try projectNaming(true)
+        defer { named.project.remove() }
+        let report = await quality.doctor(named.project).run(fix: false, checks: [named.check], from: named.project.root)
+        #expect(report.problems.isEmpty)
+        #expect(lookedForSwiftFormat?.environment == ["DEVELOPER_DIR": named.developerDir])
+    }
+
+    @Test func swiftFormatMissingFromTheXcodeTheConfigNamesIsAProblem() async throws {
+        let named = try projectNaming(false)
+        defer { named.project.remove() }
+        let report = await quality.doctor(named.project).run(fix: false, checks: [named.check], from: named.project.root)
+        #expect(report.problems.map(\.message) == ["the selected Xcode has no swift-format"])
+        #expect(lookedForSwiftFormat?.environment == ["DEVELOPER_DIR": named.developerDir])
+    }
+
+    @Test func aPinnedXcodeWinsOverTheConfigsInTheCheck() async throws {
+        let named = try projectNaming(true)
+        defer { named.project.remove() }
+        let pinned = XcodeInstall(path: "/Applications/Xcode-27.app", version: "27.0", build: "27A1")
+        let state = WorktreeState(id: "id", name: "main", project: "App", projectRoot: named.project.root, path: named.project.root,
+                                  branch: nil, xcode: pinned, devices: [:], status: .ready, createdAt: Date(timeIntervalSince1970: 1_790_040_000))
+        try WorktreeStateStore.save(state, WorktreePaths(root: named.project.root))
+        let report = await quality.doctor(named.project).run(fix: false, checks: [named.check], from: named.project.root)
+        #expect(report.problems.map(\.message) == ["the selected Xcode has no swift-format"])
+        #expect(lookedForSwiftFormat?.environment
+                == ["DEVELOPER_DIR": "/Applications/Xcode-27.app/Contents/Developer"])
+    }
+
+    /// The `project` check already says the config's Xcode is not installed, so this one says nothing about it.
+    @Test func anXcodeTheConfigNamesThatIsNotInstalledIsLeftToTheProjectCheck() async throws {
+        let project = try quality.setup(Self.base + "format:\n  tool: swift-format\nxcode: \"99.0\"\n")
+        defer { project.remove() }
+        let check = QualityToolsCheck(locator: try quality.locator(project, installed: false))
+        let report = await quality.doctor(project).run(fix: false, checks: [check, ProjectCheck()], from: project.root)
+        #expect(report.problems.map(\.check) == ["project"])
+        #expect(report.problems.first?.message == "Xcode 99.0 is not installed (xcode_missing)")
+        #expect(lookedForSwiftFormat == nil)
+    }
+
     /// A linter and a formatter that are both missing are two problems of the one check.
     @Test func eachMissingToolIsItsOwnProblem() async throws {
         let project = try quality.setup(Self.base + "lint:\n  tool: swiftlint\nformat:\n  tool: swiftformat\n  path: tools/swiftformat\n")

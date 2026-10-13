@@ -7,10 +7,24 @@ public struct FormatterLocator: Sendable {
 
     public let tools: ToolLocator
     public let runner: any ProcessRunning
+    /// How an Xcode the config names is found.
+    let discovery: XcodeDiscovery
 
-    public init(tools: ToolLocator, runner: any ProcessRunning) {
+    public init(tools: ToolLocator, runner: any ProcessRunning, discovery: XcodeDiscovery? = nil) {
         self.tools = tools
         self.runner = runner
+        self.discovery = discovery ?? XcodeDiscovery(runner: runner)
+    }
+
+    /// The Xcode whose swift-format `xcrun` is asked for, shared by `xcd format` and `xcd doctor` so they look in the
+    /// same one: the worktree's (`pinned` is its developer directory, from `--xcode` or the pin), else the one the
+    /// config names (`spec`), found as a build finds it but not pinned. Nil when `xcrun` should answer for the
+    /// selected Xcode, and when no Xcode is involved: SwiftFormat, or a `format.path`. Throws when `spec` names an
+    /// Xcode that is not installed.
+    public func developerDir(for kind: FormatterKind, path: String?, pinned: String?, spec: String?) async throws -> String? {
+        if let pinned { return pinned }
+        guard kind == .appleSwiftFormat, path == nil, let spec else { return nil }
+        return try await discovery.resolve(spec: spec).developerDir
     }
 
     /// The formatter's executable, or nil when there is none. `path` is `format.path`, and with it the answer is

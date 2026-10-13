@@ -102,11 +102,24 @@ public struct QualityToolsCheck: DoctorCheck {
             missing.append(ToolLocator.missing(LintService.swiftLint, section: LintService.section, path: path))
         }
         if case .tool(let kind, let path, _) = config.formatSetup {
-            let place = FormatterLocator(tools: locator, runner: env.runner)
-            let found = await place.locate(kind, path: path, worktreeRoot: root, developerDir: project.state?.xcode?.developerDir)
-            if found == nil { missing.append(FormatterLocator.missing(kind, path: path)) }
+            if let error = await formatterProblem(kind, path: path, in: project, env) { missing.append(error) }
         }
         return missing.map { DoctorProblem(check: id, message: $0.message, next: $0.next) }
+    }
+
+    /// The formatter's `tool_missing` error, or nil when it is found. An Xcode the config names that is not installed
+    /// is the `project` check's problem and not this one's: it says so, and swift-format has nowhere to be looked for.
+    private func formatterProblem(_ kind: FormatterKind, path: String?, in project: DoctorProject, _ env: DoctorEnvironment) async -> XcdError? {
+        let place = FormatterLocator(tools: locator, runner: env.runner, discovery: env.discovery)
+        let developerDir: String?
+        do {
+            developerDir = try await place.developerDir(for: kind, path: path, pinned: project.state?.xcode?.developerDir,
+                                                        spec: project.config?.xcode)
+        } catch {
+            return nil
+        }
+        let found = await place.locate(kind, path: path, worktreeRoot: project.location.worktreeRoot, developerDir: developerDir)
+        return found == nil ? FormatterLocator.missing(kind, path: path) : nil
     }
 
     public func fix(_ problem: DoctorProblem, _ env: DoctorEnvironment) {
