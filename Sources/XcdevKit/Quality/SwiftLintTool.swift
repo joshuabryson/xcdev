@@ -35,7 +35,8 @@ public struct SwiftLintTool: Sendable {
     /// so that is a failure too. Anything else but "nothing to lint" is a tool that failed, never findings.
     public func lint(_ folder: LintFolder) async throws -> SwiftLintRun {
         let invocation = Invocation(executable, Self.ownArguments + args, workingDirectory: folder.root, timeout: Self.timeout)
-        let output = try await runner.run(invocation)
+        let output: ProcessOutput
+        do { output = try await runner.run(invocation) } catch let error as XcdError where error.code == .timeout { throw Self.timedOut(error) }
         let transcript = "$ \(invocation.commandLine)\nexit \(output.exitCode)\n\(output.stderrString)\(output.stdoutString)"
         if let reported = try? JSONDecoder().decode([Reported].self, from: output.stdout) {
             if let stray = reported.compactMap(\.file).first(where: { folder.path(of: $0) == nil }) {
@@ -49,7 +50,16 @@ public struct SwiftLintTool: Sendable {
             return SwiftLintRun(findings: [], notes: [], transcript: transcript)
         }
         throw XcdError.subprocess(invocation, output, message: "swiftlint gave no result xcd can read (exit \(output.exitCode))",
-                                  next: "run `swiftlint lint` in the project to see what it says, and check lint.args in .xcdev.yml")
+                                  next: "read what swiftlint wrote, in this error's details, and check lint.args in .xcdev.yml and the project's .swiftlint.yml")
+    }
+
+    /// The runner's timeout error, with a message and a next step that fit `xcd lint`: it has no `--timeout`
+    /// and no simulator. The details stay as the runner made them.
+    static func timedOut(_ error: XcdError) -> XcdError {
+        var error = error
+        error.message = "swiftlint timed out after \(DurationText.format(timeout))"
+        error.next = "name paths so that fewer files are linted, and look in the lint config for a path that leads SwiftLint out of the copy xcd made: an environment variable in included, parent_config, or child_config"
+        return error
     }
 
     /// One entry of SwiftLint's JSON reporter.

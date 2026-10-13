@@ -88,8 +88,9 @@ import XcdevTestSupport
             let error = await #expect(throws: XcdError.self) { _ = try await tool().lint(folder) }
             #expect(error?.code == .subprocessFailed)
             #expect(error?.message == "swiftlint gave no result xcd can read (exit \(exitCode))")
-            #expect(error?.details.first == "command: swiftlint lint --quiet --reporter json --no-cache")
-            #expect(error?.next == "run `swiftlint lint` in the project to see what it says, and check lint.args in .xcdev.yml")
+            let stderrLines = stderr.split(separator: "\n").map(String.init)
+            #expect(error?.details == ["command: swiftlint lint --quiet --reporter json --no-cache", "exit: \(exitCode)"] + stderrLines)
+            #expect(error?.next == "read what swiftlint wrote, in this error's details, and check lint.args in .xcdev.yml and the project's .swiftlint.yml")
         }
     }
 
@@ -119,9 +120,15 @@ import XcdevTestSupport
     @Test func aRunThatTakesTooLongIsATimeout() async throws {
         let folder = try folder()
         defer { folder.remove() }
-        runner.stub(["swiftlint"]) { _ in throw XcdError(.timeout, "`swiftlint lint` timed out after 10m") }
+        runner.stub(["swiftlint"]) { _ in
+            throw XcdError(.timeout, "`swiftlint lint --quiet` timed out after 10 minutes",
+                           next: "re-run with a larger --timeout, or run `xcd doctor` if a simulator is stuck", details: ["command: swiftlint lint"])
+        }
         let error = await #expect(throws: XcdError.self) { _ = try await tool().lint(folder) }
         #expect(error?.code == .timeout)
+        #expect(error?.message == "swiftlint timed out after \(DurationText.format(SwiftLintTool.timeout))")
+        #expect(error?.next == "name paths so that fewer files are linted, and look in the lint config for a path that leads SwiftLint out of the copy xcd made: an environment variable in included, parent_config, or child_config")
+        #expect(error?.details == ["command: swiftlint lint"])
     }
 }
 
