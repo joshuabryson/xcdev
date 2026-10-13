@@ -1,7 +1,18 @@
 import Foundation
 
-/// Runs a project's own command for a quality section, such as `lint.run`.
+/// Runs a project's own command for a quality section, such as `lint.run` or `format.check`.
 public struct CommandTool: Sendable {
+    /// How the messages name a command: by what it is, and by the setting that holds it.
+    struct Name {
+        let section: String
+        let key: String
+
+        /// `lint command`, `format command`, `format check command`.
+        var command: String { key == "run" ? "\(section) command" : "\(section) \(key) command" }
+        /// `lint.run`, `format.check`.
+        var setting: String { section + "." + key }
+    }
+
     public static let timeout: Duration = .seconds(600)
     /// The longest file list handed to a command, in bytes. A command line holds about a megabyte, and the
     /// environment takes its share of that.
@@ -19,6 +30,8 @@ public struct CommandTool: Sendable {
     public let output: OutputFormat
     public let timeout: Duration
     public let now: @Sendable () -> Date
+    /// The key under the section that holds the command: `run`, or `check` for what `xcd format --check` runs.
+    public var key = "run"
 
     public init(runner: any ProcessRunning, output: OutputFormat = .text, timeout: Duration = CommandTool.timeout,
                 now: @escaping @Sendable () -> Date = { Date() }) {
@@ -33,10 +46,11 @@ public struct CommandTool: Sendable {
     /// path with a space stays one argument. Nothing is added to the command: after it, the files would be arguments
     /// of whatever it ends with, which may be a command that writes its arguments. The command runs once. Its exit
     /// code is returned, not thrown, except 126 and 127: those are the shell saying it could not run the command,
-    /// which is not a result. `section` is the config section, `lint`.
+    /// which is not a result. `section` is the config section, `lint` or `format`.
     public func run(_ command: String, section: String, files: [String], in ctx: WorktreeContext) async throws -> Result {
+        let name = Name(section: section, key: key)
         guard files.reduce(0, { $0 + $1.utf8.count + 1 }) <= Self.longestFileList else {
-            throw XcdError(.usage, "\(files.count) files are too many to hand to \(section).run on one command line",
+            throw XcdError(.usage, "\(files.count) files are too many to hand to \(name.setting) on one command line",
                            next: "pass --all with no paths so the command covers the project its own way, or name fewer paths")
         }
         let shown = command.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -48,11 +62,11 @@ public struct CommandTool: Sendable {
         do {
             exitCode = try await runner.run(invocation).exitCode
         } catch let error as XcdError where error.code == .timeout {
-            throw timedOut(error, command: shown, section: section, log: log)
+            throw timedOut(error, command: shown, name, log: log)
         }
         let printed = Self.text(of: log)
-        if let next = Self.notRun(exitCode, section: section) {
-            throw XcdError(.subprocessFailed, "the project's \(section) command could not be run (exit \(exitCode))", next: next,
+        if let next = Self.notRun(exitCode, setting: name.setting) {
+            throw XcdError(.subprocessFailed, "the project's \(name.command) could not be run (exit \(exitCode))", next: next,
                            details: ["command: \(shown)", "log: \(log)"] + printed.split(separator: "\n").suffix(20).map(String.init))
         }
         return Result(exitCode: exitCode, output: printed, log: log)
@@ -71,18 +85,19 @@ public struct CommandTool: Sendable {
     /// What the result says when files were in scope and the command names none of its arguments: it ran without
     /// them. That is right for a command that covers the project its own way, and wrong for one whose author expected
     /// the files after it. Nil when the command names them or there were none to hand over.
-    static func unnamedFilesNote(_ command: String, section: String, files: Int) -> String? {
+    /// `key` is `run`, or `check`.
+    static func unnamedFilesNote(_ command: String, section: String, files: Int, key: String = "run") -> String? {
         guard files > 0, !namesItsFiles(command) else { return nil }
-        return "\(section).run has no \"$@\", so the command did not get the \(files) file\(files == 1 ? "" : "s") in scope; "
+        return "\(section).\(key) has no \"$@\", so the command did not get the \(files) file\(files == 1 ? "" : "s") in scope; "
             + "write \"$@\" where the files go"
     }
 
     /// The runner's timeout error, with this command's message and next step, and the command and the log as its details
     /// instead of the whole argument list.
-    private func timedOut(_ error: XcdError, command: String, section: String, log: String) -> XcdError {
+    private func timedOut(_ error: XcdError, command: String, _ name: Name, log: String) -> XcdError {
         var error = error
-        error.message = "the project's \(section) command timed out after \(DurationText.format(timeout))"
-        error.next = "make \(section).run finish sooner, or name paths to give it fewer files"
+        error.message = "the project's \(name.command) timed out after \(DurationText.format(timeout))"
+        error.next = "make \(name.setting) finish sooner, or name paths to give it fewer files"
         error.details = ["command: \(command)", "log: \(log)"]
         return error
     }
@@ -95,9 +110,9 @@ public struct CommandTool: Sendable {
     }
 
     /// What to do about the shell's "not found" (127) and "not executable" (126). Nil for any other exit code.
-    static func notRun(_ exitCode: Int32, section: String) -> String? {
+    static func notRun(_ exitCode: Int32, setting: String) -> String? {
         switch exitCode {
-        case 127: return "its command was not found; check \(section).run in .xcdev.yml (paths are relative to the worktree root)"
+        case 127: return "its command was not found; check \(setting) in .xcdev.yml (paths are relative to the worktree root)"
         case 126: return "its script is not executable; run `chmod +x` on it"
         default: return nil
         }
