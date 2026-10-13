@@ -97,7 +97,8 @@ extension FormatService {
         guard !target.files.isEmpty else { return report.nothingInScope(under: target.paths.prefixes) }
         let root = ctx.location.worktreeRoot
         let place = FormatterLocator(tools: host.locator, runner: host.runner)
-        guard let executable = await place.locate(named.kind, path: named.path, worktreeRoot: root, developerDir: ctx.xcode?.developerDir) else {
+        guard let executable = await place.locate(named.kind, path: named.path, worktreeRoot: root,
+                                          developerDir: try await developerDir(for: named, in: ctx)) else {
             throw FormatterLocator.missing(named.kind, path: named.path)
         }
         let started = host.now()
@@ -107,13 +108,35 @@ extension FormatService {
             ? SwiftFormatTool(runner: host.runner, executable: executable, args: named.args, worktreeRoot: root, scratch: scratch)
             : AppleSwiftFormatTool(runner: host.runner, executable: executable, args: named.args, worktreeRoot: root)
         let one = FileFormatter(tool: tool, worktreeRoot: root, check: check, interrupts: host.interrupts)
-        let files = try await each(target.files) { file in
-            try await one.format(file.path, try await part(of: file, in: target, root))
-        }
+        let files = try await each(target.files) { file in try await formatted(file, by: one, in: target, root) }
+        let transcript = files.map(\.transcript).joined()
         report.fill(from: files, tool: named.kind.rawValue)
-        report.log = writeLog(files.map(\.transcript).joined(), in: ctx)
+        report.log = transcript.isEmpty ? nil : writeLog(transcript, in: ctx)
         report.seconds = host.now().timeIntervalSince(started)
         return report
+    }
+
+    /// The Xcode whose swift-format `xcrun` is asked for: the override or the pin, else the one the config names, found
+    /// as a build finds it but not pinned. Nil when `xcrun` should answer for the selected Xcode, and when no Xcode is
+    /// involved: SwiftFormat, or a `format.path`.
+    func developerDir(for named: Named, in ctx: WorktreeContext) async throws -> String? {
+        if let xcode = ctx.xcode { return xcode.developerDir }
+        guard named.kind == .appleSwiftFormat, named.path == nil, let spec = ctx.config.xcode else { return nil }
+        return try await XcodeDiscovery(runner: host.runner).resolve(spec: spec).developerDir
+    }
+
+    /// `file` formatted, or listed as one that could not be processed when git cannot say which of its lines changed.
+    /// That is the file's failure and not the command's: the other files are still formatted.
+    func formatted(_ file: ScopedFile, by one: FileFormatter, in target: QualityTarget, _ root: String) async throws -> FormattedFile {
+        let changed: ChangedPart
+        do {
+            changed = try await part(of: file, in: target, root)
+        } catch let error as XcdError where error.code == .subprocessFailed || error.code == .timeout {
+            let why = error.details.dropFirst(2).last.map { ": " + $0 } ?? ""
+            let line = "\(file.path): git could not say which of its lines changed, so it was left as it was" + why
+            return one.failed(FormattedFile(path: file.path), [line])
+        }
+        return try await one.format(file.path, changed)
     }
 
     /// How much of `file` to format: the lines the change touched when the scope is the change, else all of it.
