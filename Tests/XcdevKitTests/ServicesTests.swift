@@ -14,11 +14,13 @@ import XcdevTestSupport
         #expect(services.media.currentDirectory == "/cwd")
     }
 
-    /// `xcd lint` reads paths from where it is run, and looks for the linter in this process's PATH first.
+    /// `xcd lint` reads paths from where it is run, and looks for the linter in this process's PATH first. Its
+    /// scratch folders are registered with the handler Ctrl-C fires, or they would be left behind.
     @Test func lintGetsTheCurrentDirectoryThePathAndTheOutputFormat() {
         let services = Services(runner: FakeProcessRunner(), globalPaths: GlobalPaths(base: "/h"), currentDirectory: "/cwd",
-                                environment: ["PATH": "/custom/bin:/usr/bin"], output: .json)
+                                environment: ["PATH": "/custom/bin:/usr/bin"], output: .json, interrupts: Interrupts())
         #expect(services.lint.currentDirectory == "/cwd" && services.lint.output == .json)
+        #expect(services.lint.interrupts === services.interrupts)
         #expect(services.lint.locator.folders == ["/custom/bin", "/usr/bin", "/opt/homebrew/bin", "/usr/local/bin"])
         #expect(services.setup.locator.folders == services.lint.locator.folders)       // `init` says whether the linter is installed
     }

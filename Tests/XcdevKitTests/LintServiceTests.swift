@@ -181,6 +181,11 @@ import XcdevTestSupport
         #expect(recorded.base == "develop" && recorded.baseCommit == committed && recorded.files == 0)
         let flagged = try await service(project).lint(LintOptions(base: "main"), in: ctx)
         #expect(flagged.base == "main" && flagged.files == 2)
+        #expect(flagged.findings.map(\.text) == [                              // measured from the fork point, not from HEAD
+            "Sources/App/A.swift:3:5: warning: no_print is not allowed (no_print)",
+            "Sources/App/C.swift:2:5: error: no_abort is not allowed (no_abort)",
+        ])
+        #expect(flagged.older == 1)
     }
 
     @Test func theProjectsArgumentsAndPathReachSwiftLint() async throws {
