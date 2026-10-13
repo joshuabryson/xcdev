@@ -19,23 +19,8 @@ public struct LintOptions: Sendable, Equatable {
     }
 
     public func scope() throws -> QualityScope {
-        if files && all {
-            throw XcdError(.usage, "--files and --all are two scopes", next: "pass one of them, or neither to see what the change introduced")
-        }
-        if all && base != nil {
-            throw XcdError(.usage, "--base has no meaning with --all, which compares with nothing", next: "drop one of the two")
-        }
-        return all ? .all : files ? .files : .lines
+        try QualityScope.named(files: files, all: all, base: base, otherwise: "to see what the change introduced")
     }
-}
-
-/// The Swift files one lint run covers, and what they are measured against.
-struct LintTarget: Sendable {
-    let scope: QualityScope
-    /// Nil with `--all`.
-    let base: ResolvedBase?
-    let files: [ScopedFile]
-    let paths: ScopePaths
 }
 
 /// `xcd lint`: lints the Swift files a worktree changed with whatever the project's `lint:`
@@ -89,27 +74,18 @@ public struct LintService: Sendable {
         return XcdError(.notConfigured, "lint is not set up for this project", next: next)
     }
 
-    /// The files in scope: every Swift file git knows for `--all`, else the ones the working tree changed against
-    /// the fork point, in both cases narrowed by the paths given.
-    func target(_ options: LintOptions, _ scope: QualityScope, in ctx: WorktreeContext) async throws -> LintTarget {
-        let root = ctx.location.worktreeRoot
-        let paths = try ScopePaths(options.paths, from: currentDirectory, in: root)
-        let finder = ChangeFinder(runner: runner)
-        guard scope != .all else {
-            return LintTarget(scope: scope, base: nil, files: paths.narrow(try await finder.everyFile(in: root)), paths: paths)
-        }
-        let base = try await BaseResolver(runner: runner).resolve(in: root, flag: options.base, recorded: ctx.state.base)
-        let changed = try await finder.changed(in: root, since: base.forkPoint)
-        return LintTarget(scope: scope, base: base, files: paths.narrow(changed), paths: paths)
+    /// The files in scope, found the way `xcd format` finds them too.
+    func target(_ options: LintOptions, _ scope: QualityScope, in ctx: WorktreeContext) async throws -> QualityTarget {
+        try await TargetFinder(runner: runner, currentDirectory: currentDirectory).target(scope, paths: options.paths, base: options.base, in: ctx)
     }
 
-    func report(_ tool: String, _ scope: QualityScope, _ target: LintTarget, in ctx: WorktreeContext) -> LintReport {
+    func report(_ tool: String, _ scope: QualityScope, _ target: QualityTarget, in ctx: WorktreeContext) -> LintReport {
         LintReport(tool: tool, scope: scope, base: target.base?.name, baseCommit: target.base?.forkPoint, files: target.files.count,
                    worktree: ctx.state.name)
     }
 
     /// SwiftLint on the files in scope. Only the default scope compares with the fork point.
-    func swiftLint(_ target: LintTarget, path: String?, args: [String], in ctx: WorktreeContext) async throws -> LintReport {
+    func swiftLint(_ target: QualityTarget, path: String?, args: [String], in ctx: WorktreeContext) async throws -> LintReport {
         var report = report(Self.swiftLint, target.scope, target, in: ctx)
         guard !target.files.isEmpty else { return report.nothingInScope(under: target.paths.prefixes) }
         let root = ctx.location.worktreeRoot
@@ -131,7 +107,7 @@ public struct LintService: Sendable {
 
     /// The project's own command on the files in scope. It sees whole files, so the default scope is the changed
     /// files. With `--all` and no paths it is handed no files and covers the project its own way.
-    func ownCommand(_ command: String, _ target: LintTarget, in ctx: WorktreeContext) async throws -> LintReport {
+    func ownCommand(_ command: String, _ target: QualityTarget, in ctx: WorktreeContext) async throws -> LintReport {
         var report = report(Self.firstLine(of: command), target.scope == .all ? .all : .files, target, in: ctx)
         guard !target.files.isEmpty else { return report.nothingInScope(under: target.paths.prefixes) }
         let files = target.scope == .all && target.paths.isEmpty ? [] : target.files.map(\.path)
