@@ -8,7 +8,7 @@ import Testing
 
     /// Every `xcd <command>` the agent-facing docs mention is a real command, so they can't drift from the CLI.
     @Test(arguments: ["docs/agents/AGENTS-snippet.md", "skills/xcdev/SKILL.md", "README.md", "docs/agents/guides/setup.md",
-                      "docs/agents/guides/ui.md", "docs/agents/guides/deeplinks.md"])
+                      "docs/agents/guides/ui.md", "docs/agents/guides/deeplinks.md", "docs/agents/guides/quality.md"])
     func docsOnlyNameRealCommands(_ file: String) throws {
         let text = try String(contentsOfFile: Self.repo + "/" + file, encoding: .utf8)
         let regex = try NSRegularExpression(pattern: "`xcd ([a-z-]+)")
@@ -25,6 +25,13 @@ import Testing
     func theDocsPointAtRoutes(_ file: String) throws {
         let text = try String(contentsOfFile: Self.repo + "/" + file, encoding: .utf8)
         #expect(text.contains("`xcd open") && text.contains("`xcd guide deeplinks`"), "\(file) doesn't mention xcd open and its guide")
+    }
+
+    /// An agent that has never seen the project finds `xcd lint` from each of these.
+    @Test(arguments: ["docs/agents/AGENTS-snippet.md", "skills/xcdev/SKILL.md", "README.md"])
+    func theDocsPointAtLint(_ file: String) throws {
+        let text = try String(contentsOfFile: Self.repo + "/" + file, encoding: .utf8)
+        #expect(text.contains("`xcd lint") && text.contains("`xcd guide quality`"), "\(file) doesn't mention xcd lint and its guide")
     }
 
     @Test func theSkillHasFrontMatter() throws {

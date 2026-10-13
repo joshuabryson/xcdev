@@ -20,6 +20,8 @@ working in parallel never collide.
   `xcd ui type <text> --into <target>`; `xcd ui swipe up`; `xcd ui wait <target>` to confirm what happened, or add
   `--tree` to an action to get the tree after it. An "ambiguous" failure lists the candidates with refs to
   pick from. None of it takes focus on the Mac. `xcd guide ui` has the whole loop.
+- Before you call a change done: `xcd lint` lists the lint findings your change introduced, using the project's
+  own linter. Fix those, and leave the older ones it counts alone. `xcd guide quality` explains the result.
 - Every failure ends with `next:`; do that. `--json` gives one JSON object per command; `xcd help errors` lists codes.
 - If simulators or worktrees misbehave: `xcd doctor`, then `xcd doctor --fix`. Read the problems first: `--fix` may
   restart CoreSimulator, which shuts down every agent's simulators.
