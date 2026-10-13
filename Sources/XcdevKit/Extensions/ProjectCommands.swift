@@ -15,7 +15,8 @@ public struct ProjectCommandRunner: Sendable {
     }
 
     /// Prepares what the command `needs`, then runs `/bin/sh -c '<run> "$@"' xcd-<name> <arguments…>` from the
-    /// worktree root, sharing xcd's stdin, stdout, and stderr. Returns the command's exit code.
+    /// worktree root, sharing xcd's stdin, stdout, and stderr. `<run>` is the command without what ends it (`script`).
+    /// Returns the command's exit code.
     public func run(_ name: String, arguments: [String], in ctx: inout WorktreeContext) async throws -> Int32 {
         guard let spec = ctx.config.commands?[name] else {
             throw XcdError(.usage, "no command named '\(name)' under commands: in .xcdev.yml", next: "run `xcd help` to see every command")
@@ -33,7 +34,7 @@ public struct ProjectCommandRunner: Sendable {
         if device == nil { device = try? builds.provisioner.deviceName(requested, config: ctx.config) }
 
         let context = ContextInfo.build(ctx: ctx, device: device, output: output)
-        let invocation = Invocation("/bin/sh", ["-c", spec.run + " \"$@\"", "xcd-" + name] + arguments,
+        let invocation = Invocation("/bin/sh", ["-c", Self.script(spec.run), "xcd-" + name] + arguments,
                                     environment: context.environment, workingDirectory: ctx.location.worktreeRoot,
                                     timeout: spec.timeoutDuration, passthrough: true)
         fflush(stdout)    // anything xcd printed before the child must not land after the child's output
@@ -52,6 +53,25 @@ public struct ProjectCommandRunner: Sendable {
         default: break
         }
         return result.exitCode
+    }
+
+    /// What `/bin/sh -c` is given for a command's `run`: the command with the caller's arguments after it.
+    static func script(_ run: String) -> String {
+        withoutItsEnd(run) + " \"$@\""
+    }
+
+    /// The command without the whitespace, newlines and `;` at its end, so the arguments land on its last line as
+    /// that line's arguments. After a newline or a `;` they would be a command of their own, whose exit code would be
+    /// the result: 0 when there are none, as after a `run` written as a YAML block. A `;` that a backslash escapes is
+    /// an argument of the command, as in `find … -exec … \;`, and stays.
+    static func withoutItsEnd(_ command: String) -> String {
+        var kept = Substring(command)
+        while let last = kept.last, last.isWhitespace || last == ";" {
+            let escaped = kept.dropLast().reversed().prefix { $0 == "\\" }.count % 2 == 1
+            if last == ";" && escaped { break }
+            kept.removeLast()
+        }
+        return String(kept)
     }
 
     /// $XCD_DEVICE, else defaultDevice, else the only device; errors name the command, not `--device`.

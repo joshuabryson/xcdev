@@ -119,7 +119,7 @@ public struct HelpService: Sendable {
         if let spec = config?.commands?[name] {
             var lines = ["xcd \(name) [args…]  (project command from .xcdev.yml)"]
             if let description = spec.description { lines.append(description) }
-            lines.append("runs: \(spec.run) \"$@\"  (from the worktree root, with the XCD_* context variables)")
+            lines.append("runs: \(ProjectCommandRunner.script(spec.run))  (from the worktree root, with the XCD_* context variables)")
             lines.append("needs: " + ((spec.needs ?? []).isEmpty ? "nothing" : (spec.needs ?? []).joined(separator: ", ")))
             lines.append("timeout: " + DurationText.format(spec.timeoutDuration))
             return CommandHelpReport(kind: "project command", name: name, help: lines.joined(separator: "\n"))

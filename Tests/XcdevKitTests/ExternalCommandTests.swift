@@ -128,6 +128,15 @@ import XcdevTestSupport
         #expect(error?.next == "did you mean `xcd help errors`?")
     }
 
+    /// Help shows the command as xcd runs it: a `run` written as a YAML block ends in a newline, which is dropped.
+    @Test func helpDetailShowsABlockRunAsItIsRun() async throws {
+        let config = WorktreeServiceTests.config + "\ncommands:\n  check:\n    run: |\n      ./scripts/check.sh\n"
+        let project = try TempProject.make(config: config)
+        defer { project.remove() }
+        let detail = try await services(project, bin: project.base + "/bin").help.detail("check", builtins: builtins)
+        #expect(detail.text.contains("\nruns: ./scripts/check.sh \"$@\"  (from the worktree root"))
+    }
+
     /// Bare `xcd` lists plugins by name only: it never runs one. `xcd help` asks them to describe themselves.
     @Test func theBareListingRunsNoPlugin() async throws {
         let (project, bin) = try setup(plugins: [])

@@ -39,6 +39,43 @@ import XcdevTestSupport
         #expect(!fake.calls.contains { $0.arguments.starts(with: ["simctl", "clone"]) })
     }
 
+    /// The same runner, with the command's shell a real /bin/sh.
+    func realShell() -> ProjectCommandRunner {
+        let routing = RoutingRunner(fake: fake, realExecutables: ["sh"])
+        return ProjectCommandRunner(builds: BuildService(runner: routing, provisioner: worktree.provisioner), output: .json)
+    }
+
+    /// A `run` written as a YAML block ends in a newline. With the arguments on a line of their own, an empty
+    /// argument list would be an empty command, and its exit 0 the result.
+    @Test func aRunWrittenAsABlockKeepsItsScriptsExitCode() async throws {
+        defer { worktree.remove() }
+        var ctx = try context("  check:\n    run: |\n      false\n")
+        #expect(ctx.config.commands?["check"]?.run == "false\n")
+        #expect(try await realShell().run("check", arguments: [], in: &ctx) == 1)
+    }
+
+    @Test func aRunWrittenAsABlockGetsItsArgumentsOnItsLastLine() async throws {
+        defer { worktree.remove() }
+        var ctx = try context("  show:\n    run: |\n      true\n      printf '[%s]\\n' >seen\n\n")
+        #expect(try await realShell().run("show", arguments: ["a b", "--flag"], in: &ctx) == 0)
+        #expect(try String(contentsOfFile: worktree.root + "/seen", encoding: .utf8) == "[a b]\n[--flag]\n")
+    }
+
+    /// After a `;` the arguments would be a command of their own, and with none its exit code would be the result.
+    @Test func aRunEndedByASemicolonKeepsItsScriptsExitCode() async throws {
+        defer { worktree.remove() }
+        var ctx = try context("  ended: { run: \"false;\" }\n  spaced: { run: \"false ; \" }")
+        #expect(try await realShell().run("ended", arguments: [], in: &ctx) == 1)
+        #expect(try await realShell().run("spaced", arguments: [], in: &ctx) == 1)
+    }
+
+    /// A `;` after a backslash is an argument of the command, as in `find … -exec … \;`, so it is not the command's end.
+    @Test func anEscapedSemicolonAtTheEndOfARunStaysAnArgument() async throws {
+        #expect(ProjectCommandRunner.script(#"printf '[%s]\n' a\;"#) == #"printf '[%s]\n' a\; "$@""#)
+        // Two backslashes are a backslash, so the `;` after them does end the command.
+        #expect(ProjectCommandRunner.script(#"printf '[%s]\n' a\\;"#) == #"printf '[%s]\n' a\\ "$@""#)
+    }
+
     @Test func needsDeviceClonesAndBootsItFirst() async throws {
         defer { worktree.remove() }
         let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
