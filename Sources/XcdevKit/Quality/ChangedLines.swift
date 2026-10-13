@@ -31,10 +31,14 @@ public enum ChangedPart: Sendable, Equatable {
 
 /// Finds the lines of a file that the working tree changed against the fork point.
 public struct ChangedLines: Sendable {
-    /// What every diff is asked with, so that nothing in the person's git settings changes what comes back: no
-    /// lines around a change, none between two changes, renames followed, and no colour, outside diff program, or
-    /// text conversion.
-    static let options = ["diff", "-U0", "--inter-hunk-context=0", "-M", "--no-color", "--no-ext-diff", "--no-textconv"]
+    /// What every diff is asked with, so that the person's git settings, their `GIT_DIFF_OPTS`, and a file git would
+    /// call binary change nothing that comes back: no lines around a change, none between two changes, renames
+    /// followed, every file read as text, and no colour, outside diff program, or text conversion. Not covered: a
+    /// clean filter that changes the number of lines (`filter.<name>.clean`), since git diffs the cleaned text.
+    static let options = ["diff", "-U0", "--inter-hunk-context=0", "-M", "--text", "--no-color", "--no-ext-diff", "--no-textconv"]
+
+    /// git reads this after the command line, so it is set for the process, over the person's own.
+    static let environment = ["GIT_DIFF_OPTS": "-u0"]
 
     public let runner: any ProcessRunning
 
@@ -45,16 +49,19 @@ public struct ChangedLines: Sendable {
     public func part(of file: ScopedFile, in root: String, since forkPoint: String) async throws -> ChangedPart {
         guard let basePath = file.basePath else { return .whole }
         let paths = basePath == file.path ? [basePath] : [basePath, file.path]
-        let diff = try await runner.runChecked(.git(["--literal-pathspecs"] + Self.options + [forkPoint, "--"] + paths, in: root))
+        var invocation = Invocation.git(["--literal-pathspecs"] + Self.options + [forkPoint, "--"] + paths, in: root)
+        invocation.environment = Self.environment
+        let diff = try await runner.runChecked(invocation)
         return Self.parse(diff.stdoutString)
     }
 
-    /// One file's diff as its changed part. The lines of the file itself all start with a space, `+`, `-`, or `\`
-    /// there, so a line that starts with `@@` is a hunk's header and nothing else. A diff that says a file was
-    /// removed is of a path that was a link at the fork point, or that git no longer tracks: what is on disk now has
-    /// no earlier version to be compared with line by line.
+    /// One file's diff as its changed part. A line ends at `\n` or `\r\n`, which Swift counts as one character, so a
+    /// carriage return that git prints at the end of a line of the file does not hide the header after it. The lines
+    /// of the file itself all start with a space, `+`, `-`, or `\` there, so a line that starts with `@@` is a hunk's
+    /// header and nothing else. A diff that says a file was removed is of a path that was a link at the fork point,
+    /// or that git no longer tracks: what is on disk now has no earlier version to be compared with line by line.
     static func parse(_ diff: String) -> ChangedPart {
-        let lines = diff.split(separator: "\n", omittingEmptySubsequences: true)
+        let lines = diff.split(whereSeparator: { $0 == "\n" || $0 == "\r\n" })
         if lines.contains(where: { $0.hasPrefix("deleted file mode") }) { return .whole }
         return .lines(lines.compactMap(range(ofHunk:)))
     }

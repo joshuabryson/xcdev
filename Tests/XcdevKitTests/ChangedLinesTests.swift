@@ -114,6 +114,42 @@ import XcdevTestSupport
         #expect(try await part(project, fork, "B.swift", was: "A.swift") == .lines([LineRange(2, 2), LineRange(4, 4)]))
     }
 
+    /// git reads `GIT_DIFF_OPTS` after the command line, so a person's `-u3` would join lines 2 and 4 into one hunk.
+    @Test func theDiffOptionsVariableDoesNotChangeTheRanges() async throws {
+        let (project, fork) = try project()
+        defer { project.remove() }
+        try project.write(text(editing: [2, 4]), to: "A.swift")
+        let file = ScopedFile(path: "A.swift", basePath: "A.swift")
+        for value in ["-u3", "--unified=3", "-u1"] {
+            let changed = ChangedLines(runner: UnderlyingEnvironmentRunner(["GIT_DIFF_OPTS": value]))
+            #expect(try await changed.part(of: file, in: project.root, since: fork) == .lines([LineRange(2, 2), LineRange(4, 4)]), "\(value)")
+        }
+    }
+
+    /// A file git calls binary has no hunks to read, which would look like a file the change only renamed.
+    @Test func aFileGitCallsBinaryIsStillMeasuredLineByLine() async throws {
+        let (project, fork) = try project()
+        defer { project.remove() }
+        try project.write(text(editing: [2, 4]), to: "A.swift")
+        for attributes in ["*.swift -diff\n", "*.swift binary\n"] {
+            try project.write(attributes, to: ".gitattributes")
+            #expect(try await part(project, fork) == .lines([LineRange(2, 2), LineRange(4, 4)]), "\(attributes)")
+        }
+    }
+
+    /// A carriage return before the newline keeps `split(separator: "\n")` from breaking the line, and the next
+    /// header with it.
+    @Test func aHunkHeaderAfterALineEndingInCRLFIsStillRead() async throws {
+        #expect(ChangedLines.parse("@@ -3 +2,0 @@\n-a\r\n@@ -7 +6 @@\n-b\n+c\n") == .lines([LineRange(6, 6)]))
+        let (project, _) = try project()
+        defer { project.remove() }
+        let crlf = Self.ten.replacingOccurrences(of: "\n", with: "\r\n")
+        try project.write(crlf, to: "A.swift")
+        let base = try project.commit("Windows line endings")
+        try project.write(crlf.replacingOccurrences(of: "= 2\r", with: "= 0\r").replacingOccurrences(of: "= 4\r", with: "= 0\r"), to: "A.swift")
+        #expect(try await part(project, base) == .lines([LineRange(2, 2), LineRange(4, 4)]))
+    }
+
     @Test func aFileInAnUnresolvedConflictHasItsMarkersAmongItsChangedLines() async throws {
         let (project, fork) = try project()
         defer { project.remove() }
@@ -136,5 +172,18 @@ import XcdevTestSupport
         defer { project.remove() }
         let error = await #expect(throws: XcdError.self) { _ = try await part(project, "0000000000000000000000000000000000000001") }
         #expect(error?.code == .subprocessFailed)
+    }
+}
+
+/// Starts the real process with `underlying` in its environment, under the invocation's own, as a person's shell would.
+private struct UnderlyingEnvironmentRunner: ProcessRunning {
+    let underlying: [String: String]
+
+    init(_ underlying: [String: String]) { self.underlying = underlying }
+
+    func run(_ invocation: Invocation) async throws -> ProcessOutput {
+        var wrapped = invocation
+        wrapped.environment = underlying.merging(invocation.environment) { _, own in own }
+        return try await SystemProcessRunner().run(wrapped)
     }
 }
