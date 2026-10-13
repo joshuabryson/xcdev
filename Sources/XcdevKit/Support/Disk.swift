@@ -1,0 +1,25 @@
+import Foundation
+
+/// The folder operations a scratch folder needs. Each call uses a file manager of its own, since nothing is kept
+/// from one call to the next.
+enum Disk {
+    /// Makes the folder and the folders on the way to it. One that is already there is left as it is.
+    static func makeFolder(_ path: String) throws {
+        try FileManager().createDirectory(atPath: path, withIntermediateDirectories: true)
+    }
+
+    /// Deletes the folder and what it holds. Nothing happens when it is not there.
+    static func remove(_ path: String) {
+        try? FileManager().removeItem(atPath: path)
+    }
+
+    /// The regular files under the folder, relative to it, in order. Empty when it is not a folder. Links are left out.
+    static func files(under path: String) -> [String] {
+        let below = (try? FileManager().subpathsOfDirectory(atPath: path)) ?? []
+        return below.sorted().filter { isRegularFile(path + "/" + $0) }
+    }
+
+    static func isRegularFile(_ path: String) -> Bool {
+        (try? URL(fileURLWithPath: path).resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+    }
+}
