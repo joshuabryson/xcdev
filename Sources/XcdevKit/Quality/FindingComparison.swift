@@ -23,11 +23,12 @@ public enum FindingComparison {
     }
 
     /// The key of each finding. A finding with no line, or with a line the text does not have, has no text.
-    /// Lines end where a compiler ends them: at LF, CRLF, or CR. (In a Swift string CRLF is one character.)
+    /// Lines are counted as SwiftLint counts them: a CR and an LF each end one, so a line that ends in CRLF is
+    /// followed by an empty line, and a finding on the third line of a CRLF file is reported on line 5.
     static func keys(_ findings: [LintFinding], in text: String) -> [Key] {
-        let lines = text.split(omittingEmptySubsequences: false) { $0 == "\n" || $0 == "\r\n" || $0 == "\r" }
+        let lines = text.unicodeScalars.split(omittingEmptySubsequences: false) { $0 == "\n" || $0 == "\r" }
         return findings.map { finding in
-            let line = finding.line.flatMap { lines.indices.contains($0 - 1) ? lines[$0 - 1] : nil }
+            let line = finding.line.flatMap { lines.indices.contains($0 - 1) ? String(lines[$0 - 1]) : nil }
             return Key(rule: finding.rule, text: (line ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
         }
     }

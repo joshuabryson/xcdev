@@ -107,9 +107,28 @@ import Testing
         #expect(newLines(current, against: version("one line\n", [])) == [40])
     }
 
+    /// SwiftLint counts a CR and an LF each as a line end, so the second source line of a CRLF file is line 3.
     @Test func windowsLineEndingsDoNotMakeEveryFindingNew() {
         let base = version("print(1)\nprint(2)\n", [(1, "no_print"), (2, "no_print")])
-        let current = version("print(1)\r\nprint(2)\r\n", [(1, "no_print"), (2, "no_print")])
+        let current = version("print(1)\r\nprint(2)\r\n", [(1, "no_print"), (3, "no_print")])
+        #expect(newLines(current, against: base).isEmpty)
+    }
+
+    @Test func aFindingOnAnEditedLineOfAFileWithWindowsLineEndingsIsNew() {
+        let base = version("let a = 1\r\nlet b = 2 // TODO: b\r\nlet c = 3\r\n", [(3, "todo")])
+        let current = version("let a = 1\r\nlet b = 2 // TODO: c\r\nlet c = 3\r\n", [(3, "todo")])
+        #expect(newLines(current, against: base) == [3])
+    }
+
+    @Test func aNeighbouringLineEditedInAFileWithWindowsLineEndingsLeavesFindingsOld() {
+        let base = version("let a = 1 // TODO: a\r\nlet b = 2 // TODO: b\r\nlet c = 3\r\n", [(1, "todo"), (3, "todo")])
+        let current = version("let a = 1 // TODO: a\r\nlet b = 2 // TODO: b\r\nlet c = 4\r\n", [(1, "todo"), (3, "todo")])
+        #expect(newLines(current, against: base).isEmpty)
+    }
+
+    @Test func aFileWithOnlyCarriageReturnsKeepsItsFindingsOld() {
+        let base = version("print(1)\nprint(2)\n", [(1, "no_print"), (2, "no_print")])
+        let current = version("print(1)\rprint(2)\r", [(1, "no_print"), (2, "no_print")])
         #expect(newLines(current, against: base).isEmpty)
     }
 
