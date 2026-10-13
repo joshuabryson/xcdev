@@ -14,6 +14,14 @@ import XcdevTestSupport
         #expect(services.media.currentDirectory == "/cwd")
     }
 
+    /// `xcd lint` reads paths from where it is run, and looks for the linter in this process's PATH first.
+    @Test func lintGetsTheCurrentDirectoryThePathAndTheOutputFormat() {
+        let services = Services(runner: FakeProcessRunner(), globalPaths: GlobalPaths(base: "/h"), currentDirectory: "/cwd",
+                                environment: ["PATH": "/custom/bin:/usr/bin"], output: .json)
+        #expect(services.lint.currentDirectory == "/cwd" && services.lint.output == .json)
+        #expect(services.lint.locator.folders == ["/custom/bin", "/usr/bin", "/opt/homebrew/bin", "/usr/local/bin"])
+    }
+
     @Test func uiServicesShareTheLauncherAndTransport() {
         let detached = FakeDetachedProcesses()
         let transport = FakeRunnerTransport()
