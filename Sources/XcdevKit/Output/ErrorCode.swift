@@ -59,7 +59,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .usage: return "The command line is wrong: an unknown flag, a bad value, or a missing argument."
         case .notInProject: return "The current directory isn't inside a git repository (or has no Xcode project for init)."
         case .configMissing: return "The project has no .xcdev.yml; run `xcd guide setup`."
-        case .configInvalid: return ".xcdev.yml (or .xcdev.local.yml, or an init answer) has an unknown key or a bad value."
+        case .configInvalid: return ".xcdev.yml (or .xcdev.local.yml, or an init answer) has an unknown key or a bad value, or the project's lint config names a path by an absolute path, which `xcd lint` cannot follow."
         case .deviceUnknown: return "--device names a device that isn't under devices: in .xcdev.yml."
         case .deviceTypeUnknown: return "A device's type isn't a simulator device type installed with this Xcode."
         case .worktreeNotFound: return "No worktree with that name, or its checkout was deleted outside xcd."
