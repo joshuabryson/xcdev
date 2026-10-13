@@ -14,7 +14,7 @@ public struct LintReport: Reportable {
     public static let noTool = "none"
     static let rerun = "run `xcd lint` again"
 
-    /// What ran: `swiftlint`, the project's own command as written, or `none`.
+    /// What ran: `swiftlint`, the first line of the project's own command, or `none`.
     public let tool: String
     public let scope: QualityScope
     /// The ref the change is measured against, and the commit where the work left it. Absent with `--all`.

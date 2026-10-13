@@ -230,6 +230,32 @@ import XcdevTestSupport
         #expect(!fake.calls.contains { $0.argv.first == "swiftlint" })
     }
 
+    /// A command written as a YAML block (`run: |`) ends in a newline, which must not break the result's first line.
+    @Test func aCommandWrittenAsABlockIsShownWithoutItsNewline() async throws {
+        let (project, _) = try project("version: 1\nproject: App.xcodeproj\nlint:\n  run: |\n    echo checked\n")
+        defer { project.remove() }
+        try change(project)
+        let ctx = try await context(project)
+        #expect(ctx.config.lintSetup == .command("echo checked\n"))
+        let report = try await service(project).lint(LintOptions(), in: ctx)
+        #expect(report.tool == "echo checked")
+        #expect(report.text.components(separatedBy: "\n").first == "lint: passed  tool=echo checked  files=2  base=main  0.0s")
+        #expect(report.output == "checked Sources/App/A.swift Sources/App/C.swift\n")
+    }
+
+    /// A script of several lines is named by its first line, trimmed, and ` …`. All of it still runs.
+    @Test func aCommandOfSeveralLinesIsShownByItsFirstLine() async throws {
+        let (project, _) = try project("version: 1\nproject: App.xcodeproj\nlint:\n  run: |\n    echo one  \n    echo two\n")
+        defer { project.remove() }
+        try change(project)
+        let ctx = try await context(project)
+        #expect(ctx.config.lintSetup == .command("echo one  \necho two\n"))
+        let report = try await service(project).lint(LintOptions(), in: ctx)
+        #expect(report.tool == "echo one …")
+        #expect(report.text.components(separatedBy: "\n").first == "lint: passed  tool=echo one …  files=2  base=main  0.0s")
+        #expect(report.output == "one\ntwo Sources/App/A.swift Sources/App/C.swift\n")
+    }
+
     @Test func aProjectsOwnCommandThatFailsIsLintFailed() async throws {
         let (project, _) = try project("version: 1\nproject: App.xcodeproj\nlint:\n  run: \"echo bad; exit 4 #\"\n")
         defer { project.remove() }

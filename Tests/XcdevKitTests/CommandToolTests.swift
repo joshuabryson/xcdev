@@ -35,6 +35,27 @@ import XcdevTestSupport
         #expect(result.output == "[My App/A.swift]\n")
     }
 
+    /// After a `;` the files would be a command of their own, and with no files its exit code would be the result.
+    @Test func aCommandEndedByASemicolonKeepsItsExitCode() async throws {
+        defer { worktree.remove() }
+        let ctx = try context()
+        let ended = try await tool().run("false;", section: "lint", files: [], in: ctx)
+        #expect(ended.exitCode == 1)
+        let spaced = try await tool().run("false ; \n", section: "lint", files: [], in: ctx)
+        #expect(spaced.exitCode == 1)
+    }
+
+    /// A `;` after a backslash is an argument of the command, as in `find … -exec … \;`, so it is not the command's end.
+    @Test func anEscapedSemicolonAtTheEndStaysAnArgument() async throws {
+        defer { worktree.remove() }
+        let ctx = try context()
+        let result = try await tool().run(#"printf '[%s]\n' a\;"#, section: "lint", files: ["B.swift"], in: ctx)
+        #expect(result.output == "[a;]\n[B.swift]\n")
+        // Two backslashes are a backslash, so the `;` after them does end the command.
+        let ended = try await tool().run(#"printf '[%s]\n' a\\;"#, section: "lint", files: ["B.swift"], in: ctx)
+        #expect(ended.output == "[a\\]\n[B.swift]\n")
+    }
+
     @Test func outputThatIsNotUTF8IsStillShown() async throws {
         defer { worktree.remove() }
         let ctx = try context()

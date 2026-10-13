@@ -37,8 +37,7 @@ public struct CommandTool: Sendable {
             throw XcdError(.usage, "\(files.count) files are too many to hand to \(section).run on one command line",
                            next: "pass --all with no paths so the command covers the project its own way, or name fewer paths")
         }
-        // The end is trimmed so the files land on the command's last line, not on a line of their own.
-        let command = String(command.reversed().drop(while: \.isWhitespace).reversed())
+        let command = Self.withoutItsEnd(command)
         let log = ctx.paths.newArtifact(in: ctx.paths.logs, kind: section, ext: "log", now: now())
         let context = ContextInfo.build(ctx: ctx, device: nil, output: output)
         let invocation = Invocation("/bin/sh", ["-c", command + " \"$@\"", "xcd-" + section] + files, environment: context.environment,
@@ -55,6 +54,19 @@ public struct CommandTool: Sendable {
                            details: ["command: \(command)", "log: \(log)"] + printed.split(separator: "\n").suffix(20).map(String.init))
         }
         return Result(exitCode: exitCode, output: printed, log: log)
+    }
+
+    /// The command without the whitespace, newlines and `;` at its end, so the files land on its last line as that
+    /// line's arguments. After a newline or a `;` they would be a command of their own, whose exit code would be the
+    /// result. A `;` that a backslash escapes is an argument of the command, as in `find … -exec … \;`, and stays.
+    static func withoutItsEnd(_ command: String) -> String {
+        var kept = Substring(command)
+        while let last = kept.last, last.isWhitespace || last == ";" {
+            let escaped = kept.dropLast().reversed().prefix { $0 == "\\" }.count % 2 == 1
+            if last == ";" && escaped { break }
+            kept.removeLast()
+        }
+        return String(kept)
     }
 
     /// The runner's timeout error, with this command's message and next step, and the command and the log as its details

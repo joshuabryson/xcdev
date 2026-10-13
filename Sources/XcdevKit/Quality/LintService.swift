@@ -132,7 +132,7 @@ public struct LintService: Sendable {
     /// The project's own command on the files in scope. It sees whole files, so the default scope is the changed
     /// files. With `--all` and no paths it is handed no files and covers the project its own way.
     func ownCommand(_ command: String, _ target: LintTarget, in ctx: WorktreeContext) async throws -> LintReport {
-        var report = report(command, target.scope == .all ? .all : .files, target, in: ctx)
+        var report = report(Self.firstLine(of: command), target.scope == .all ? .all : .files, target, in: ctx)
         guard !target.files.isEmpty else { return report.nothingInScope(under: target.paths.prefixes) }
         let files = target.scope == .all && target.paths.isEmpty ? [] : target.files.map(\.path)
         let started = now()
@@ -142,5 +142,13 @@ public struct LintService: Sendable {
         report.log = result.log
         report.seconds = now().timeIntervalSince(started)
         return report
+    }
+
+    /// A project's command as the result names it: its first line, trimmed, and ` …` when more lines follow. A
+    /// command written as a YAML block (`run: |`) ends in a newline, and a script of several lines would land whole
+    /// in the result's first line. Empty lines are not counted.
+    static func firstLine(of command: String) -> String {
+        let lines = command.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        return (lines.first ?? "") + (lines.count > 1 ? " …" : "")
     }
 }
