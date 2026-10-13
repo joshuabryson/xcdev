@@ -22,10 +22,12 @@ public struct LintFolder: Sendable {
 
     /// Copies the lint config that applies to `files` (paths relative to the worktree root) as it is in the
     /// working tree, and SwiftLint's cache of remote configs when the worktree has one. `args` are the project's
-    /// extra SwiftLint arguments, which may name config files.
+    /// extra SwiftLint arguments, which may name config files. Throws `config_invalid`, before it writes anything,
+    /// for a config that holds an absolute path SwiftLint would follow out of the folder.
     public func copyConfig(from worktreeRoot: String, for files: [String], args: [String]) throws {
+        let configs = try LintConfigFiles(worktreeRoot: worktreeRoot).paths(for: files, args: args)
         let cache = Disk.files(under: worktreeRoot + "/" + LintConfigFiles.cacheFolder).map { LintConfigFiles.cacheFolder + "/" + $0 }
-        for path in LintConfigFiles(worktreeRoot: worktreeRoot).paths(for: files, args: args) + cache {
+        for path in configs + cache {
             try write(try Data(contentsOf: URL(fileURLWithPath: worktreeRoot + "/" + path)), to: path)
         }
     }

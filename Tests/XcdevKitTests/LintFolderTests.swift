@@ -95,9 +95,48 @@ import Testing
         defer { folder.remove() }
         let beside = (folder.root as NSString).deletingLastPathComponent + "/" + name
         defer { try? FileManager.default.removeItem(atPath: beside) }
-        try folder.copyConfig(from: worktree.root, for: ["A.swift"], args: ["--config", "/etc/hosts", "--config", "missing.yml", "--config"])
+        try folder.copyConfig(from: worktree.root, for: ["A.swift"], args: ["--config", "missing.yml", "--config", "../\(name)", "--config"])
         #expect(try contents(of: folder) == [".swiftlint.yml"])
         #expect(!FileManager.default.fileExists(atPath: beside))               // nothing was written beside the folder either
+    }
+
+    /// SwiftLint follows an absolute path out of the folder it runs in and lints the files beside it.
+    @Test(arguments: [
+        Refusal(files: [:], args: ["--config", "/etc/hosts"], subject: "lint.args: --config /etc/hosts"),
+        Refusal(files: [:], args: ["--config=/etc/hosts"], subject: "lint.args: --config /etc/hosts"),
+        Refusal(files: [".swiftlint.yml": "parent_config: /shared/base.yml\n"], args: [],
+                subject: ".swiftlint.yml: parent_config: /shared/base.yml"),
+        Refusal(files: ["Sources/App/.swiftlint.yml": "child_config: /shared/more.yml\n"], args: [],
+                subject: "Sources/App/.swiftlint.yml: child_config: /shared/more.yml"),
+        Refusal(files: [".swiftlint.yml": "included:\n  - Sources\n  - /elsewhere/Sources\n"], args: [],
+                subject: ".swiftlint.yml: included: /elsewhere/Sources"),
+    ])
+    func aConfigWithAnAbsolutePathIsRefusedAndNothingIsWritten(_ refusal: Refusal) throws {
+        let worktree = try Worktree(refusal.files.merging(["Sources/App/A.swift": "let a = 1\n"]) { first, _ in first })
+        let folder = try LintFolder.create()
+        defer { folder.remove() }
+        let error = try #require(throws: XcdError.self) {
+            try folder.copyConfig(from: worktree.root, for: ["Sources/App/A.swift"], args: refusal.args)
+        }
+        #expect(error.code == .configInvalid)
+        #expect(error.message == refusal.subject + " is an absolute path, which xcd lint cannot follow")
+        #expect(error.next?.contains("lint.run") == true)
+        #expect(try contents(of: folder).isEmpty)
+    }
+
+    @Test func aConfigWhoseIncludedHoldsOnlyRelativeEntriesIsCopied() throws {
+        let worktree = try Worktree([".swiftlint.yml": "included:\n  - Sources\n  - ./Tests\nexcluded: [/not/checked]\n"])
+        let folder = try LintFolder.create()
+        defer { folder.remove() }
+        try folder.copyConfig(from: worktree.root, for: [], args: [])
+        #expect(try contents(of: folder) == [".swiftlint.yml"])
+    }
+
+    struct Refusal: Sendable, CustomTestStringConvertible {
+        let files: [String: String]
+        let args: [String]
+        let subject: String
+        var testDescription: String { subject }
     }
 
     /// SwiftLint keeps its copy of a `parent_config` that is a URL here, and uses it when it cannot reach the URL.
