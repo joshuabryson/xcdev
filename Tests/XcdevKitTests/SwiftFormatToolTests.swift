@@ -22,6 +22,7 @@ import XcdevTestSupport
 
     /// A stand-in SwiftFormat: it reads its standard input and prints it with `change` applied to the lines of the
     /// range it was given (to every line without one). The lines are numbered from 1 and come without their newline.
+    /// Like the real tool, it leaves a last line alone when no newline follows it.
     func install(stderr: String = "", _ change: @escaping @Sendable (Int, String) -> [String]) {
         runner.stub(["swiftformat"]) { [inputs] invocation in
             let text = try String(contentsOfFile: invocation.inputFile ?? "", encoding: .utf8)
@@ -31,9 +32,10 @@ import XcdevTestSupport
                 let ends = invocation.arguments[flag + 1].split(separator: ",").compactMap { Int($0) }
                 range = ends[0]...ends[1]
             }
-            let lines = text.split(separator: "\n", omittingEmptySubsequences: false).dropLast().enumerated()
+            let parts = text.split(separator: "\n", omittingEmptySubsequences: false)
+            let lines = parts.dropLast().enumerated()
             let printed = lines.flatMap { range.contains($0.offset + 1) ? change($0.offset + 1, String($0.element)) : [String($0.element)] }
-            return ProcessOutput(exitCode: 0, stdout: printed.map { $0 + "\n" }.joined(), stderr: stderr)
+            return ProcessOutput(exitCode: 0, stdout: printed.map { $0 + "\n" }.joined() + (parts.last ?? ""), stderr: stderr)
         }
     }
 
@@ -78,10 +80,60 @@ import XcdevTestSupport
         }
         let answer = try await tool(scratch).format(job([LineRange(2, 2), LineRange(6, 7)]))
         #expect(answer.text == nil)
-        #expect(answer.said == ["swiftformat changed a line above lines 6-7, the range it was given, so the file was left as it was"])
+        #expect(answer.said == [Self.refusal("lines 6-7")])
+        #expect(answer.transcript.hasSuffix(Self.refusal("lines 6-7") + "\n"))         // the log says why, after the pass's own lines
         #expect(runner.calls.count == 1)                                             // the pass for lines 2-2 never ran
         // A range that starts at line 1 has no line above it.
         #expect(try await tool(scratch).format(job([LineRange(1, 3)])).text == "// a header\n" + Self.ten)
+    }
+
+    static func refusal(_ range: String) -> String {
+        "swiftformat changed a line above \(range), the range it was given, so the file was left as it was; `xcd format --files` formats the file whole"
+    }
+
+    @Test func aRangeOfOneLineIsNamedAsOneLine() async throws {
+        let scratch = try ScratchFolder.create(for: "format")
+        defer { scratch.remove() }
+        runner.stub(["swiftformat"]) { invocation in
+            ProcessOutput(exitCode: 0, stdout: "// a header\n" + (try String(contentsOfFile: invocation.inputFile ?? "", encoding: .utf8)))
+        }
+        let answer = try await tool(scratch).format(job([LineRange(8, 8)]))
+        #expect(answer.said == [Self.refusal("line 8")])
+    }
+
+    /// What the real tool does with ordinary code: `else {` alone on its line is joined to the `}` above it.
+    @Test func anElseJoinedToTheBraceAboveRefusesTheFileAndTheLogSaysWhy() async throws {
+        let scratch = try ScratchFolder.create(for: "format")
+        defer { scratch.remove() }
+        let given = "func f() {\n    if a {\n    }\n    else {\n    }\n}\n"
+        runner.stub(["swiftformat"], stdout: "func f() {\n    if a {\n    } else {\n    }\n}\n")
+        let answer = try await tool(scratch).format(job([LineRange(1, 1), LineRange(4, 4)], text: given))
+        #expect(answer.text == nil && answer.said == [Self.refusal("line 4")])
+        #expect(runner.calls.count == 1 && answer.transcript.hasSuffix(Self.refusal("line 4") + "\n"))
+    }
+
+    /// The real tool leaves the last token of a text out of a range when no newline ends the text, and damages it.
+    @Test func aRangedPassOverATextWithoutAFinalNewlineIsHandedOneAndTheNewlineIsTakenOffAgain() async throws {
+        let scratch = try ScratchFolder.create(for: "format")
+        defer { scratch.remove() }
+        install { _, line in [line.uppercased()] }
+        let answer = try await tool(scratch).format(job([LineRange(3, 3)], text: "line 1\nline 2\nline 3"))
+        #expect(answer.text == "line 1\nline 2\nLINE 3")
+        #expect(inputs.value == ["line 1\nline 2\nline 3\n"])
+    }
+
+    @Test func aTextThatEndsInANewlineIsHandedOverAsItIsAndSoIsOneFormattedWhole() async throws {
+        let scratch = try ScratchFolder.create(for: "format")
+        defer { scratch.remove() }
+        install { _, line in [line.uppercased()] }
+        let ranged = try await tool(scratch).format(job([LineRange(3, 3)], text: "a\nb\nc\n"))
+        #expect(ranged.text == "a\nb\nC\n" && inputs.value == ["a\nb\nc\n"])
+        let whole = try await tool(scratch).format(job(text: "a\nb\nc"))
+        #expect(inputs.value.last == "a\nb\nc" && whole.text == "A\nB\nc")      // no range: as it is, and what the tool gave is kept
+        let crlf = try await tool(scratch).format(job([LineRange(1, 1)], text: "a\r\n"))
+        #expect(inputs.value.last == "a\r\n" && crlf.text == "a\r\n")                 // CRLF is one character to Swift, two bytes to the tool
+        let empty = try await tool(scratch).format(job([LineRange(1, 1)], text: ""))
+        #expect(inputs.value.last == "" && empty.text == "")
     }
 
     /// The lines above are compared as bytes: Swift takes CRLF for one character, and two spellings of an accented
