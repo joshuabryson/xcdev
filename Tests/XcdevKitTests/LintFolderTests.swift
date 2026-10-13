@@ -23,7 +23,18 @@ import XcdevTestSupport
             try text.write(toFile: full, atomically: true, encoding: .utf8)
         }
 
+        /// A folder beside the worktree for scratch folders to be made under, so that a test can read what is left there.
+        func emptyFolder() throws -> String {
+            try FileManager.default.createDirectory(atPath: base + "/tmp", withIntermediateDirectories: true)
+            return base + "/tmp"
+        }
+
         deinit { try? FileManager.default.removeItem(atPath: base) }
+    }
+
+    /// A handler whose line goes nowhere: these tests read what it does to a folder.
+    static func quietInterrupts() -> Interrupts {
+        Interrupts(report: { _ in /* not what these tests read */ })
     }
 
     /// Every file and link in the folder, as relative paths in order. A link ends in ` -> `.
@@ -55,7 +66,7 @@ import XcdevTestSupport
     /// Ctrl-C ends xcd while the folder is being filled: the handler removes the folder, and a write that comes after
     /// must not bring it back, since xcd exits before anything could remove it again.
     @Test func afterAnInterruptTheFolderIsGoneAndNothingIsWrittenToIt() throws {
-        let interrupts = Interrupts(report: { _ in /* the handler's line is not what this test reads */ })
+        let interrupts = Self.quietInterrupts()
         let folder = try LintFolder.create(removedBy: interrupts)
         defer { folder.remove() }
         try folder.write(Data("let a = 1\n".utf8), to: "Sources/App/A.swift")
@@ -71,8 +82,7 @@ import XcdevTestSupport
     /// which holds the write open with no clock. The handler's wait is what reads the pipe.
     @Test(.timeLimit(.minutes(1))) func theHandlerWaitsForAWriteThatIsUnderWay() throws {
         let worktree = try Worktree([:])
-        let parent = worktree.base + "/tmp"
-        try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
+        let parent = try worktree.emptyFolder()
         let pipe = Shared<Int32>(-1)
         let written = DispatchSemaphore(value: 0)
         let waits = Counter()
@@ -111,9 +121,8 @@ import XcdevTestSupport
     /// An interrupt that came first: the folder is never made, so there is nothing to leave behind.
     @Test func onceInterruptedNoFolderIsMade() throws {
         let worktree = try Worktree([:])
-        let parent = worktree.base + "/tmp"
-        try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
-        let interrupts = Interrupts(report: { _ in /* the handler's line is not what this test reads */ })
+        let parent = try worktree.emptyFolder()
+        let interrupts = Self.quietInterrupts()
         _ = interrupts.handle(SIGINT)
         #expect(throws: XcdError.self) { _ = try LintFolder.create(removedBy: interrupts, under: parent) }
         #expect(try FileManager.default.contentsOfDirectory(atPath: parent).isEmpty)
@@ -122,9 +131,8 @@ import XcdevTestSupport
     /// A folder that was removed in the ordinary way is no longer the handler's to remove.
     @Test func removingTheFolderTakesItOffTheHandlersList() throws {
         let worktree = try Worktree([:])
-        let parent = worktree.base + "/tmp"
-        try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
-        let interrupts = Interrupts(report: { _ in /* the handler's line is not what this test reads */ })
+        let parent = try worktree.emptyFolder()
+        let interrupts = Self.quietInterrupts()
         let folder = try LintFolder.create(removedBy: interrupts, under: parent)
         folder.remove()
         try FileManager.default.createDirectory(atPath: folder.root, withIntermediateDirectories: true)   // something else's now

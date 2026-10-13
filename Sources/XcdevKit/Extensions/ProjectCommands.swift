@@ -21,18 +21,7 @@ public struct ProjectCommandRunner: Sendable {
         guard let spec = ctx.config.commands?[name] else {
             throw XcdError(.usage, "no command named '\(name)' under commands: in .xcdev.yml", next: "run `xcd help` to see every command")
         }
-        let requested = environment["XCD_DEVICE"].flatMap { $0.isEmpty ? nil : $0 }
-        var device: String?
-        if spec.needsDevice {
-            let name = try deviceForCommand(name, requested: requested, config: ctx.config)
-            if ctx.config.allDevices[name]?.isMac != true {
-                _ = try await builds.provisioner.boot(name, in: &ctx)
-            }
-            device = name
-        }
-        if spec.needsBuild { try await ensureBuild(for: name, device: requested, in: &ctx) }
-        if device == nil { device = try? builds.provisioner.deviceName(requested, config: ctx.config) }
-
+        let device = try await prepare(name, spec, in: &ctx)
         let context = ContextInfo.build(ctx: ctx, device: device, output: output)
         let invocation = Invocation("/bin/sh", ["-c", Self.script(spec.run), "xcd-" + name] + arguments,
                                     environment: context.environment, workingDirectory: ctx.location.worktreeRoot,
@@ -53,6 +42,22 @@ public struct ProjectCommandRunner: Sendable {
         default: break
         }
         return result.exitCode
+    }
+
+    /// Boots the device and makes the build the command `needs`. Returns the device the command's context names:
+    /// the one it needs, else the one `XCD_DEVICE` or the config would pick, which is not booted for it.
+    func prepare(_ name: String, _ spec: ProjectCommandSpec, in ctx: inout WorktreeContext) async throws -> String? {
+        let requested = environment["XCD_DEVICE"].flatMap { $0.isEmpty ? nil : $0 }
+        var device: String?
+        if spec.needsDevice {
+            let name = try deviceForCommand(name, requested: requested, config: ctx.config)
+            if ctx.config.allDevices[name]?.isMac != true {
+                _ = try await builds.provisioner.boot(name, in: &ctx)
+            }
+            device = name
+        }
+        if spec.needsBuild { try await ensureBuild(for: name, device: requested, in: &ctx) }
+        return device ?? (try? builds.provisioner.deviceName(requested, config: ctx.config))
     }
 
     /// What `/bin/sh -c` is given for a command's `run`: the command with the caller's arguments after it.
