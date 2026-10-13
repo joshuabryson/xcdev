@@ -1,0 +1,68 @@
+import Foundation
+
+/// Runs a project's own command for a quality section, such as `lint.run`.
+public struct CommandTool: Sendable {
+    public static let timeout: Duration = .seconds(600)
+    /// The longest file list handed to a command, in bytes. A command line holds about a megabyte, and the
+    /// environment takes its share of that.
+    public static let longestFileList = 250_000
+
+    public struct Result: Sendable, Equatable {
+        public let exitCode: Int32
+        /// What the command printed, stdout and stderr in the order they came.
+        public let output: String
+        public let log: String
+    }
+
+    public let runner: any ProcessRunning
+    /// Passed to the command as XCD_OUTPUT.
+    public let output: OutputFormat
+    public let timeout: Duration
+    public let now: @Sendable () -> Date
+
+    public init(runner: any ProcessRunning, output: OutputFormat = .text, timeout: Duration = CommandTool.timeout,
+                now: @escaping @Sendable () -> Date = { Date() }) {
+        self.runner = runner
+        self.output = output
+        self.timeout = timeout
+        self.now = now
+    }
+
+    /// Runs `/bin/sh -c '<command> "$@"' xcd-<section> <files…>` from the worktree root with the worktree's context
+    /// variables, the way a project command gets its arguments, so a path with a space stays one argument. The
+    /// command runs once. Its exit code is returned, not thrown, except 126 and 127: those are the shell saying it
+    /// could not run the command, which is not a result. `section` is the config section, `lint`.
+    public func run(_ command: String, section: String, files: [String], in ctx: WorktreeContext) async throws -> Result {
+        guard files.reduce(0, { $0 + $1.utf8.count + 1 }) <= Self.longestFileList else {
+            throw XcdError(.usage, "\(files.count) files are too many to hand to \(section).run on one command line",
+                           next: "pass --all with no paths so the command covers the project its own way, or name fewer paths")
+        }
+        let log = ctx.paths.newArtifact(in: ctx.paths.logs, kind: section, ext: "log", now: now())
+        let context = ContextInfo.build(ctx: ctx, device: nil, output: output)
+        let invocation = Invocation("/bin/sh", ["-c", command + " \"$@\"", "xcd-" + section] + files, environment: context.environment,
+                                    workingDirectory: ctx.location.worktreeRoot, timeout: timeout, outputFile: log)
+        let exitCode: Int32
+        do {
+            exitCode = try await runner.run(invocation).exitCode
+        } catch var error as XcdError where error.code == .timeout {
+            error.message = "the project's \(section) command timed out after \(DurationText.format(timeout))"
+            error.next = "make \(section).run finish sooner, or name paths to give it fewer files"
+            throw error
+        }
+        let printed = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""
+        if let next = Self.notRun(exitCode, section: section) {
+            throw XcdError(.subprocessFailed, "the project's \(section) command could not be run (exit \(exitCode))", next: next,
+                           details: ["command: \(command)", "log: \(log)"] + printed.split(separator: "\n").suffix(20).map(String.init))
+        }
+        return Result(exitCode: exitCode, output: printed, log: log)
+    }
+
+    /// What to do about the shell's "not found" (127) and "not executable" (126). Nil for any other exit code.
+    static func notRun(_ exitCode: Int32, section: String) -> String? {
+        switch exitCode {
+        case 127: return "its command was not found; check \(section).run in .xcdev.yml (paths are relative to the worktree root)"
+        case 126: return "its script is not executable; run `chmod +x` on it"
+        default: return nil
+        }
+    }
+}
