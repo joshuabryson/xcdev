@@ -6,7 +6,9 @@ import Foundation
 /// left alone too: doctor cannot tell a config file added later from one the person declined.
 public struct QualitySetupCheck: DoctorCheck {
     static let section = "lint:\n  tool: swiftlint\n"
-    static let byHand = "add `lint: { tool: swiftlint }` to \(ConfigLoader.fileName)"
+    static let edit = "`lint: { tool: swiftlint }` to \(ConfigLoader.fileName)"
+    static let byHand = "add " + edit
+    static let done = "added " + edit + "; the change is yours to commit"
 
     public let id = "quality-setup"
 
@@ -19,7 +21,7 @@ public struct QualitySetupCheck: DoctorCheck {
         guard let found = QualityDetection.lintConfigFile(in: root) else { return [] }
         let message = "\(ConfigLoader.fileName) has no `lint:` section, and the project has a \(found), so `xcd lint` is not set up"
         return [DoctorProblem(check: id, message: message, action: .addLintSection, fix: Self.byHand + "; the change is then yours to commit",
-                              subject: root + "/" + ConfigLoader.fileName)]
+                              subject: root + "/" + ConfigLoader.fileName, done: Self.done)]
     }
 
     /// Adds the section at the end of the file as it is now, not as `detect` saw it, and writes the result only

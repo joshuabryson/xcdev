@@ -30,17 +30,20 @@ public struct DoctorProblem: Codable, Sendable, Equatable {
     public let next: String?
     /// What the fix acts on: a simulator's udid, a registry id, a worktree path, the cache directory, or a package cache.
     public let subject: String?
+    /// What the fix did, in words, for the line of a fixed problem.
+    public let done: String?
     public var fixed = false
     public var fixError: String?
 
     public init(check: String, message: String, action: Action? = nil, fix: String? = nil, next: String? = nil,
-                subject: String? = nil) {
+                subject: String? = nil, done: String? = nil) {
         self.check = check
         self.message = message
         self.action = action
         self.fix = fix
         self.next = next
         self.subject = subject
+        self.done = done
     }
 }
 

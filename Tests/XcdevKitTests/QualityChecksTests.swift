@@ -8,6 +8,7 @@ import XcdevTestSupport
 @Suite struct QualityChecksTests {
     static let base = "version: 1\nproject: App.xcodeproj\n"
     static let problem = ".xcdev.yml has no `lint:` section, and the project has a .swiftlint.yml, so `xcd lint` is not set up"
+    static let done = "added `lint: { tool: swiftlint }` to .xcdev.yml; the change is yours to commit"
     static let fix = "add `lint: { tool: swiftlint }` to .xcdev.yml; the change is then yours to commit"
 
     /// The doctor of `SwiftLintCheckTests`: simulators from the simctl-list fixture, and git run for real.
@@ -43,12 +44,15 @@ import XcdevTestSupport
         #expect(report.checks.map(\.id).suffix(4) == ["quality-setup", "quality-tools", "project", "swiftlint"])
         #expect(report.problems.filter { $0.check == "quality-setup" } == [
             DoctorProblem(check: "quality-setup", message: Self.problem, action: .addLintSection, fix: Self.fix,
-                          subject: project.root + "/.xcdev.yml")])
+                          subject: project.root + "/.xcdev.yml", done: Self.done)])
+        #expect(!report.text.contains("added `lint:"))
         #expect(report.text.contains("problem  quality-setup  \(Self.problem)  (--fix: \(Self.fix))"))
         #expect(try config(project) == Self.base)                               // reported only, without --fix
 
         let fixed = await doctor(project).run(fix: true, checks: [QualitySetupCheck()], from: project.root)
         #expect(fixed.problems.map(\.fixed) == [true] && fixed.failure == nil)
+        #expect(fixed.text.contains("fixed    quality-setup  \(Self.problem)  (\(Self.done))"))
+        #expect(String(decoding: try JSONEncoder().encode(fixed.problems), as: UTF8.self).contains(Self.done))
         #expect(try config(project) == Self.base + "lint:\n  tool: swiftlint\n")
         #expect(try ConfigLoader.load(worktreeRoot: project.root, projectRoot: project.root).lintSetup == .swiftlint(path: nil, args: []))
         let after = await doctor(project).run(fix: false, checks: [QualitySetupCheck()], from: project.root)

@@ -51,6 +51,7 @@ public struct DoctorReport: Reportable {
                 var line: String
                 if problem.fixed {
                     line = "fixed    \(check.id)  \(problem.message)"
+                    if let done = problem.done { line += "  (\(done))" }
                 } else if let error = problem.fixError {
                     line = "failed   \(check.id)  \(problem.message)  (fix failed: \(error))"
                 } else {
