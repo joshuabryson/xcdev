@@ -17,6 +17,32 @@ import XcdevTestSupport
         try worktree.context("version: 1\nproject: App.xcodeproj\nlint:\n  run: ./scripts/lint.sh\n", container: "App.xcodeproj")
     }
 
+    func lintLogs(_ ctx: WorktreeContext) -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: ctx.paths.logs)) ?? []).filter { $0.hasSuffix("-lint.log") }.sorted()
+    }
+
+    @Test func aCommandEndedByANewlineKeepsItsExitCode() async throws {
+        defer { worktree.remove() }
+        let ctx = try context()
+        #expect(try await tool().run("false\n", section: "lint", files: [], in: ctx).exitCode == 1)
+    }
+
+    @Test func aCommandEndedByANewlineGetsAPathWithASpaceAsOneArgument() async throws {
+        defer { worktree.remove() }
+        let ctx = try context()
+        let result = try await tool().run("printf '[%s]\\n'\n\n", section: "lint", files: ["My App/A.swift"], in: ctx)
+        #expect(result.exitCode == 0)
+        #expect(result.output == "[My App/A.swift]\n")
+    }
+
+    @Test func outputThatIsNotUTF8IsStillShown() async throws {
+        defer { worktree.remove() }
+        let ctx = try context()
+        let result = try await tool().run(#"printf 'one\n\351 two\n'; exit 1"#, section: "lint", files: [], in: ctx)
+        #expect(result.exitCode == 1)
+        #expect(result.output.contains("one") && result.output.contains("two"))
+    }
+
     @Test func theFilesArriveAsArgumentsAfterTheCommandsOwn() async throws {
         defer { worktree.remove() }
         let ctx = try context()
@@ -75,9 +101,12 @@ import XcdevTestSupport
         let fits = Array(repeating: name, count: 2_500)
         #expect(try await tool().run("echo $#", section: "lint", files: fits, in: ctx).output.hasPrefix("2500 aaa"))
 
+        let before = lintLogs(ctx)
         let error = await #expect(throws: XcdError.self) {
-            _ = try await tool().run("echo $#", section: "lint", files: fits + ["b"], in: ctx)
+            _ = try await tool().run("touch ran; echo $#", section: "lint", files: fits + ["b"], in: ctx)
         }
+        #expect(!FileManager.default.fileExists(atPath: worktree.root + "/ran"))    // nothing ran
+        #expect(lintLogs(ctx) == before)
         #expect(error?.code == .usage)
         #expect(error?.message == "2501 files are too many to hand to lint.run on one command line")
         #expect(error?.next == "pass --all with no paths so the command covers the project its own way, or name fewer paths")
@@ -93,6 +122,8 @@ import XcdevTestSupport
         #expect(error?.code == .timeout)
         #expect(error?.message == "the project's lint command timed out after 0.3s")
         #expect(error?.next == "make lint.run finish sooner, or name paths to give it fewer files")
+        #expect(error?.details.first == "command: sleep 30; touch finished")
+        #expect(error?.details.count == 2 && error?.details.last?.hasPrefix("log: \(worktree.root)/.xcdev/logs/") == true)
         #expect(!FileManager.default.fileExists(atPath: marker))
     }
 }

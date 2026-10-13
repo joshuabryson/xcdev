@@ -37,6 +37,8 @@ public struct CommandTool: Sendable {
             throw XcdError(.usage, "\(files.count) files are too many to hand to \(section).run on one command line",
                            next: "pass --all with no paths so the command covers the project its own way, or name fewer paths")
         }
+        // The end is trimmed so the files land on the command's last line, not on a line of their own.
+        let command = String(command.reversed().drop(while: \.isWhitespace).reversed())
         let log = ctx.paths.newArtifact(in: ctx.paths.logs, kind: section, ext: "log", now: now())
         let context = ContextInfo.build(ctx: ctx, device: nil, output: output)
         let invocation = Invocation("/bin/sh", ["-c", command + " \"$@\"", "xcd-" + section] + files, environment: context.environment,
@@ -44,17 +46,32 @@ public struct CommandTool: Sendable {
         let exitCode: Int32
         do {
             exitCode = try await runner.run(invocation).exitCode
-        } catch var error as XcdError where error.code == .timeout {
-            error.message = "the project's \(section) command timed out after \(DurationText.format(timeout))"
-            error.next = "make \(section).run finish sooner, or name paths to give it fewer files"
-            throw error
+        } catch let error as XcdError where error.code == .timeout {
+            throw timedOut(error, command: command, section: section, log: log)
         }
-        let printed = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""
+        let printed = Self.text(of: log)
         if let next = Self.notRun(exitCode, section: section) {
             throw XcdError(.subprocessFailed, "the project's \(section) command could not be run (exit \(exitCode))", next: next,
                            details: ["command: \(command)", "log: \(log)"] + printed.split(separator: "\n").suffix(20).map(String.init))
         }
         return Result(exitCode: exitCode, output: printed, log: log)
+    }
+
+    /// The runner's timeout error, with this command's message and next step, and the command and the log as its details
+    /// instead of the whole argument list.
+    private func timedOut(_ error: XcdError, command: String, section: String, log: String) -> XcdError {
+        var error = error
+        error.message = "the project's \(section) command timed out after \(DurationText.format(timeout))"
+        error.next = "make \(section).run finish sooner, or name paths to give it fewer files"
+        error.details = ["command: \(command)", "log: \(log)"]
+        return error
+    }
+
+    /// What the command printed, decoded leniently so a byte that is not UTF-8 does not hide the rest. A log that cannot
+    /// be read is empty.
+    private static func text(of log: String) -> String {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: log)) else { return "" }
+        return String(decoding: data, as: UTF8.self)
     }
 
     /// What to do about the shell's "not found" (127) and "not executable" (126). Nil for any other exit code.
