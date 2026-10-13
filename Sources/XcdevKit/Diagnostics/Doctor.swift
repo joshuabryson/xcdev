@@ -17,6 +17,7 @@ public struct DoctorProblem: Codable, Sendable, Equatable {
         case stopRunner = "stop_ui_runner"
         case forgetRunner = "forget_ui_runner"
         case excludeFromSwiftLint = "exclude_from_swiftlint"
+        case addLintSection = "add_lint_section"
     }
 
     /// The check's id, e.g. "orphaned-clones".

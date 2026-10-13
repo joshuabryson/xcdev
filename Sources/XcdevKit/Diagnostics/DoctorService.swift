@@ -104,12 +104,12 @@ public struct DoctorService: Sendable {
 
     /// Every check, in the order fixes should happen: worktrees before the clones they leave behind. Scratch
     /// folders and package caches depend on nothing else, so they come after the simulators, before the project's
-    /// own setup and its SwiftLint config.
+    /// `lint:` section, its own setup, and its SwiftLint config.
     public static var allChecks: [any DoctorCheck] {
         [CoreSimulatorCheck(), MissingWorktreesCheck(), IncompleteWorktreesCheck(), OrphanedClonesCheck(),
          StuckClonesCheck(), TemplatesCheck(), RecordingsCheck(), StaleUIRunnersCheck(),
          InitScratchCheck(), PackageCacheCheck(),
-         ProjectCheck(), SwiftLintCheck()]
+         QualitySetupCheck(), QualityToolsCheck(), ProjectCheck(), SwiftLintCheck()]
     }
 
     /// `xcd prune`: worktrees that are gone, and clones nothing owns.
