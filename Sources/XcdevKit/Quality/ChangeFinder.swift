@@ -39,7 +39,8 @@ public struct ChangeFinder: Sendable {
     }
 
     /// `git diff --name-status -z`: a status, then one path, or two for a rename (the old one first). A deleted
-    /// file is listed like a modified one here; `swiftFiles` drops it, since it is not on disk.
+    /// file is listed like a modified one here; `swiftFiles` drops it, since it is not on disk, or is there only
+    /// through a link.
     static func parse(nameStatus records: [String]) -> [ScopedFile] {
         var files: [ScopedFile] = []
         var rest = records[...]
@@ -51,13 +52,46 @@ public struct ChangeFinder: Sendable {
         return files
     }
 
-    /// The regular files among `files` that end in `.swift`, each once, in path order. A link is not a regular file.
+    /// The regular files among `files` that end in `.swift`, each once, in path order. A link is not a regular file,
+    /// and a file under a folder that is a link is not the worktree's: git lists a tracked folder that was replaced
+    /// by a link as files that were deleted, while their paths lead through the link to whatever is there.
     static func swiftFiles(_ files: [ScopedFile], in root: String) -> [ScopedFile] {
         var seen = Set<String>()
+        var linked = LinkedFolders(root: root)
         return files.filter { file in
-            guard file.path.hasSuffix(".swift"), seen.insert(file.path).inserted else { return false }
+            guard file.path.hasSuffix(".swift"), seen.insert(file.path).inserted, !linked.hold(file.path) else { return false }
             let values = try? URL(fileURLWithPath: root + "/" + file.path).resourceValues(forKeys: [.isRegularFileKey])
             return values?.isRegularFile == true
         }.sorted { $0.path < $1.path }
+    }
+}
+
+/// Which folders of a worktree are links, each looked at once.
+struct LinkedFolders {
+    let root: String
+    /// Each folder asked about so far, by its full path, and whether it is a link.
+    private var links: [String: Bool] = [:]
+
+    init(root: String) { self.root = root }
+
+    /// Whether the file at `path`, relative to the root, lies under a folder that is a link, so that its path leads
+    /// out of the folder git knows it in. Each folder on the way is looked at. The path with its links resolved is
+    /// not compared with the path as git gave it: resolving also spells every name as the disk has it, which is
+    /// another case than git's after a rename that changed only the case.
+    mutating func hold(_ path: String) -> Bool {
+        var folder = root
+        for name in path.split(separator: "/").dropLast() {
+            folder += "/" + name
+            if isLink(folder) { return true }
+        }
+        return false
+    }
+
+    private mutating func isLink(_ folder: String) -> Bool {
+        if let known = links[folder] { return known }
+        let values = try? URL(fileURLWithPath: folder, isDirectory: false).resourceValues(forKeys: [.isSymbolicLinkKey])
+        let isLink = values?.isSymbolicLink == true
+        links[folder] = isLink
+        return isLink
     }
 }
