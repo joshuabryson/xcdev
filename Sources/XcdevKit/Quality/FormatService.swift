@@ -109,7 +109,8 @@ extension FormatService {
             ? SwiftFormatTool(runner: host.runner, executable: executable, args: named.args, worktreeRoot: root, scratch: scratch)
             : AppleSwiftFormatTool(runner: host.runner, executable: executable, args: named.args, worktreeRoot: root)
         let one = FileFormatter(tool: tool, worktreeRoot: root, check: check, interrupts: host.interrupts)
-        let files = try await each(target.files) { file in try await formatted(file, by: one, in: target, root) }
+        let (files, failure) = await each(target.files) { file in try await formatted(file, by: one, in: target, root) }
+        if let failure { throw ending(failure, after: files, check: check) }
         let transcript = files.map(\.transcript).joined()
         report.fill(from: files, tool: named.kind.rawValue)
         report.log = transcript.isEmpty ? nil : writeLog(transcript, in: ctx)
@@ -137,22 +138,49 @@ extension FormatService {
         return try await ChangedLines(runner: host.runner).part(of: file, in: root, since: base.forkPoint)
     }
 
-    /// `work` on each file, up to `atOnce` at a time. The results are in the files' order.
-    func each(_ files: [ScopedFile], _ work: @escaping @Sendable (ScopedFile) async throws -> FormattedFile) async throws -> [FormattedFile] {
-        try await withThrowingTaskGroup(of: (Int, FormattedFile).self) { group in
+    /// `work` on each file, up to `atOnce` at a time. The results are in the files' order. Once a file's work throws,
+    /// no further file is started, and the ones under way are let finish: a file whose formatter already answered may
+    /// still be written, and what was written has to be known. `failure` is the first error thrown.
+    func each(_ files: [ScopedFile], _ work: @escaping @Sendable (ScopedFile) async throws -> FormattedFile) async -> (done: [FormattedFile], failure: (any Error)?) {
+        await withTaskGroup(of: (Int, Result<FormattedFile, any Error>).self) { group in
             var results = [FormattedFile?](repeating: nil, count: files.count)
             var waiting = Array(files.indices.reversed())
+            var failure: (any Error)?
             var running = 0
-            while !waiting.isEmpty || running > 0 {
+            while running > 0 || !waiting.isEmpty {
                 while running < atOnce, let index = waiting.popLast() {
-                    group.addTask { (index, try await work(files[index])) }
+                    group.addTask {
+                        do { return (index, .success(try await work(files[index]))) } catch { return (index, .failure(error)) }
+                    }
                     running += 1
                 }
-                if let (index, file) = try await group.next() { results[index] = file }
+                guard let (index, result) = await group.next() else { break }
                 running -= 1
+                switch result {
+                case .success(let file): results[index] = file
+                case .failure(let error):
+                    failure = failure ?? error
+                    waiting = []
+                }
             }
-            return results.compactMap { $0 }
+            return (results.compactMap { $0 }, failure)
         }
+    }
+
+    /// The error that ends the command after a file's formatter could not be run, with the files that were rewritten
+    /// before it. A check rewrote none: its files have lines listed, and were not written.
+    func ending(_ failure: any Error, after files: [FormattedFile], check: Bool) -> any Error {
+        guard let error = failure as? XcdError, !check else { return failure }
+        return Self.naming(files.filter { $0.lines != nil }.map(\.path), in: error)
+    }
+
+    /// `error` with the files that were rewritten before it ended the command, one per line under a line that says so:
+    /// the result that would have listed them is never printed. With none, the error is as it was.
+    static func naming(_ rewritten: [String], in error: XcdError) -> XcdError {
+        guard !rewritten.isEmpty else { return error }
+        var error = error
+        error.details += ["reformatted before this error:"] + rewritten
+        return error
     }
 
     /// Writes what the formatter runs said to a log, and returns its path. A log that cannot be written is no
@@ -192,7 +220,8 @@ extension FormatService {
 
     /// The project's own command on the files in scope. It sees whole files, so the default scope is the changed
     /// files. With `--all` and no paths it is handed no files and covers the project its own way. xcd reads the
-    /// files in scope before and after a `run`, and lists the ones that differ.
+    /// files in scope before and after a `run`, and lists the ones that differ. A `run` that could not be run to its
+    /// end (the shell's 126 or 127, or the timeout) may have rewritten files before that: its error names them.
     func ownCommand(_ command: String, _ target: QualityTarget, check: Bool, in ctx: WorktreeContext) async throws -> FormatReport {
         var report = FormatReport(tool: LintService.firstLine(of: command), scope: target.scope == .all ? .all : .files, base: target.base,
                                   files: target.files.count, check: check, worktree: ctx.state.name)
@@ -203,7 +232,12 @@ extension FormatService {
         let before = check ? nil : FileStamps(of: target.files.map(\.path), in: root)
         var tool = CommandTool(runner: host.runner, output: host.output, now: host.now)
         tool.key = check ? "check" : "run"
-        let result = try await tool.run(command, section: Self.section, files: handed, in: ctx)
+        let result: CommandTool.Result
+        do {
+            result = try await tool.run(command, section: Self.section, files: handed, in: ctx)
+        } catch let error as XcdError where error.code == .subprocessFailed || error.code == .timeout {
+            throw Self.naming(before?.changed(in: root) ?? [], in: error)
+        }
         report.changed = (before?.changed(in: root) ?? []).map { FormatReport.Changed(file: $0, lines: nil) }
         report.notes = [CommandTool.unnamedFilesNote(command, section: Self.section, files: handed.count, key: tool.key)].compactMap { $0 }
         report.exitCode = result.exitCode

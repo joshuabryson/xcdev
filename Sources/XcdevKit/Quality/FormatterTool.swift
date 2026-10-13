@@ -39,6 +39,7 @@ public struct FormatAnswer: Sendable, Equatable {
     /// - A formatter that exits 0 and prints nothing for a file that is not empty left the file out: swift-format
     ///   does so for a file its `.swift-format-ignore` names. The text then stands as it is.
     /// - A run past its deadline is a file the formatter could not process. It does not end the command.
+    /// - A formatter that cannot be started ends the command: the runner's error is thrown on, with what to do next.
     static func from(_ invocation: Invocation, given text: String, on runner: any ProcessRunning) async throws -> FormatAnswer {
         let output: ProcessOutput
         do {
@@ -46,6 +47,9 @@ public struct FormatAnswer: Sendable, Equatable {
         } catch let error as XcdError where error.code == .timeout {
             let limit = DurationText.format(invocation.timeout)
             return FormatAnswer(text: nil, said: ["did not finish in \(limit) and was stopped"], transcript: "$ \(invocation.commandLine)\nstopped after \(limit)\n")
+        } catch var error as XcdError where error.code == .subprocessFailed && error.next == nil {
+            error.next = "see that \(invocation.executable) can be run, or set format.path in .xcdev.local.yml to one that can"
+            throw error
         }
         let said = output.stderrString.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         let transcript = "$ \(invocation.commandLine)\nexit \(output.exitCode)\n" + said.map { $0 + "\n" }.joined()
