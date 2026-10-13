@@ -78,7 +78,9 @@ public struct Services: Sendable {
         ProjectCommandRunner(builds: builds, output: output, environment: environment)
     }
     public var setup: InitService {
-        InitService(runner: runner, globalPaths: globalPaths, progress: activity, interrupts: interrupts)
+        var service = InitService(runner: runner, globalPaths: globalPaths, progress: activity, interrupts: interrupts)
+        service.locator = ToolLocator(environment: environment)
+        return service
     }
     public var doctor: DoctorService { DoctorService(runner: runner, globalPaths: globalPaths, detached: detached,
                                                       runnerClient: RunnerClient(transport: runnerTransport)) }

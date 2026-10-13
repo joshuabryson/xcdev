@@ -12,6 +12,8 @@ public struct InitService: Sendable {
     /// Searched for Swift packages Xcode already resolved, when the project files don't say enough.
     public let xcodeDerivedData: String
     let now: @Sendable () -> Date
+    /// Finds the linter, to say in its decision whether it is installed. By default it finds nothing.
+    public var locator = ToolLocator(environment: [:], extraFolders: [])
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, discovery: XcodeDiscovery? = nil,
                 progress: Activity = .silent, interrupts: Interrupts = .shared,
@@ -30,7 +32,7 @@ public struct InitService: Sendable {
         InitScratch.removeStale(in: globalPaths.cacheDirectory, now: now())
         let location = try await WorktreeLocator(runner: runner).locate(from: directory)
         let root = location.worktreeRoot
-        var plan = try await makePlan(location, container: nil)
+        var plan = try await makePlan(location, container: nil).adding(await quality.lintDecision(in: root))
         let exists = configExists(root)
         if let note = swiftLintNote(in: root, configExists: exists) { plan = plan.noting(note) }
         return InitPlanReport(plan: plan, root: root, configExists: exists)
@@ -61,7 +63,8 @@ public struct InitService: Sendable {
             return unchanged(path: path, root: root)
         }
         let plan = try await makePlan(location, container: answers["project"])
-        let generated = try plan.config(answers: answers)
+        let linter = try QualityInit.chosen(answers, from: await quality.lintDecision(in: root))
+        let generated = try QualityInit.adding(linter, to: plan.config(answers: answers.filter { $0.key != QualityInit.lintKey }))
         try generated.yaml.write(toFile: path, atomically: true, encoding: .utf8)
         let added = try Gitignore.ensure([".xcdev/", ConfigLoader.localFileName, ".xcdev-media/"], in: root)
         var report = InitReport(status: .written, path: path, summary: generated.summary, gitignoreAdded: added)
@@ -72,11 +75,14 @@ public struct InitService: Sendable {
     /// What `init` reports when it keeps the .xcdev.yml that is there. It changes nothing then, so a .swiftlint.yml
     /// that has SwiftLint search .xcdev/ is a warning.
     func unchanged(path: String, root: String) -> InitReport {
-        let project = (try? ConfigLoader.load(worktreeRoot: root, projectRoot: root))?.project
+        let config = try? ConfigLoader.load(worktreeRoot: root, projectRoot: root)
         let lint = SwiftLintConfig.load(in: root).flatMap { $0.searchesStateFolder ? $0 : nil }
-        return InitReport(status: .unchanged, path: path, summary: project.map { ["project: \($0)"] } ?? [],
-                          gitignoreAdded: [], warnings: lint.map { [$0.warning(fixedBy: SwiftLintConfig.doctorFix)] } ?? [])
+        let warnings = (lint.map { [$0.warning(fixedBy: SwiftLintConfig.doctorFix)] } ?? []) + QualityInit.missingSections(config, in: root)
+        return InitReport(status: .unchanged, path: path, summary: (config?.project).map { ["project: \($0)"] } ?? [],
+                          gitignoreAdded: [], warnings: warnings)
     }
+
+    var quality: QualityInit { QualityInit(runner: runner, locator: locator) }
 
     /// Adds .xcdev to the `excluded` list of the project's .swiftlint.yml when SwiftLint would search the folder
     /// (see `SwiftLintConfig`). A file that can't be edited or written is a warning: the config `init` came to

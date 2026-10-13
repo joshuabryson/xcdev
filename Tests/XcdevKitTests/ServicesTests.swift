@@ -20,6 +20,7 @@ import XcdevTestSupport
                                 environment: ["PATH": "/custom/bin:/usr/bin"], output: .json)
         #expect(services.lint.currentDirectory == "/cwd" && services.lint.output == .json)
         #expect(services.lint.locator.folders == ["/custom/bin", "/usr/bin", "/opt/homebrew/bin", "/usr/local/bin"])
+        #expect(services.setup.locator.folders == services.lint.locator.folders)       // `init` says whether the linter is installed
     }
 
     @Test func uiServicesShareTheLauncherAndTransport() {

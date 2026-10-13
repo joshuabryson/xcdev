@@ -56,7 +56,7 @@ import XcdevTestSupport
         defer { project.remove() }
         let before = try files(project.root)
         let report = try await service.plan(from: project.root + "/SampleApp.xcodeproj")
-        #expect(report.decisions.map(\.key) == ["devices.default", "devices.ipad", "devices.watch"])
+        #expect(report.decisions.map(\.key) == ["devices.default", "devices.ipad", "devices.watch", "lint.tool"])
         #expect(report.xcode == "none found (install Xcode from https://developer.apple.com/xcode/)")
         #expect(!report.configExists)
         #expect(try files(project.root) == before)
@@ -254,7 +254,7 @@ import XcdevTestSupport
         try project.write("included:\n  - App\n", to: ".swiftlint.yml")
         let report = try await service.write(answers: [:], force: false, from: project.root)
         #expect(try lintConfig(project) == "included:\n  - App\n")
-        #expect(report.swiftlintExcluded.isEmpty && report.warnings.isEmpty && !report.text.contains("swiftlint"))
+        #expect(report.swiftlintExcluded.isEmpty && report.warnings.isEmpty && !report.text.contains("excluded"))
     }
 
     @Test func aProjectWithoutSwiftLintGetsNoConfigForIt() async throws {
@@ -297,7 +297,7 @@ import XcdevTestSupport
     @Test func thePlanSaysWhatInitWillDoAboutSwiftLint() async throws {
         let (project, service) = try setup()
         defer { project.remove() }
-        #expect(try await !service.plan(from: project.root).text.contains("swiftlint"))
+        #expect(try await !service.plan(from: project.root).text.contains("excluded"))
         try project.write(Self.lintConfig, to: ".swiftlint.yml")
         let report = try await service.plan(from: project.root)
         #expect(report.notes.last == Self.lintProblem + "; `xcd init` adds `.xcdev` to its `excluded` list")
