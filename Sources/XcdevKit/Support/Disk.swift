@@ -22,4 +22,9 @@ enum Disk {
     static func isRegularFile(_ path: String) -> Bool {
         (try? URL(fileURLWithPath: path).resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
     }
+
+    /// Whether `path` is a file this process may run. A link is followed, as Homebrew's commands are links.
+    static func isExecutable(_ path: String) -> Bool {
+        access(path, X_OK) == 0 && isRegularFile(URL(fileURLWithPath: path).resolvingSymlinksInPath().path)
+    }
 }
