@@ -11,7 +11,7 @@ public enum QualityScope: String, Codable, Sendable {
 /// The result of `xcd lint`.
 public struct LintReport: Reportable {
     /// What `tool` says for `lint.tool: none`.
-    public static let noTool = "none"
+    public static let noTool = QualityHeadline.noTool
     static let rerun = "run `xcd lint` again"
 
     /// What ran: `swiftlint`, the first line of the project's own command, or `none`.
@@ -57,14 +57,7 @@ public struct LintReport: Reportable {
 
     /// `lint: 2 new findings  tool=swiftlint  files=3  base=main  1.8s`. With nothing linted, only what and why.
     var headline: String {
-        var parts = ["lint: " + summary]
-        guard tool != Self.noTool else { return parts[0] + "  (lint.tool is none)" }
-        parts.append("tool=\(tool)")
-        guard files > 0 else { return parts.joined(separator: "  ") }
-        parts.append("files=\(files)")
-        if let base { parts.append("base=\(base)") }
-        parts.append(DurationText.format(.seconds(seconds)))
-        return parts.joined(separator: "  ")
+        QualityHeadline(command: "lint", tool: tool, files: files, base: base, seconds: seconds).text(summary)
     }
 
     var summary: String {
@@ -95,7 +88,7 @@ public struct LintReport: Reportable {
     }
 
     static func count(_ number: Int, _ noun: String) -> String {
-        "\(number) \(noun)\(number == 1 ? "" : "s")"
+        QualityHeadline.count(number, noun)
     }
 }
 
@@ -103,13 +96,9 @@ extension LintReport {
     /// This result, worded for no Swift file in scope. `paths` are the ones given, relative to the worktree root.
     public func nothingInScope(under paths: [String]) -> LintReport {
         var report = self
-        let under = paths.isEmpty ? "" : " under " + paths.map { $0.isEmpty ? "." : $0 }.joined(separator: ", ")
-        if let base, scope != .all {
-            report.nothingInScope = "no Swift files changed since \(base)" + under
-            report.notes = ["`xcd lint --all` lints the whole project"]
-        } else {
-            report.nothingInScope = paths.isEmpty ? "no Swift files in the project" : "no Swift files" + under
-        }
+        let wording = scope.nothingInScope(since: base, under: paths)
+        report.nothingInScope = wording.summary
+        if wording.changeHeldNone { report.notes = ["`xcd lint --all` lints the whole project"] }
         return report
     }
 

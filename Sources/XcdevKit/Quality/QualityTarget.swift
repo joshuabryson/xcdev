@@ -12,6 +12,15 @@ extension QualityScope {
         }
         return all ? .all : files ? .files : .lines
     }
+
+    /// What a result's first line says when no Swift file is in scope, and whether that is a change that held none,
+    /// in which case the result points at the whole project. `paths` are the ones given, relative to the worktree
+    /// root.
+    func nothingInScope(since base: String?, under paths: [String]) -> (summary: String, changeHeldNone: Bool) {
+        let under = paths.isEmpty ? "" : " under " + paths.map { $0.isEmpty ? "." : $0 }.joined(separator: ", ")
+        if let base, self != .all { return ("no Swift files changed since \(base)" + under, true) }
+        return (paths.isEmpty ? "no Swift files in the project" : "no Swift files" + under, false)
+    }
 }
 
 /// The Swift files one quality command covers, and what they are measured against.
