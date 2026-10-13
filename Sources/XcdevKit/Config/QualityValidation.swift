@@ -9,6 +9,9 @@ enum QualityValidation {
         "--use-script-input-files", "--use-script-input-file-lists",
     ]
 
+    /// The options of swift-format's `format` that take a value and that xcd does not set itself.
+    static let swiftFormatValueOptions = ["--configuration", "--enable-experimental-feature"]
+
     /// What xcd sets itself for each formatter: the range, where the text comes from and goes, and how much is said.
     static let formatterOwned: [FormatterKind: [String]] = [
         .appleSwiftFormat: ["--lines", "--offsets", "-i", "--in-place", "-r", "--recursive", "-p", "--parallel", "--assume-filename"],
@@ -22,8 +25,13 @@ enum QualityValidation {
     /// list of its rules), which xcd would write over the file, and SwiftFormat's `--strict`, with which it fails on
     /// every file it reformats. `--rules` with nothing after it lists the rules, so the rules are named in .swiftformat.
     static let formatterMisused: [FormatterKind: [String]] = [
-        .appleSwiftFormat: ["--version", "--help", "-h"],
-        .swiftFormat: ["--version", "--help", "--options", "--rules", "--ruleinfo", "--rule-info", "--inferoptions", "--infer-options", "--strict"],
+        .appleSwiftFormat: [
+            "--version", "--help", "-h", "--help-hidden", "--experimental-dump-help", "--generate-completion-script",
+        ],
+        .swiftFormat: [
+            "--version", "--help", "--options", "--rules", "--ruleinfo", "--rule-info", "--inferoptions", "--infer-options",
+            "--strict", "--output-tokens",
+        ],
     ]
 
     static func issues(_ config: XcdevConfig) -> [ConfigIssue] {
@@ -44,6 +52,7 @@ enum QualityValidation {
         var section = ToolSectionCheck(section: "format", hasTool: format.tool != nil, toolRuns: kind != nil, path: format.path,
                                        args: format.args, run: format.run, owned: kind.flatMap { formatterOwned[$0] } ?? [])
         section.misused = kind.flatMap { formatterMisused[$0] } ?? []
+        section.formatter = kind
         var issues = section.issues()
         if let check = format.check {
             if format.run == nil { issues.append(section.issue("check", "is only read with run")) }
@@ -66,6 +75,8 @@ struct ToolSectionCheck {
     let owned: [String]
     /// The tool's arguments that make its run something xcd cannot use.
     var misused: [String] = []
+    /// Set for a formatter, whose arguments are also checked for one dash, and for SwiftFormat's case and hyphens.
+    var formatter: FormatterKind?
 
     func issue(_ key: String, _ message: String) -> ConfigIssue {
         ConfigIssue(path: key.isEmpty ? section : section + "." + key, message: message)
@@ -77,7 +88,7 @@ struct ToolSectionCheck {
         if !hasTool && run == nil { issues.append(issue("", "needs one of tool or run")) }
         if let run, isBlank(run) { issues.append(issue("run", "must not be empty")) }
         if let path { issues += toolOnly("path") + (isBlank(path) ? [issue("path", "must not be empty")] : []) }
-        if let args { issues += toolOnly("args") + ownedIssues(args) }
+        if let args { issues += toolOnly("args") + argumentIssues(args) }
         return issues
     }
 
@@ -88,15 +99,41 @@ struct ToolSectionCheck {
         toolRuns && run == nil ? [] : [issue(key, "is only read with a tool other than none")]
     }
 
-    /// The arguments in `args` that xcd sets itself, and the ones that would change what the run gives xcd, each
-    /// written alone or as `--name=value`.
-    func ownedIssues(_ args: [String]) -> [ConfigIssue] {
+    /// What in `args` cannot be given, one issue per kind of refusal: arguments xcd sets itself, ones that make the run
+    /// give something else, ones with one dash (a formatter picks the option itself), and, for swift-format, bare words
+    /// (it formats them as more files). Each is written alone or as `--name=value`.
+    func argumentIssues(_ args: [String]) -> [ConfigIssue] {
         let names = args.map { String($0.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).first ?? "") }
-        let refusals = [(owned, "xcd sets these itself, so they can't be given"),
-                        (misused, "these make the tool give xcd something other than the formatted file, so they can't be given")]
-        return refusals.compactMap { list, why in
-            let found = names.filter(list.contains)
-            return found.isEmpty ? nil : issue("args", "\(why): \(found.joined(separator: ", "))")
+        let listed = names.filter { isListed($0, owned) || isListed($0, misused) }
+        let refusals = [
+            (names.filter { isListed($0, owned) }, "xcd sets these itself, so they can't be given"),
+            (names.filter { isListed($0, misused) }, "these make the tool give xcd something other than the formatted file, so they can't be given"),
+            (formatter == nil ? [] : names.filter { $0.hasPrefix("-") && !$0.hasPrefix("--") && !listed.contains($0) },
+             "with one dash a formatter picks the option itself, so write an option's full name after two dashes"),
+            (formatter == .appleSwiftFormat ? moreFiles(args) : [],
+             "swift-format takes these for more files to format, so they can't be given"),
+        ]
+        return refusals.compactMap { found, why in
+            found.isEmpty ? nil : issue("args", "\(why): \(found.joined(separator: ", "))")
+        }
+    }
+
+    /// SwiftFormat reads a name after two dashes without regard to case or hyphens; the rest are exact.
+    private func isListed(_ name: String, _ list: [String]) -> Bool {
+        guard formatter == .swiftFormat else { return list.contains(name) }
+        return list.contains { folded($0) == folded(name) }
+    }
+
+    private func folded(_ name: String) -> String {
+        name.hasPrefix("--") ? name.lowercased().replacingOccurrences(of: "-", with: "") : name
+    }
+
+    /// The words that stand where swift-format would read one more file: not an option, and not an option's value (an
+    /// owned option's value is refused with it).
+    private func moreFiles(_ args: [String]) -> [String] {
+        args.indices.compactMap { index in
+            let isValue = index > 0 && (QualityValidation.swiftFormatValueOptions + owned).contains(args[index - 1])
+            return args[index].hasPrefix("-") || isValue ? nil : args[index]
         }
     }
 }

@@ -54,7 +54,7 @@ import Testing
         #expect(issues("  tool: swiftformat\n  args: [\"--line-range\", \"1,2\", \"--linerange\", \"1,2\", \"--stdinpath\", \"a\", \"--lint\", \"--cache=clear\"]")
                 == ["format.args: xcd sets these itself, so they can't be given: --line-range, --linerange, --stdinpath, --lint, --cache"])
         // One formatter's own arguments mean nothing to the other, so they are not looked for there.
-        #expect(issues("  tool: swiftformat\n  args: [\"--lines\", \"-i\"]").isEmpty)
+        #expect(issues("  tool: swiftformat\n  args: [\"--lines\", \"--in-place\"]").isEmpty)
         #expect(issues("  tool: swiftformat\n  args: [\"--config\", \"ci/.swiftformat\", \"--swiftversion\", \"6.0\"]").isEmpty)
     }
 
@@ -70,6 +70,46 @@ import Testing
         #expect(issues("  tool: swiftformat\n  args: [\"--quiet\", \"--version\"]") == [
             "format.args: xcd sets these itself, so they can't be given: --quiet", why + "--version",
         ])
+    }
+
+    /// SwiftFormat reads a name after two dashes without regard to case or hyphens, so the lists do too.
+    @Test func swiftFormatNamesAreComparedWithoutCaseOrHyphens() {
+        let why = "format.args: these make the tool give xcd something other than the formatted file, so they can't be given: "
+        #expect(issues("  tool: swiftformat\n  args: [\"--OUTPUT\", \"a\", \"--Line-Range\", \"1,1\", \"--DRYRUN\"]")
+                == ["format.args: xcd sets these itself, so they can't be given: --OUTPUT, --Line-Range, --DRYRUN"])
+        for name in ["--Version", "--RuleInfo", "--Infer-Options", "--output-tokens", "--outputtokens"] {
+            #expect(issues("  tool: swiftformat\n  args: [\"\(name)\"]") == [why + name])
+        }
+        // swift-format tells case apart, and refuses what it does not know itself.
+        #expect(issues("  tool: swift-format\n  args: [\"--Lines\"]").isEmpty)
+    }
+
+    @Test func moreArgumentsThatPrintSomethingElseAreRefusedForSwiftFormat() {
+        let why = "format.args: these make the tool give xcd something other than the formatted file, so they can't be given: "
+        #expect(issues("  tool: swift-format\n  args: [\"--help-hidden\", \"--experimental-dump-help\", \"--generate-completion-script=zsh\"]")
+                == [why + "--help-hidden, --experimental-dump-help, --generate-completion-script"])
+    }
+
+    @Test func anArgumentWithOneDashIsRefusedForBothFormatters() {
+        let why = "format.args: with one dash a formatter picks the option itself, so write an option's full name after two dashes: "
+        #expect(issues("  tool: swift-format\n  args: [\"-ip\", \"-version\", \"-v\", \"-recursive\"]") == [why + "-ip, -version, -v, -recursive"])
+        #expect(issues("  tool: swiftformat\n  args: [\"-o\", \"x\", \"-i\", \"-vers\", \"-h\", \"-output-t\"]") == [why + "-o, -i, -vers, -h, -output-t"])
+        #expect(issues("  tool: swift-format\n  args: [\"-i\"]") == ["format.args: xcd sets these itself, so they can't be given: -i"])
+        #expect(issues("  tool: swift-format\n  args: [\"-h\"]").count == 1)
+        #expect(QualityConfigTests.issues("  tool: swiftlint\n  args: [\"-x\"]", section: "lint").isEmpty)
+    }
+
+    @Test func swiftFormatTakesABareWordForOneMoreFile() {
+        let why = "format.args: swift-format takes these for more files to format, so they can't be given: "
+        #expect(issues("  tool: swift-format\n  args: [\"Sources/Other.swift\"]") == [why + "Sources/Other.swift"])
+        #expect(issues("  tool: swift-format\n  args: [\"--configuration\", \"ci/format.json\"]").isEmpty)
+        #expect(issues("  tool: swift-format\n  args: [\"--enable-experimental-feature\", \"x\"]").isEmpty)
+        #expect(issues("  tool: swift-format\n  args: [\"--configuration=ci/format.json\"]").isEmpty)
+        #expect(issues("  tool: swift-format\n  args: [\"--configuration\", \"a.json\", \"Other.swift\"]") == [why + "Other.swift"])
+        // The value of an option xcd sets itself is refused with it, not named as a file.
+        #expect(issues("  tool: swift-format\n  args: [\"--lines\", \"1:2\"]") == ["format.args: xcd sets these itself, so they can't be given: --lines"])
+        // SwiftFormat ignores a bare word.
+        #expect(issues("  tool: swiftformat\n  args: [\"--config\", \"ci/.swiftformat\"]").isEmpty)
     }
 
     @Test func anUnknownToolIsRefused() {
