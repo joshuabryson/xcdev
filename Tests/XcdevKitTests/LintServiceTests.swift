@@ -29,9 +29,9 @@ import XcdevTestSupport
 
     func service(_ project: TempProject, from directory: String? = nil, path: String? = nil) -> LintService {
         linter.install(on: fake)
-        return LintService(runner: runner(), locator: ToolLocator(environment: ["PATH": path ?? project.base + "/bin"], extraFolders: []),
-                           currentDirectory: directory ?? project.root, interrupts: Interrupts(), output: .json,
-                           now: { Date(timeIntervalSince1970: 1_790_040_000) })
+        return LintService(QualityHost(runner: runner(), locator: ToolLocator(environment: ["PATH": path ?? project.base + "/bin"], extraFolders: []),
+                                       currentDirectory: directory ?? project.root, interrupts: Interrupts(), output: .json,
+                                       now: { Date(timeIntervalSince1970: 1_790_040_000) }))
     }
 
     func context(_ project: TempProject) async throws -> WorktreeContext {

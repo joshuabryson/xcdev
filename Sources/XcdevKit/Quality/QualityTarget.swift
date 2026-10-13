@@ -52,3 +52,30 @@ struct TargetFinder: Sendable {
         return QualityTarget(scope: scope, base: base, files: paths.narrow(changed), paths: paths)
     }
 }
+
+/// What `xcd lint` and `xcd format` are given by the process they run in.
+public struct QualityHost: Sendable {
+    public let runner: any ProcessRunning
+    /// Finds the project's linter or formatter.
+    public let locator: ToolLocator
+    /// Where paths on the command line are read from.
+    public let currentDirectory: String
+    /// Removes what a command put outside the worktree when a signal ends xcd.
+    public let interrupts: Interrupts
+    /// Passed to a project's own command as XCD_OUTPUT.
+    public let output: OutputFormat
+    public let now: @Sendable () -> Date
+
+    public init(runner: any ProcessRunning, locator: ToolLocator, currentDirectory: String, interrupts: Interrupts,
+                output: OutputFormat = .text, now: @escaping @Sendable () -> Date = { Date() }) {
+        self.runner = runner
+        self.locator = locator
+        self.currentDirectory = currentDirectory
+        self.interrupts = interrupts
+        self.output = output
+        self.now = now
+    }
+
+    /// Works out what a command covers, with paths read from the current directory.
+    var targets: TargetFinder { TargetFinder(runner: runner, currentDirectory: currentDirectory) }
+}

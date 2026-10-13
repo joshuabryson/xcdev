@@ -19,10 +19,12 @@ import XcdevTestSupport
     @Test func lintGetsTheCurrentDirectoryThePathAndTheOutputFormat() {
         let services = Services(runner: FakeProcessRunner(), globalPaths: GlobalPaths(base: "/h"), currentDirectory: "/cwd",
                                 environment: ["PATH": "/custom/bin:/usr/bin"], output: .json, interrupts: Interrupts())
-        #expect(services.lint.currentDirectory == "/cwd" && services.lint.output == .json)
-        #expect(services.lint.interrupts === services.interrupts)
-        #expect(services.lint.locator.folders == ["/custom/bin", "/usr/bin", "/opt/homebrew/bin", "/usr/local/bin"])
-        #expect(services.setup.locator.folders == services.lint.locator.folders)       // `init` says whether the linter is installed
+        let host = services.lint.host
+        #expect(host.currentDirectory == "/cwd" && host.output == .json)
+        #expect(host.interrupts === services.interrupts)
+        #expect(host.locator.folders == ["/custom/bin", "/usr/bin", "/opt/homebrew/bin", "/usr/local/bin"])
+        #expect(services.setup.locator.folders == host.locator.folders)                // `init` says whether the linter is installed
+        #expect(host.targets.currentDirectory == "/cwd")
     }
 
     @Test func uiServicesShareTheLauncherAndTransport() {

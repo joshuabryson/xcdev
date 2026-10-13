@@ -29,24 +29,9 @@ public struct LintService: Sendable {
     static let swiftLint = "swiftlint"
     static let section = "lint"
 
-    public let runner: any ProcessRunning
-    public let locator: ToolLocator
-    /// Where paths on the command line are read from.
-    public let currentDirectory: String
-    public let interrupts: Interrupts
-    /// Passed to a project's own command as XCD_OUTPUT.
-    public let output: OutputFormat
-    public let now: @Sendable () -> Date
+    public let host: QualityHost
 
-    public init(runner: any ProcessRunning, locator: ToolLocator, currentDirectory: String, interrupts: Interrupts,
-                output: OutputFormat = .text, now: @escaping @Sendable () -> Date = { Date() }) {
-        self.runner = runner
-        self.locator = locator
-        self.currentDirectory = currentDirectory
-        self.interrupts = interrupts
-        self.output = output
-        self.now = now
-    }
+    public init(_ host: QualityHost) { self.host = host }
 
     /// The three states of the section: absent is `not_configured`, `tool: none` succeeds
     /// saying so, and a tool or a command runs.
@@ -76,7 +61,7 @@ public struct LintService: Sendable {
 
     /// The files in scope, found the way `xcd format` finds them too.
     func target(_ options: LintOptions, _ scope: QualityScope, in ctx: WorktreeContext) async throws -> QualityTarget {
-        try await TargetFinder(runner: runner, currentDirectory: currentDirectory).target(scope, paths: options.paths, base: options.base, in: ctx)
+        try await host.targets.target(scope, paths: options.paths, base: options.base, in: ctx)
     }
 
     func report(_ tool: String, _ scope: QualityScope, _ target: QualityTarget, in ctx: WorktreeContext) -> LintReport {
@@ -89,19 +74,19 @@ public struct LintService: Sendable {
         var report = report(Self.swiftLint, target.scope, target, in: ctx)
         guard !target.files.isEmpty else { return report.nothingInScope(under: target.paths.prefixes) }
         let root = ctx.location.worktreeRoot
-        guard let executable = locator.locate(Self.swiftLint, path: path, worktreeRoot: root) else {
+        guard let executable = host.locator.locate(Self.swiftLint, path: path, worktreeRoot: root) else {
             throw ToolLocator.missing(Self.swiftLint, section: Self.section, path: path)
         }
-        let started = now()
-        let tool = SwiftLintTool(runner: runner, executable: executable, args: args)
-        let linter = SwiftLintLinter(tool: tool, worktreeRoot: root, interrupts: interrupts)
+        let started = host.now()
+        let tool = SwiftLintTool(runner: host.runner, executable: executable, args: args)
+        let linter = SwiftLintLinter(tool: tool, worktreeRoot: root, interrupts: host.interrupts)
         let result = try await linter.lint(target.files, against: target.scope == .lines ? target.base?.forkPoint : nil)
         report.findings = result.findings
         report.older = result.older
         report.notes = LintReport.toolNotes(result.notes, from: Self.swiftLint)
-        report.log = ctx.paths.newArtifact(in: ctx.paths.logs, kind: Self.section, ext: "log", now: now())
+        report.log = ctx.paths.newArtifact(in: ctx.paths.logs, kind: Self.section, ext: "log", now: host.now())
         try result.transcript.write(toFile: report.log ?? "", atomically: true, encoding: .utf8)
-        report.seconds = now().timeIntervalSince(started)
+        report.seconds = host.now().timeIntervalSince(started)
         return report
     }
 
@@ -111,13 +96,13 @@ public struct LintService: Sendable {
         var report = report(Self.firstLine(of: command), target.scope == .all ? .all : .files, target, in: ctx)
         guard !target.files.isEmpty else { return report.nothingInScope(under: target.paths.prefixes) }
         let files = target.scope == .all && target.paths.isEmpty ? [] : target.files.map(\.path)
-        let started = now()
-        let result = try await CommandTool(runner: runner, output: output, now: now).run(command, section: Self.section, files: files, in: ctx)
+        let started = host.now()
+        let result = try await CommandTool(runner: host.runner, output: host.output, now: host.now).run(command, section: Self.section, files: files, in: ctx)
         report.notes = [CommandTool.unnamedFilesNote(command, section: Self.section, files: files.count)].compactMap { $0 }
         report.exitCode = result.exitCode
         report.output = result.output
         report.log = result.log
-        report.seconds = now().timeIntervalSince(started)
+        report.seconds = host.now().timeIntervalSince(started)
         return report
     }
 
