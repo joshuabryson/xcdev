@@ -95,6 +95,13 @@ import Testing
           lint:
             tool: swiftlint
         """)
+        #expect(try ConfigExplainReport(key: "lint.run").text == """
+        lint.run (string)
+        The project's own lint command, in place of tool. A shell command run from the worktree root with the XCD_* context variables. The Swift files in scope are its arguments, and it names "$@" where they go: xcd adds nothing to the command, so one with no "$@" gets no files. Exit 0 means it passed.
+        example:
+          lint:
+            run: ./scripts/lint.sh "$@"
+        """)
         #expect(try ConfigExplainReport(key: "lint").text.hasSuffix("keys: lint.tool, lint.path, lint.args, lint.run"))
         #expect(try ConfigExplainer.explain("lint.args").type == "list of strings")
     }

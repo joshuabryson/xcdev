@@ -63,9 +63,9 @@ A project whose linter xcd does not know names its own command instead:
 
 ```yaml
 lint:
-  run: ./scripts/lint.sh
+  run: ./scripts/lint.sh "$@"
 ```
 
-xcd runs it from the worktree root with the changed Swift files as its arguments, and with none for `xcd lint --all`. Exit 0 means it passed. Its output is shown as it is. A command sees whole files, so its result does not tell new findings from old ones.
+xcd runs it from the worktree root. `"$@"` is where the changed Swift files go: xcd adds nothing to the command, so one with no `"$@"` gets no files, and the result has a note saying so. `xcd lint --all` passes none. Exit 0 means it passed. Its output is shown as it is. A command sees whole files, so its result does not tell new findings from old ones.
 
 `xcd config explain lint` describes every key.

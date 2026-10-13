@@ -28,45 +28,53 @@ public struct CommandTool: Sendable {
         self.now = now
     }
 
-    /// Runs `/bin/sh -c '<command> "$@"' xcd-<section> <files…>` from the worktree root with the worktree's context
-    /// variables, the way a project command gets its arguments, so a path with a space stays one argument. The
-    /// command runs once. Its exit code is returned, not thrown, except 126 and 127: those are the shell saying it
-    /// could not run the command, which is not a result. `section` is the config section, `lint`.
+    /// Runs `/bin/sh -c '<command>' xcd-<section> <files…>` from the worktree root with the worktree's context
+    /// variables. The files are the shell's arguments, and the command says where they go by naming `"$@"`, so a
+    /// path with a space stays one argument. Nothing is added to the command: after it, the files would be arguments
+    /// of whatever it ends with, which may be a command that writes its arguments. The command runs once. Its exit
+    /// code is returned, not thrown, except 126 and 127: those are the shell saying it could not run the command,
+    /// which is not a result. `section` is the config section, `lint`.
     public func run(_ command: String, section: String, files: [String], in ctx: WorktreeContext) async throws -> Result {
         guard files.reduce(0, { $0 + $1.utf8.count + 1 }) <= Self.longestFileList else {
             throw XcdError(.usage, "\(files.count) files are too many to hand to \(section).run on one command line",
                            next: "pass --all with no paths so the command covers the project its own way, or name fewer paths")
         }
-        let command = Self.withoutItsEnd(command)
+        let shown = command.trimmingCharacters(in: .whitespacesAndNewlines)
         let log = ctx.paths.newArtifact(in: ctx.paths.logs, kind: section, ext: "log", now: now())
         let context = ContextInfo.build(ctx: ctx, device: nil, output: output)
-        let invocation = Invocation("/bin/sh", ["-c", command + " \"$@\"", "xcd-" + section] + files, environment: context.environment,
+        let invocation = Invocation("/bin/sh", ["-c", command, "xcd-" + section] + files, environment: context.environment,
                                     workingDirectory: ctx.location.worktreeRoot, timeout: timeout, outputFile: log)
         let exitCode: Int32
         do {
             exitCode = try await runner.run(invocation).exitCode
         } catch let error as XcdError where error.code == .timeout {
-            throw timedOut(error, command: command, section: section, log: log)
+            throw timedOut(error, command: shown, section: section, log: log)
         }
         let printed = Self.text(of: log)
         if let next = Self.notRun(exitCode, section: section) {
             throw XcdError(.subprocessFailed, "the project's \(section) command could not be run (exit \(exitCode))", next: next,
-                           details: ["command: \(command)", "log: \(log)"] + printed.split(separator: "\n").suffix(20).map(String.init))
+                           details: ["command: \(shown)", "log: \(log)"] + printed.split(separator: "\n").suffix(20).map(String.init))
         }
         return Result(exitCode: exitCode, output: printed, log: log)
     }
 
-    /// The command without the whitespace, newlines and `;` at its end, so the files land on its last line as that
-    /// line's arguments. After a newline or a `;` they would be a command of their own, whose exit code would be the
-    /// result. A `;` that a backslash escapes is an argument of the command, as in `find … -exec … \;`, and stays.
-    static func withoutItsEnd(_ command: String) -> String {
-        var kept = Substring(command)
-        while let last = kept.last, last.isWhitespace || last == ";" {
-            let escaped = kept.dropLast().reversed().prefix { $0 == "\\" }.count % 2 == 1
-            if last == ";" && escaped { break }
-            kept.removeLast()
+    /// Whether the command's text names the shell's arguments: `$@`, `$*`, or one by its number, with or without
+    /// braces. Read from the text alone, so a `$1` inside single quotes counts too.
+    static func namesItsFiles(_ command: String) -> Bool {
+        let parts = command.split(separator: "$", omittingEmptySubsequences: false).dropFirst()
+        return parts.contains { part in
+            guard let named = part.first == "{" ? part.dropFirst().first : part.first else { return false }
+            return named == "@" || named == "*" || ("1"..."9").contains(named)
         }
-        return String(kept)
+    }
+
+    /// What the result says when files were in scope and the command names none of its arguments: it ran without
+    /// them. That is right for a command that covers the project its own way, and wrong for one whose author expected
+    /// the files after it. Nil when the command names them or there were none to hand over.
+    static func unnamedFilesNote(_ command: String, section: String, files: Int) -> String? {
+        guard files > 0, !namesItsFiles(command) else { return nil }
+        return "\(section).run has no \"$@\", so the command did not get the \(files) file\(files == 1 ? "" : "s") in scope; "
+            + "write \"$@\" where the files go"
     }
 
     /// The runner's timeout error, with this command's message and next step, and the command and the log as its details

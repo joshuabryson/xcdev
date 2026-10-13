@@ -137,6 +137,7 @@ public struct LintService: Sendable {
         let files = target.scope == .all && target.paths.isEmpty ? [] : target.files.map(\.path)
         let started = now()
         let result = try await CommandTool(runner: runner, output: output, now: now).run(command, section: Self.section, files: files, in: ctx)
+        report.notes = [CommandTool.unnamedFilesNote(command, section: Self.section, files: files.count)].compactMap { $0 }
         report.exitCode = result.exitCode
         report.output = result.output
         report.log = result.log

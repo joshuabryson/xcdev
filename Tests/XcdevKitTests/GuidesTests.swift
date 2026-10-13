@@ -78,7 +78,7 @@ import Testing
     @Test func qualityGuideCoversTheScopesTheResultAndTheErrors() throws {
         let guide = try Guides.guide("quality")
         #expect(guide.summary == "Lint the code you changed")
-        for word in ["`xcd lint`", "xcd lint --files", "xcd lint --all", "--base <ref>", "tool: swiftlint", "run: ./scripts/lint.sh",
+        for word in ["`xcd lint`", "xcd lint --files", "xcd lint --all", "--base <ref>", "tool: swiftlint", #"run: ./scripts/lint.sh "$@""#,
                      "`.swiftlint.yml`", "`.xcdev.local.yml`", "`xcd doctor --fix`", "`xcd config explain lint`", "(lint.tool is none)",
                      "older findings"] {
             #expect(guide.markdown.contains(word), "the quality guide doesn't mention \(word)")
@@ -86,7 +86,7 @@ import Testing
         // What an agent would otherwise get wrong: fixing findings that were there before, choosing a linter for the
         // user, installing one, and trusting findings made with the linter's default rules.
         for advice in ["Leave the older ones alone", "theirs to decide", "Do not install it yourself", "on a line you did not touch",
-                       "its default rules"] {
+                       "its default rules", #"one with no `"$@"` gets no files"#] {
             #expect(guide.markdown.contains(advice), "the quality guide doesn't say: \(advice)")
         }
         for code in [ErrorCode.notConfigured, .toolMissing, .lintFailed, .usage, .configInvalid, .subprocessFailed] {

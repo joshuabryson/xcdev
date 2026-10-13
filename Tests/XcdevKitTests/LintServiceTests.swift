@@ -217,39 +217,40 @@ import XcdevTestSupport
     }
 
     @Test func aProjectsOwnCommandGetsTheChangedFilesWhole() async throws {
-        let (project, fork) = try project("version: 1\nproject: App.xcodeproj\nlint:\n  run: printf '%s\\n' checked\n")
+        let (project, fork) = try project("version: 1\nproject: App.xcodeproj\nlint:\n  run: printf '%s\\n' checked \"$@\"\n")
         defer { project.remove() }
         try change(project)
         let ctx = try await context(project)
         let report = try await service(project).lint(LintOptions(), in: ctx)
-        #expect(report.tool == "printf '%s\\n' checked" && report.scope == .files)      // a command sees whole files
+        #expect(report.tool == "printf '%s\\n' checked \"$@\"" && report.scope == .files)      // a command sees whole files
         #expect(report.base == "main" && report.baseCommit == fork && report.files == 2)
         #expect(report.exitCode == 0 && report.failure == nil)
         #expect(report.output == "checked\nSources/App/A.swift\nSources/App/C.swift\n")
-        #expect(report.text.hasPrefix("lint: passed  tool=printf '%s\\n' checked  files=2  base=main  0.0s\nchecked\n"))
+        #expect(report.text.hasPrefix("lint: passed  tool=printf '%s\\n' checked \"$@\"  files=2  base=main  0.0s\nchecked\n"))
+        #expect(report.notes.isEmpty)
         #expect(!fake.calls.contains { $0.argv.first == "swiftlint" })
     }
 
     /// A command written as a YAML block (`run: |`) ends in a newline, which must not break the result's first line.
     @Test func aCommandWrittenAsABlockIsShownWithoutItsNewline() async throws {
-        let (project, _) = try project("version: 1\nproject: App.xcodeproj\nlint:\n  run: |\n    echo checked\n")
+        let (project, _) = try project("version: 1\nproject: App.xcodeproj\nlint:\n  run: |\n    echo checked \"$@\"\n")
         defer { project.remove() }
         try change(project)
         let ctx = try await context(project)
-        #expect(ctx.config.lintSetup == .command("echo checked\n"))
+        #expect(ctx.config.lintSetup == .command("echo checked \"$@\"\n"))
         let report = try await service(project).lint(LintOptions(), in: ctx)
-        #expect(report.tool == "echo checked")
-        #expect(report.text.components(separatedBy: "\n").first == "lint: passed  tool=echo checked  files=2  base=main  0.0s")
+        #expect(report.tool == "echo checked \"$@\"")
+        #expect(report.text.components(separatedBy: "\n").first == "lint: passed  tool=echo checked \"$@\"  files=2  base=main  0.0s")
         #expect(report.output == "checked Sources/App/A.swift Sources/App/C.swift\n")
     }
 
     /// A script of several lines is named by its first line, trimmed, and ` …`. All of it still runs.
     @Test func aCommandOfSeveralLinesIsShownByItsFirstLine() async throws {
-        let (project, _) = try project("version: 1\nproject: App.xcodeproj\nlint:\n  run: |\n    echo one  \n    echo two\n")
+        let (project, _) = try project("version: 1\nproject: App.xcodeproj\nlint:\n  run: |\n    echo one  \n    echo two \"$@\"\n")
         defer { project.remove() }
         try change(project)
         let ctx = try await context(project)
-        #expect(ctx.config.lintSetup == .command("echo one  \necho two\n"))
+        #expect(ctx.config.lintSetup == .command("echo one  \necho two \"$@\"\n"))
         let report = try await service(project).lint(LintOptions(), in: ctx)
         #expect(report.tool == "echo one …")
         #expect(report.text.components(separatedBy: "\n").first == "lint: passed  tool=echo one …  files=2  base=main  0.0s")
@@ -268,7 +269,7 @@ import XcdevTestSupport
 
     /// With `--all` and no paths the command is handed no files and covers the project its own way.
     @Test func withAllAndNoPathsACommandGetsNoFiles() async throws {
-        let (project, _) = try project("version: 1\nproject: App.xcodeproj\nlint:\n  run: echo files\n")
+        let (project, _) = try project("version: 1\nproject: App.xcodeproj\nlint:\n  run: echo files \"$@\"\n")
         defer { project.remove() }
         try change(project)
         let ctx = try await context(project)
@@ -276,7 +277,23 @@ import XcdevTestSupport
         #expect(whole.output == "files\n" && whole.scope == .all && whole.files == 3 && whole.base == nil)
         let narrowed = try await service(project).lint(LintOptions(paths: ["Sources/App/B.swift"], all: true), in: ctx)
         #expect(narrowed.output == "files Sources/App/B.swift\n" && narrowed.files == 1)
+        #expect(whole.notes.isEmpty && narrowed.notes.isEmpty)
         let nothing = try await service(project).lint(LintOptions(paths: ["Docs"]), in: ctx)
-        #expect(nothing.text.hasPrefix("lint: no Swift files changed since main under Docs  tool=echo files\n"))
+        #expect(nothing.text.hasPrefix("lint: no Swift files changed since main under Docs  tool=echo files \"$@\"\n"))
+    }
+
+    /// xcd adds nothing to the command, so one with no `"$@"` gets no files. The result says so: such a command may
+    /// cover the project its own way, or its author may have expected the files after it.
+    @Test func aCommandThatDoesNotNameItsFilesRunsWithoutThemAndIsToldSo() async throws {
+        let (project, _) = try project("version: 1\nproject: App.xcodeproj\nlint:\n  run: echo checked\n")
+        defer { project.remove() }
+        try change(project)
+        let ctx = try await context(project)
+        let report = try await service(project).lint(LintOptions(), in: ctx)
+        #expect(report.output == "checked\n" && report.exitCode == 0 && report.files == 2)
+        #expect(report.notes == [#"lint.run has no "$@", so the command did not get the 2 files in scope; write "$@" where the files go"#])
+        #expect(report.text.hasPrefix("lint: passed  tool=echo checked  files=2  base=main  0.0s\nnote: lint.run has no \"$@\", "))
+        let whole = try await service(project).lint(LintOptions(all: true), in: ctx)
+        #expect(whole.output == "checked\n" && whole.notes.isEmpty)                  // with --all there are none to get
     }
 }

@@ -21,39 +21,54 @@ import XcdevTestSupport
         ((try? FileManager.default.contentsOfDirectory(atPath: ctx.paths.logs)) ?? []).filter { $0.hasSuffix("-lint.log") }.sorted()
     }
 
-    @Test func aCommandEndedByANewlineKeepsItsExitCode() async throws {
+    /// The files are the shell's arguments, and the command says where they go: xcd adds nothing to it.
+    @Test func theFilesGoWhereTheCommandNamesThem() async throws {
         defer { worktree.remove() }
         let ctx = try context()
-        #expect(try await tool().run("false\n", section: "lint", files: [], in: ctx).exitCode == 1)
-    }
-
-    @Test func aCommandEndedByANewlineGetsAPathWithASpaceAsOneArgument() async throws {
-        defer { worktree.remove() }
-        let ctx = try context()
-        let result = try await tool().run("printf '[%s]\\n'\n\n", section: "lint", files: ["My App/A.swift"], in: ctx)
+        let command = #"test -d App.xcodeproj && printf '[%s]\n' --strict "$@" | sort; echo "in the worktree as $0""#
+        let result = try await tool().run(command, section: "lint", files: ["Sources/My App/A.swift", "Tests/T.swift"], in: ctx)
         #expect(result.exitCode == 0)
-        #expect(result.output == "[My App/A.swift]\n")
+        #expect(result.output == "[--strict]\n[Sources/My App/A.swift]\n[Tests/T.swift]\nin the worktree as xcd-lint\n")
     }
 
-    /// After a `;` the files would be a command of their own, and with no files its exit code would be the result.
-    @Test func aCommandEndedByASemicolonKeepsItsExitCode() async throws {
+    /// Put after the command, the files would be arguments of whatever it ends with: `tee` would write over them.
+    @Test func aCommandThatDoesNotNameTheFilesLeavesThemAlone() async throws {
         defer { worktree.remove() }
         let ctx = try context()
-        let ended = try await tool().run("false;", section: "lint", files: [], in: ctx)
-        #expect(ended.exitCode == 1)
-        let spaced = try await tool().run("false ; \n", section: "lint", files: [], in: ctx)
-        #expect(spaced.exitCode == 1)
+        try "let a = 1\n".write(toFile: worktree.root + "/A.swift", atomically: true, encoding: .utf8)
+        let result = try await tool().run("echo findings | tee lint.out", section: "lint", files: ["A.swift"], in: ctx)
+        #expect(result.output == "findings\n")
+        #expect(try String(contentsOfFile: worktree.root + "/A.swift", encoding: .utf8) == "let a = 1\n")
     }
 
-    /// A `;` after a backslash is an argument of the command, as in `find … -exec … \;`, so it is not the command's end.
-    @Test func anEscapedSemicolonAtTheEndStaysAnArgument() async throws {
+    /// A `run` written as a YAML block is several lines, and its last may end a compound command, which takes no
+    /// arguments.
+    @Test func aCommandOfSeveralLinesThatEndsInFiRunsAndKeepsItsExitCode() async throws {
         defer { worktree.remove() }
         let ctx = try context()
-        let result = try await tool().run(#"printf '[%s]\n' a\;"#, section: "lint", files: ["B.swift"], in: ctx)
-        #expect(result.output == "[a;]\n[B.swift]\n")
-        // Two backslashes are a backslash, so the `;` after them does end the command.
-        let ended = try await tool().run(#"printf '[%s]\n' a\\;"#, section: "lint", files: ["B.swift"], in: ctx)
-        #expect(ended.output == "[a\\]\n[B.swift]\n")
+        let command = "if [ \"$#\" -gt 0 ]; then\n  echo \"linting $# files\"\n  false\nfi\n"
+        let result = try await tool().run(command, section: "lint", files: ["A.swift", "B.swift"], in: ctx)
+        #expect(result.output == "linting 2 files\n")
+        #expect(result.exitCode == 1)
+        #expect(try await tool().run(command, section: "lint", files: [], in: ctx).exitCode == 0)
+    }
+
+    @Test func whetherACommandNamesItsFilesIsReadFromItsText() {
+        for command in [#"./scripts/lint.sh "$@""#, "mytool lint $*", #"for f in "${@}"; do lint "$f"; done"#, #"lint "$1""#, "lint ${2}"] {
+            #expect(CommandTool.namesItsFiles(command), "\(command)")
+        }
+        for command in ["./scripts/lint.sh", "echo $HOME ${PATH}", #"echo "as $0""#, "echo 5$", "echo $", "echo ${"] {
+            #expect(!CommandTool.namesItsFiles(command), "\(command)")
+        }
+    }
+
+    @Test func aCommandThatLeftItsFilesUnnamedGetsANote() {
+        #expect(CommandTool.unnamedFilesNote("./scripts/lint.sh", section: "lint", files: 2)
+                == #"lint.run has no "$@", so the command did not get the 2 files in scope; write "$@" where the files go"#)
+        #expect(CommandTool.unnamedFilesNote("./scripts/lint.sh", section: "lint", files: 1)
+                == #"lint.run has no "$@", so the command did not get the 1 file in scope; write "$@" where the files go"#)
+        #expect(CommandTool.unnamedFilesNote("./scripts/lint.sh", section: "lint", files: 0) == nil)       // --all: none to get
+        #expect(CommandTool.unnamedFilesNote(#"./scripts/lint.sh "$@""#, section: "lint", files: 2) == nil)
     }
 
     @Test func outputThatIsNotUTF8IsStillShown() async throws {
@@ -62,16 +77,6 @@ import XcdevTestSupport
         let result = try await tool().run(#"printf 'one\n\351 two\n'; exit 1"#, section: "lint", files: [], in: ctx)
         #expect(result.exitCode == 1)
         #expect(result.output.contains("one") && result.output.contains("two"))
-    }
-
-    @Test func theFilesArriveAsArgumentsAfterTheCommandsOwn() async throws {
-        defer { worktree.remove() }
-        let ctx = try context()
-        // xcd puts the files after the command as written, so they follow the command's own arguments.
-        let command = #"test -d App.xcodeproj && echo "in the worktree as $0"; printf '[%s]\n' --strict"#
-        let result = try await tool().run(command, section: "lint", files: ["Sources/My App/A.swift", "Tests/T.swift"], in: ctx)
-        #expect(result.exitCode == 0)
-        #expect(result.output == "in the worktree as xcd-lint\n[--strict]\n[Sources/My App/A.swift]\n[Tests/T.swift]\n")
     }
 
     @Test func theCommandGetsTheWorktreesContext() async throws {
@@ -96,12 +101,12 @@ import XcdevTestSupport
         defer { worktree.remove() }
         let ctx = try context()
         let missing = await #expect(throws: XcdError.self) {
-            _ = try await tool().run("./scripts/lint.sh", section: "lint", files: ["A.swift"], in: ctx)
+            _ = try await tool().run("./scripts/lint.sh \"$@\"\n", section: "lint", files: ["A.swift"], in: ctx)
         }
         #expect(missing?.code == .subprocessFailed)
         #expect(missing?.message == "the project's lint command could not be run (exit 127)")
         #expect(missing?.next == "its command was not found; check lint.run in .xcdev.yml (paths are relative to the worktree root)")
-        #expect(missing?.details.first == "command: ./scripts/lint.sh")
+        #expect(missing?.details.first == "command: ./scripts/lint.sh \"$@\"")                  // without the block's newline
         #expect(missing?.details.dropFirst().first?.hasPrefix("log: \(worktree.root)/.xcdev/logs/") == true)
 
         try FileManager.default.createDirectory(atPath: worktree.root + "/scripts", withIntermediateDirectories: true)
@@ -120,7 +125,7 @@ import XcdevTestSupport
         let ctx = try context()
         let name = String(repeating: "a", count: 99)                           // 100 bytes with its separator
         let fits = Array(repeating: name, count: 2_500)
-        #expect(try await tool().run("echo $#", section: "lint", files: fits, in: ctx).output.hasPrefix("2500 aaa"))
+        #expect(try await tool().run("echo $#", section: "lint", files: fits, in: ctx).output == "2500\n")
 
         let before = lintLogs(ctx)
         let error = await #expect(throws: XcdError.self) {
