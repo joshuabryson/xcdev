@@ -4,45 +4,19 @@ import Foundation
 /// Swift files to lint and of the project's lint config, and nothing in it is a link, so nothing SwiftLint does
 /// there can reach the worktree. In place, SwiftLint would walk `.xcdev/` and lint files the config leaves out.
 public struct LintFolder: Sendable {
-    public let root: String
-    /// The handler a signal that ends xcd runs, and this folder's cleanup there. Nil for a folder made without one.
-    private let guarded: (interrupts: Interrupts, cleanup: Interrupts.Cleanup)?
+    let scratch: ScratchFolder
 
-    /// A new, empty folder under the system's temporary directory. With `interrupts`, a signal that ends xcd removes
-    /// the folder, and from then on nothing is made or written here: the handler removes the folder once, and xcd
-    /// exits before anything could remove what a later write brought back. The cleanup is registered before the
-    /// folder is made, so there is no moment at which the folder is there and the handler does not know it.
+    public var root: String { scratch.root }
+
+    /// A new, empty folder under the system's temporary directory, which a signal that ends xcd removes when
+    /// `interrupts` is given (see `ScratchFolder`).
     public static func create(removedBy interrupts: Interrupts? = nil, under parent: String = NSTemporaryDirectory()) throws -> LintFolder {
-        let root = (parent as NSString).appendingPathComponent("xcd-lint-" + UUID().uuidString)
-        let folder = LintFolder(root: root, guarded: interrupts.map { ($0, $0.addCleanup { Disk.remove(root) }) })
-        do {
-            try folder.writing { try Disk.makeFolder(root) }
-        } catch {
-            folder.remove()
-            throw error
-        }
-        return folder
+        LintFolder(scratch: try ScratchFolder.create(for: "lint", removedBy: interrupts, under: parent))
     }
 
     /// Writes a file at `path` inside the folder, making the folders on the way to it.
     public func write(_ contents: Data, to path: String) throws {
-        let full = root + "/" + path
-        try writing {
-            try Disk.makeFolder((full as NSString).deletingLastPathComponent)
-            try contents.write(to: URL(fileURLWithPath: full))
-        }
-    }
-
-    /// Runs `work` as one write of the handler's: it waits for a write under way before it removes the folder, and
-    /// lets none start afterwards. Throws when the handler has fired, and what `work` throws.
-    private func writing(_ work: () throws -> Void) throws {
-        guard let interrupts = guarded?.interrupts else { return try work() }
-        var failure: (any Error)?
-        let ran = interrupts.perform {
-            do { try work() } catch { failure = error }
-        }
-        if let failure { throw failure }
-        guard ran else { throw XcdError(.subprocessFailed, "xcd was interrupted, so nothing more was written to its lint folder") }
+        try scratch.write(contents, to: path)
     }
 
     /// Copies the lint config that applies to `files` (paths relative to the worktree root) as it is in the
@@ -59,8 +33,7 @@ public struct LintFolder: Sendable {
 
     /// Deletes the folder, and takes it off the handler's list.
     public func remove() {
-        if let guarded { guarded.interrupts.removeCleanup(guarded.cleanup) }
-        Disk.remove(root)
+        scratch.remove()
     }
 
     /// The path inside the folder of a file SwiftLint reported: it gives absolute paths, and drops a leading
