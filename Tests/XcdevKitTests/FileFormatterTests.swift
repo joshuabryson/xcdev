@@ -202,4 +202,90 @@ struct StubFormatter: FormatterTool {
         let file = try await formatter().format("Sources/Gone.swift", .whole)
         #expect(file.failure == ["Sources/Gone.swift: could not be read"])
     }
+
+    // MARK: a leading byte order mark stays, and an empty answer is never written over text
+
+    static let mark = Data([0xEF, 0xBB, 0xBF])
+
+    /// Indents only line 3, so line 1 is untouched whatever the scope.
+    static func indentLineThree() -> StubFormatter {
+        StubFormatter { $0.replacingOccurrences(of: "\n  let b", with: "\n    let b") }
+    }
+
+    func writeWithMark(_ text: String = FileFormatterTests.source) throws {
+        try (Self.mark + Data(text.utf8)).write(to: URL(fileURLWithPath: root + "/Sources/A.swift"))
+    }
+
+    func bytes() throws -> Data { try Data(contentsOf: URL(fileURLWithPath: root + "/Sources/A.swift")) }
+
+    @Test func aByteOrderMarkStaysWhenTheFileIsFormattedByLines() async throws {
+        defer { cleanUp() }
+        try writeWithMark()
+        let tool = Self.indentLineThree()
+        let file = try await formatter(tool).format("Sources/A.swift", .lines([LineRange(3, 3)]))
+        let expected = "struct A {\n  let a = 1\n    let b = 2\n}\n"
+        #expect(try bytes() == Self.mark + Data(expected.utf8))
+        #expect(file.lines == [LineRange(3, 3)] && file.failure == nil)
+        #expect(tool.jobs.value.first?.text == Self.source)
+    }
+
+    @Test func aByteOrderMarkStaysWhenTheFileIsFormattedWhole() async throws {
+        defer { cleanUp() }
+        try writeWithMark()
+        let file = try await formatter().format("Sources/A.swift", .whole)
+        #expect(try bytes() == Self.mark + Data(Self.formatted.utf8))
+        #expect(file.lines == [LineRange(1, 1), LineRange(3, 4)])
+    }
+
+    /// SwiftFormat gives a mark back when it is handed one. It is not a difference, and it is not kept twice.
+    @Test func aMarkTheFormatterGivesBackIsNotADifferenceAndNotKeptTwice() async throws {
+        defer { cleanUp() }
+        try writeWithMark(Self.formatted)
+        let before = try bytes()
+        let tidy = try await formatter(StubFormatter { "\u{FEFF}" + $0 }).format("Sources/A.swift", .whole)
+        #expect(tidy.lines == nil && tidy.failure == nil)
+        #expect(try bytes() == before)
+        try writeWithMark()
+        _ = try await formatter(StubFormatter { "\u{FEFF}" + Self.formatted + $0.prefix(0) }).format("Sources/A.swift", .whole)
+        #expect(try bytes() == Self.mark + Data(Self.formatted.utf8))
+    }
+
+    @Test func aFileWithoutAMarkGetsNone() async throws {
+        defer { cleanUp() }
+        try write()
+        _ = try await formatter(StubFormatter { "\u{FEFF}" + Self.formatted + $0.prefix(0) }).format("Sources/A.swift", .whole)
+        #expect(try bytes() == Data(Self.formatted.utf8))
+    }
+
+    @Test func aCheckOfAFileWithAMarkListsTheLinesTheWriteListsAndWritesNothing() async throws {
+        defer { cleanUp() }
+        try writeWithMark()
+        let before = try bytes()
+        let checked = try await formatter(check: true).format("Sources/A.swift", .whole)
+        #expect(try bytes() == before)
+        try writeWithMark()
+        let written = try await formatter().format("Sources/A.swift", .whole)
+        #expect(checked.lines == [LineRange(1, 3)] && written.lines == [LineRange(1, 1), LineRange(3, 4)])
+        try writeWithMark()
+        let byLines = try await formatter(Self.indentLineThree(), check: true).format("Sources/A.swift", .lines([LineRange(3, 3)]))
+        #expect(byLines.lines == [LineRange(3, 3)])
+        #expect(try bytes() == before)
+    }
+
+    @Test func aFileThatIsTidyButForItsMarkIsNotWrittenAndNotListed() async throws {
+        defer { cleanUp() }
+        try writeWithMark()
+        let before = try bytes()
+        let file = try await formatter(StubFormatter { $0 }).format("Sources/A.swift", .whole)
+        #expect(file.lines == nil && file.failure == nil)
+        #expect(try bytes() == before)
+    }
+
+    @Test func anEmptyAnswerForAFileWithTextLeavesTheFileAsItIs() async throws {
+        defer { cleanUp() }
+        try write()
+        let file = try await formatter(StubFormatter { _ in "" }).format("Sources/A.swift", .whole)
+        #expect(file.lines == nil && file.failure == nil && file.note == nil)
+        #expect(try bytes() == Data(Self.source.utf8))
+    }
 }

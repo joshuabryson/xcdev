@@ -29,7 +29,19 @@ struct FileFormatter: Sendable {
     struct Source {
         let url: URL
         let data: Data
+        /// The file's text without a leading byte order mark.
         let text: String
+        let hasMark: Bool
+    }
+
+    /// The UTF-8 byte order mark. It is not text for a formatter to have an opinion on, so it stays as it is.
+    static let byteOrderMark = Data([0xEF, 0xBB, 0xBF])
+
+    /// A file's bytes as text, the mark taken off explicitly. Nil when they are not valid UTF-8.
+    static func decode(_ data: Data, url: URL) -> Source? {
+        let hasMark = data.starts(with: byteOrderMark)
+        guard let text = String(data: hasMark ? data.dropFirst(byteOrderMark.count) : data, encoding: .utf8) else { return nil }
+        return Source(url: url, data: data, text: text, hasMark: hasMark)
     }
 
     let tool: any FormatterTool
@@ -44,9 +56,10 @@ struct FileFormatter: Sendable {
         guard part != .lines([]) else { return file }
         let url = URL(fileURLWithPath: worktreeRoot + "/" + path)
         guard let data = try? Data(contentsOf: url) else { return failed(file, ["could not be read"]) }
-        guard let text = String(data: data, encoding: .utf8) else {
+        guard let source = Self.decode(data, url: url) else {
             return failed(file, ["is not valid UTF-8, so it was not given to the formatter"])
         }
+        let text = source.text
         var ranges: [LineRange]?
         if case .lines(let changed) = part {
             guard !text.utf8.contains(UInt8(ascii: "\r")) else { return failed(file, [Self.windowsEndings]) }
@@ -54,10 +67,18 @@ struct FileFormatter: Sendable {
         }
         let answer = try await tool.format(FormatJob(path: path, text: text, ranges: ranges))
         file.transcript = answer.transcript
-        guard let formatted = answer.text else { return failed(file, answer.said) }
+        guard let given = answer.text else { return failed(file, answer.said) }
         file.said = answer.said
-        guard formatted != text else { return file }
-        return write(formatted, over: Source(url: url, data: data, text: text), file)
+        guard let formatted = Self.change(given, to: text) else { return file }
+        return write(formatted, over: source, file)
+    }
+
+    /// What to write for the formatter's answer: nil when the file stays as it is, because the answer is the same
+    /// text or is empty for a file that has text. A mark the formatter gave back is taken off.
+    static func change(_ answer: String, to text: String) -> String? {
+        var answer = answer
+        if answer.unicodeScalars.first == "\u{FEFF}" { answer.unicodeScalars.removeFirst() }
+        return answer == text || (answer.isEmpty && !text.isEmpty) ? nil : answer
     }
 
     /// Why a file with a carriage return is not formatted by lines. Both formatters damage such a file around the
@@ -68,7 +89,9 @@ struct FileFormatter: Sendable {
 
     /// The file with the formatter's change: listed, and written unless this is a check. Before writing, the file is
     /// read again: when it is no longer what the formatter was given, it is left alone and the result says so. The
-    /// write replaces the file in one step and keeps its permissions, and does not start once xcd was interrupted.
+    /// write replaces the file in one step and does not start once xcd was interrupted. The file is a new one under the
+    /// old name: its mode bits are kept, but not its extended attributes (Finder tags), ACL or creation date, its group
+    /// becomes the folder's, and a hard link's twin keeps the old text. Both formatters do the same.
     func write(_ formatted: String, over source: Source, _ file: FormattedFile) -> FormattedFile {
         var file = file
         let diff = LineDiff(from: source.text, to: formatted)
@@ -81,7 +104,7 @@ struct FileFormatter: Sendable {
         let ran = interrupts.perform {
             current = try? Data(contentsOf: source.url)
             guard current == source.data else { return }
-            do { try Data(formatted.utf8).write(to: source.url, options: .atomic) } catch { failure = error }
+            do { try ((source.hasMark ? Self.byteOrderMark : Data()) + Data(formatted.utf8)).write(to: source.url, options: .atomic) } catch { failure = error }
         }
         if let failure { return failed(file, ["could not be written: \(failure.localizedDescription)"]) }
         if ran, current == source.data {
