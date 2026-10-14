@@ -148,9 +148,7 @@ extension FormatService {
             var running = 0
             while running > 0 || !waiting.isEmpty {
                 while running < atOnce, let index = waiting.popLast() {
-                    group.addTask {
-                        do { return (index, .success(try await work(files[index]))) } catch { return (index, .failure(error)) }
-                    }
+                    group.addTask { (index, await Self.outcome { try await work(files[index]) }) }
                     running += 1
                 }
                 guard let (index, result) = await group.next() else { break }
@@ -164,6 +162,15 @@ extension FormatService {
             }
             return (results.compactMap { $0 }, failure)
         }
+    }
+
+    /// What `work` gave, or the error it threw. This is a function of its own because of what Xcode 27's compiler
+    /// (Swift 6.4) makes of the other way when it optimizes: a task that returned `(index, result)` from inside a `do`
+    /// block that awaits gave 0 for every index, so each file's result took the first file's place and only the last
+    /// one to finish was reported. The debug build, which the tests run, was right; `swift test -c release
+    /// -Xswiftc -enable-testing` is what shows it.
+    static func outcome(of work: @Sendable () async throws -> FormattedFile) async -> Result<FormattedFile, any Error> {
+        do { return .success(try await work()) } catch { return .failure(error) }
     }
 
     /// The error that ends the command after a file's formatter could not be run, with the files that were rewritten
