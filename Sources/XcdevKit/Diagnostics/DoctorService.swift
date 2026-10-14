@@ -17,10 +17,12 @@ public struct DiskSummary: Codable, Sendable, Equatable {
     public var text: String {
         let total = worktrees.reduce(0) { $0 + $1.bytes }
         let largest = worktrees.prefix(5).map { "\($0.project)/\($0.name) \(ByteText.format($0.bytes))" }
-        return "disk: worktrees \(ByteText.format(total))" + (largest.isEmpty ? "" : " (" + largest.joined(separator: ", ") + ")")
-            + ", clones \(ByteText.format(clonesBytes)), templates \(ByteText.format(templatesBytes))"
-            + (mediaBytes > 0 ? ", media \(ByteText.format(mediaBytes))" : "")
-            + "  (APFS clones are counted in full)"
+        var parts: [String] = ["disk: worktrees \(ByteText.format(total))"]
+        if !largest.isEmpty { parts.append(" (\(largest.joined(separator: ", ")))") }
+        parts.append(", clones \(ByteText.format(clonesBytes)), templates \(ByteText.format(templatesBytes))")
+        if mediaBytes > 0 { parts.append(", media \(ByteText.format(mediaBytes))") }
+        parts.append("  (APFS clones are counted in full)")
+        return parts.joined()
     }
 }
 
