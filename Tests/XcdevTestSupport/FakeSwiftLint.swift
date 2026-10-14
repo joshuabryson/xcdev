@@ -34,7 +34,7 @@ public final class FakeSwiftLint: Sendable {
             let folder = invocation.workingDirectory ?? ""
             let run = Self.read(folder)
             seen.change { $0.append(run) }
-            let findings = run.swiftFiles.flatMap { findings(in: run.texts[$0] ?? "", at: folder + "/" + $0) }
+            let findings = run.swiftFiles.flatMap { self.findings(in: run.texts[$0] ?? "", at: folder + "/" + $0) }
             let hasError = findings.contains { $0.contains(#""severity" : "Error""#) }
             return ProcessOutput(exitCode: hasError ? 2 : 0, stdout: "[\n" + findings.joined(separator: ",\n") + "\n]\n", stderr: stderr)
         }
