@@ -65,9 +65,11 @@ struct RangeAnswer: Sendable, CustomTestStringConvertible {
     init() throws { files = try FileFormatterTests() }
 
     /// `given` through a formatter that answers as it says: what became of the file, and the file's text afterwards.
-    func format(_ given: RangeAnswer, check: Bool = false) async throws -> (file: FormattedFile, text: String) {
+    func format(_ given: RangeAnswer, check: Bool = false, joins: Bool = false) async throws -> (file: FormattedFile, text: String) {
         try files.write(given.text)
-        let file = try await files.formatter(StubFormatter { _ in given.answer }, check: check).format("Sources/A.swift", .lines(given.ranges))
+        var tool = StubFormatter { _ in given.answer }
+        tool.joinsToLineAbove = joins
+        let file = try await files.formatter(tool, check: check).format("Sources/A.swift", .lines(given.ranges))
         return (file, try files.read())
     }
 
@@ -145,6 +147,55 @@ struct RangeAnswer: Sendable, CustomTestStringConvertible {
         #expect(report.failed == [FormatReport.Failed(file: "Sources/App/A.swift", message: Self.refusal("line 7")[0].replacingOccurrences(
             of: "Sources/A.swift", with: "Sources/App/A.swift"))])
         #expect(report.changed.isEmpty && report.failure?.code == .formatFailed && report.failure?.code.exitCode == 1)
+    }
+
+    /// SwiftFormat joins the first line of a range to the line above it, and holds that line to account itself after
+    /// each pass (`SwiftFormatTool.keepsLinesAbove`). For such a formatter the line directly above each range is not
+    /// held against the answer here; for any other it is.
+    @Test func aFormatterThatJoinsToTheLineAboveMayChangeThatLine() async throws {
+        defer { files.cleanUp() }
+        let joined = RangeAnswer(testDescription: "", ranges: [LineRange(3, 3)], answer: "one\ntwo three\nfour\nfive\n")
+        let strict = try await format(joined)
+        #expect(strict.text == RangeAnswer.five && strict.file.failure == Self.refusal("line 3"))
+        let taken = try await format(joined, joins: true)
+        #expect(taken.text == joined.answer && taken.file.failure == nil && taken.file.lines == [LineRange(2, 2)])
+        let both = RangeAnswer(testDescription: "", ranges: [LineRange(2, 2), LineRange(5, 5)], answer: "one two\nthree\nfour five\n")
+        let two = try await format(both, joins: true)
+        #expect(two.text == both.answer && two.file.failure == nil && two.file.lines == [LineRange(1, 1), LineRange(3, 3)])
+        let check = try await format(joined, check: true, joins: true)
+        #expect(check.text == RangeAnswer.five && check.file.failure == nil && check.file.lines == [LineRange(2, 3)])
+    }
+
+    /// The line directly above is the only one let go: a line further up, a line below, and a line put in front are
+    /// held against such a formatter's answer as against any other's.
+    @Test(arguments: [0, 1, 3, 5, 7])
+    func aFormatterThatJoinsToTheLineAboveMayChangeNoOtherLine(_ index: Int) async throws {
+        defer { files.cleanUp() }
+        let given = RangeAnswer.reachingPast[index]
+        let (file, text) = try await format(given, joins: true)
+        #expect(text == given.text && file.lines == nil, "\(given.testDescription)")
+        #expect(file.failure?.first?.hasPrefix("Sources/A.swift: the formatter changed lines other than line") == true, "\(given.testDescription)")
+        let twoUp = RangeAnswer(testDescription: "", ranges: [LineRange(2, 2), LineRange(5, 5)], answer: "one\nTWO\nTHREE\nfour\nFIVE\n")
+        #expect(try await format(twoUp, joins: true).file.failure == Self.refusal("lines 2, 5"))
+    }
+
+    /// Through `xcd format`, with what SwiftFormat gives for a changed line that starts with a comma: the comma at
+    /// the end of the line above, which the change did not touch. The file is written, and both lines are listed.
+    @Test func xcdFormatWritesAFileWhoseChangedLineSwiftFormatJoinedToTheLineAbove() async throws {
+        let project = try FormatProject()
+        defer { project.project.remove() }
+        defer { files.cleanUp() }
+        let edited = FormatProject.base.replacingOccurrences(of: "    let d = 4\n", with: "    let d = 4\n    , e = 5\n")
+        let joined = FormatProject.base.replacingOccurrences(of: "    let d = 4\n", with: "    let d = 4,\n        e = 5\n")
+        try project.project.write(edited, to: "Sources/App/A.swift")
+        let ctx = try await project.context()
+        let service = project.service(FakeFormatters())
+        project.fake.stub(["swiftformat"], stdout: joined)
+        let report = try await service.format(FormatOptions(paths: ["Sources/App/A.swift"]), in: ctx)
+        #expect(try project.read("Sources/App/A.swift") == joined)
+        #expect(report.failure == nil && report.failed.isEmpty, "\(report.text)")
+        #expect(report.changed.map(\.lines) == [[LineRange(7, 8)]])
+        #expect(project.fake.calls.last?.arguments.contains("8,8") == true)
     }
 
     /// There is nothing to hold an answer for a whole file against: it is written as the formatter gave it.

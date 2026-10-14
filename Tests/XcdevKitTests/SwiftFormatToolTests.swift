@@ -85,6 +85,8 @@ import XcdevTestSupport
         #expect(runner.calls.count == 1)                                             // the pass for lines 2-2 never ran
         // A range that starts at line 1 has no line above it.
         #expect(try await tool(scratch).format(job([LineRange(1, 3)])).text == "// a header\n" + Self.ten)
+        // One that starts at line 2 has line 1 above it, and a line put on top is not line 1 with more at its end.
+        #expect(try await tool(scratch).format(job([LineRange(2, 3)])).said == [Self.refusal("lines 2-3")])
     }
 
     static func refusal(_ range: String) -> String {
@@ -101,15 +103,64 @@ import XcdevTestSupport
         #expect(answer.said == [Self.refusal("line 8")])
     }
 
-    /// What the real tool does with ordinary code: `else {` alone on its line is joined to the `}` above it.
-    @Test func anElseJoinedToTheBraceAboveRefusesTheFileAndTheLogSaysWhy() async throws {
+    /// What the real tool does with ordinary code: `else {` alone on its line is joined to the `}` above it. That
+    /// line keeps what it held and no line further up moves, so the pass is taken and the range above still names
+    /// its line.
+    @Test func anElseJoinedToTheBraceAboveIsTakenAndTheRangeAboveStillNamesItsLine() async throws {
         let scratch = try ScratchFolder.create(for: "format")
         defer { scratch.remove() }
-        let given = "func f() {\n    if a {\n    }\n    else {\n    }\n}\n"
-        runner.stub(["swiftformat"], stdout: "func f() {\n    if a {\n    } else {\n    }\n}\n")
+        let given = "func f( ) {\n    if a {\n    }\n    else {\n    }\n}\n"
+        let joined = "func f( ) {\n    if a {\n    } else {\n    }\n}\n"
+        runner.stub(["swiftformat"]) { [inputs] invocation in
+            let text = try String(contentsOfFile: invocation.inputFile ?? "", encoding: .utf8)
+            inputs.change { $0.append(text) }
+            let printed = invocation.arguments.contains("4,4") ? joined : text.replacingOccurrences(of: "f( )", with: "f()")
+            return ProcessOutput(exitCode: 0, stdout: printed)
+        }
         let answer = try await tool(scratch).format(job([LineRange(1, 1), LineRange(4, 4)], text: given))
-        #expect(answer.text == nil && answer.said == [Self.refusal("line 4")])
-        #expect(runner.calls.count == 1 && answer.transcript.hasSuffix(Self.refusal("line 4") + "\n"))
+        #expect(answer.text == "func f() {\n    if a {\n    } else {\n    }\n}\n" && answer.said.isEmpty)
+        #expect(inputs.value == [given, joined])
+        #expect(runner.calls.map { $0.arguments.dropFirst(3).prefix(2).joined(separator: " ") } == ["--line-range 4,4", "--line-range 1,1"])
+    }
+
+    /// What the real tool does with a line that starts with a comma, under a line that ends in a comment: the comma
+    /// lands inside the comment, and the code no longer compiles. Such a pass is not
+    /// taken, and no further pass runs.
+    @Test func aCommaPutIntoTheCommentAboveRefusesTheFileAndTheLogSaysWhy() async throws {
+        let scratch = try ScratchFolder.create(for: "format")
+        defer { scratch.remove() }
+        let given = "let v = f( \n    a: 1 // one\n    , b: 2\n)\n"
+        runner.stub(["swiftformat"], stdout: "let v = f( \n    a: 1 // one, // one\n        b: 2\n)\n")
+        let answer = try await tool(scratch).format(job([LineRange(1, 1), LineRange(3, 3)], text: given))
+        #expect(answer.text == nil && answer.said == [Self.refusal("line 3")])
+        #expect(runner.calls.count == 1 && answer.transcript.hasSuffix(Self.refusal("line 3") + "\n"))
+    }
+
+    /// The line directly above a range may come back with more at its end, as a join leaves it. Each pair is what the
+    /// real tool was given and what it gave.
+    @Test func theLineDirectlyAboveARangeMayGainTextAtItsEnd() {
+        let keeps = SwiftFormatTool.keepsLinesAbove
+        #expect(keeps(LineRange(3, 3), "if a {\n}\nelse {\n}\n", "if a {\n} else {\n}\n"))
+        #expect(keeps(LineRange(4, 4), "let xs = [\n    1,\n    2\n]\n", "let xs = [\n    1,\n    2,\n]\n"))
+        #expect(keeps(LineRange(3, 3), "f(\n    a: 1 /* one */\n    , b: 2\n)\n", "f(\n    a: 1 /* one */,\n    b: 2\n)\n"))
+        #expect(keeps(LineRange(2, 3), "func f()\n{\n}\n", "func f() {}\n"))               // the line above is the first line
+        #expect(keeps(LineRange(5, 5), "do {\n    g()\n}   \n\tcatch {\n}\n", "do {\n    g()\n}   \n\tcatch {\n}\n"))  // nothing joined
+    }
+
+    /// Any other change above a range still refuses the file. The blank line and the two comments are what the real
+    /// tool gave: a `{` under a blank line takes the blank line's place, and a leading comma goes into the comment.
+    @Test func aLineAboveARangeThatChangedAnyOtherWayIsNotKept() {
+        let keeps = SwiftFormatTool.keepsLinesAbove
+        #expect(!keeps(LineRange(4, 4), "let xs = [\n    1\n    // note\n    , 2\n]\n", "let xs = [\n    1,\n    // note\n    2\n]\n"))   // two lines up
+        #expect(!keeps(LineRange(3, 3), "if a {\n    }\nelse {\n}\n", "if a {\n} else {\n}\n"))        // the line above lost its indentation
+        #expect(!keeps(LineRange(3, 3), "if a {\n} // end\nelse {\n}\n", "if a {\n}\nelse {\n}\n"))        // and here its comment
+        #expect(!keeps(LineRange(3, 4), "func f()\n\n{\n}\n", "func f()\n{\n}\n"))
+        #expect(!keeps(LineRange(3, 4), "func f()\n  \t\n{\n}\n", "func f()\n  \t{\n}\n"))               // spaces and a tab are blank too
+        #expect(!keeps(LineRange(4, 4), "f(\n    a: 1\n    // note\n    , b: 2\n)\n", "f(\n    a: 1\n    // note, // note\n        b: 2\n)\n"))
+        #expect(!keeps(LineRange(3, 3), "f(\n    a: 1 // one\n    , b: 2\n)\n", "f(\n    a: 1 // one, // one\n        b: 2\n)\n"))
+        // A blank line and a line with a comment are kept when they come back as they were.
+        #expect(keeps(LineRange(3, 3), "func f()\n\ng( )\n", "func f()\n\ng()\n"))
+        #expect(keeps(LineRange(3, 3), "f(\n    // note\n    b:2\n)\n", "f(\n    // note\n    b: 2\n)\n"))
     }
 
     /// The real tool leaves the last token of a text out of a range when no newline ends the text, and damages it.
@@ -142,7 +193,7 @@ import XcdevTestSupport
         #expect(SwiftFormatTool.keepsLinesAbove(LineRange(3, 3), "a\nb\nc\n", "a\nb\nC\n"))
         #expect(SwiftFormatTool.keepsLinesAbove(LineRange(3, 3), "a\r\nb\r\nc\r\n", "a\r\nb\r\nC\r\n"))
         #expect(!SwiftFormatTool.keepsLinesAbove(LineRange(3, 3), "a\r\nb\r\nc\r\n", "a\r\nb\nC\r\n"))
-        #expect(!SwiftFormatTool.keepsLinesAbove(LineRange(2, 2), "// caf\u{E9}\nb\n", "// cafe\u{301}\nB\n"))
+        #expect(!SwiftFormatTool.keepsLinesAbove(LineRange(3, 3), "let caf\u{E9} = 1\nb\nc\n", "let cafe\u{301} = 1\nb\nC\n"))
         #expect(!SwiftFormatTool.keepsLinesAbove(LineRange(3, 3), "a\nb\nc\n", "a\n"))
         #expect(SwiftFormatTool.keepsLinesAbove(LineRange(9, 9), "a\nb\n", "a\nb\n"))          // a range past the end
     }

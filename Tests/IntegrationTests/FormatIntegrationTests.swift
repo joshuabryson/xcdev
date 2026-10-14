@@ -259,24 +259,43 @@ extension FormatIntegrationTests {
     }
 
     /// SwiftFormat, given a range that starts on `else {`, joins it to the `}` on the line above, outside its range.
-    /// xcd refuses the file; `--files` formats it whole.
-    @Test func aChangeThatStartsOnElseIsRefusedBySwiftFormatAndFormattedWithFiles() async throws {
+    /// xcd takes the join: the line above keeps what it held, the range higher up is still formatted on its own line,
+    /// and a line the change did not touch stays unformatted.
+    @Test func aChangeThatStartsOnElseIsJoinedToTheBraceAboveBySwiftFormat() async throws {
         let project = try project(.swiftFormat)
         defer { project.remove() }
         let path = "Sources/App/Branch.swift"
-        let base = "func f(a: Bool) {\n    if a {\n        g()\n    }\n}\n\nfunc g() {}\nfunc h() {}\n"
+        let base = "func f(a: Bool) {\n    let x = 1\n    if a {\n        g()\n    }\n}\n\nfunc g() {}\nfunc h() {}\nfunc k(){}\n"
         try commitToMain(Data(base.utf8), at: path, project)
-        let edited = base.replacingOccurrences(of: "    }\n}\n", with: "    }\n    else {\n        h()\n    }\n}\n")
+        let edited = base.replacingOccurrences(of: "let x = 1", with: "let y=1")
+            .replacingOccurrences(of: "    }\n}\n", with: "    }\n    else {\n        h( )\n    }\n}\n")
+        try write(Data(edited.utf8), at: path, project)
+        let report = try await format(FormatOptions(), project)
+        #expect(report.failure == nil && report.failed.isEmpty, "\(report.text)")
+        #expect(try read(path, project) == "func f(a: Bool) {\n    let y = 1\n    if a {\n        g()\n    } else {\n        h()\n    }\n}\n\n"
+            + "func g() {}\nfunc h() {}\nfunc k(){}\n")
+        #expect(lines(report) == [path + " 2,5-6"])
+    }
+
+    /// SwiftFormat, given a range that starts on a comma under a line that ends in a comment, puts the comma inside
+    /// the comment, and the call no longer compiles. xcd refuses the file; `--files`
+    /// formats it whole, which SwiftFormat gets right.
+    @Test func aLeadingCommaUnderACommentIsRefusedBySwiftFormatAndFormattedWithFiles() async throws {
+        let project = try project(.swiftFormat)
+        defer { project.remove() }
+        let path = "Sources/App/Call.swift"
+        try commitToMain(Data("let v = f(\n    a: 1 // one\n)\n".utf8), at: path, project)
+        let edited = "let v = f(\n    a: 1 // one\n    , b: 2\n)\n"
         try write(Data(edited.utf8), at: path, project)
         let report = try await format(FormatOptions(), project)
         #expect(report.failure?.code == .formatFailed && report.failed.map(\.file) == [path] && report.changed.isEmpty, "\(report.text)")
-        #expect(report.failed.first?.message.contains("swiftformat changed a line above") == true)
+        #expect(report.failed.first?.message.contains("swiftformat changed a line above line 3") == true)
         #expect(report.failed.first?.message.contains("xcd format --files") == true)
         #expect(try bytes(path, project) == Data(edited.utf8))
 
         let whole = try await format(FormatOptions(files: true), project)
         #expect(whole.failure == nil, "\(whole.text)")
-        #expect(try read(path, project).contains("    } else {\n"))
+        #expect(try read(path, project) == "let v = f(\n    a: 1, // one\n    b: 2\n)\n")
     }
 
     /// A `format.path` that names a script which prints a line of its own and then runs the real swift-format. The

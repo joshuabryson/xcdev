@@ -23,11 +23,12 @@ public struct SwiftFormatTool: FormatterTool {
 
     /// SwiftFormat applies one range per run, so a file with several goes through once per range, the last range
     /// first, each pass on the text the one before gave. A pass usually leaves the lines above its range as they
-    /// were, but in some shapes it changes the line directly above: an `else {` or a `catch {` alone on its line is
-    /// joined to the `}` above it, a `{` alone on its line to the line above, and a `]` alone gives the last element
-    /// above it a comma. The check after each pass is what keeps xcd from writing a file whose earlier ranges may no
-    /// longer name their lines: when a line above the range came back changed, the file is refused, no further pass
-    /// runs, and the answer says how to format the file whole.
+    /// were, but in some shapes it joins the range's first line to the line directly above: an `else {` or a
+    /// `catch {` alone on its line goes to the `}` above it, a `{` alone on its line to the line above, a comma that
+    /// starts a line to the end of the line above, and a `]` alone gives the last element above it a comma. Such a
+    /// pass is taken: no line further up moved, so the earlier ranges still name their lines. For any other change
+    /// above the range (`keepsLinesAbove`) the file is refused, no further pass runs, and the answer says how to
+    /// format the file whole.
     public func format(_ job: FormatJob) async throws -> FormatAnswer {
         var answer = FormatAnswer.untouched(job)
         for range in job.ranges.map({ $0.reversed().map(Optional.some) }) ?? [nil] {
@@ -47,7 +48,7 @@ public struct SwiftFormatTool: FormatterTool {
         return answer
     }
 
-    /// What is said of a file refused because a pass changed a line above its range.
+    /// What is said of a file refused because a pass changed a line above its range in a way that is not taken.
     static func refusal(_ range: LineRange) -> String {
         let named = range.first == range.last ? "line \(range.first)" : "lines \(range.text)"
         return "swiftformat changed a line above \(named), the range it was given, so the file was left as it was; `xcd format --files` formats the file whole"
@@ -71,8 +72,28 @@ public struct SwiftFormatTool: FormatterTool {
         return answer
     }
 
-    /// Whether the lines above `range` are the same, byte for byte, in both texts.
+    /// SwiftFormat joins the first line of a range to the line above it, so `FileFormatter` does not hold that line
+    /// against the answer: `keepsLinesAbove` has held it to account after each pass.
+    public var joinsToLineAbove: Bool { true }
+
+    /// Whether a pass over `range` left the lines above it as xcd takes them: every line further up than the one
+    /// directly above is the same in both texts, byte for byte, and that one is the same or was joined to.
     static func keepsLinesAbove(_ range: LineRange, _ given: String, _ formatted: String) -> Bool {
-        LineDiff.lines(of: given).prefix(range.first - 1) == LineDiff.lines(of: formatted).prefix(range.first - 1)
+        let before = LineDiff.lines(of: given).prefix(range.first - 1), after = LineDiff.lines(of: formatted)
+        guard let above = before.last else { return true }
+        guard after.count >= before.count, after.prefix(before.count - 1) == before.dropLast() else { return false }
+        return after[before.count - 1] == above || isJoin(after[before.count - 1], to: above)
+    }
+
+    /// Whether `line` is `above` with more at its end, which is what a join leaves: the line keeps every byte it
+    /// held but its line ending. Not a join, though SwiftFormat gives both: a blank line that the range's first line
+    /// took the place of (a `{` under a blank line comes back without the blank line and without its indentation),
+    /// and a line with `//` in it, since what is added after a comment is no longer code (a comma that starts the
+    /// range comes back inside the comment above it, and the call no longer compiles).
+    static func isJoin(_ line: ArraySlice<UInt8>, to above: ArraySlice<UInt8>) -> Bool {
+        let held = above.last == UInt8(ascii: "\n") ? above.dropLast() : above
+        let blank = held.allSatisfy { $0 == UInt8(ascii: " ") || $0 == UInt8(ascii: "\t") }
+        let comment = zip(held, held.dropFirst()).contains { $0 == UInt8(ascii: "/") && $1 == UInt8(ascii: "/") }
+        return !blank && !comment && line.starts(with: held)
     }
 }

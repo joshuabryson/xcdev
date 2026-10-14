@@ -66,5 +66,13 @@ public struct FormatAnswer: Sendable, Equatable {
 /// A formatter xcd runs on one file at a time. It gives the formatted text and writes no file
 /// of the project's, so `xcd format`, `xcd format --check`, and every scope go the same way.
 public protocol FormatterTool: Sendable {
+    /// Whether the formatter, handed a range, can give back the line directly above it changed, and answers for
+    /// what became of that line itself.
+    var joinsToLineAbove: Bool { get }
+
     func format(_ job: FormatJob) async throws -> FormatAnswer
+}
+
+extension FormatterTool {
+    public var joinsToLineAbove: Bool { false }
 }

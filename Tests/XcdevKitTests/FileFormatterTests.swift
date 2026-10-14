@@ -7,6 +7,8 @@ import XcdevTestSupport
 struct StubFormatter: FormatterTool {
     let jobs = Shared<[FormatJob]>([])
     let answer: @Sendable (FormatJob) throws -> FormatAnswer
+    /// Whether it stands for a formatter that joins a range's first line to the line above, as SwiftFormat does.
+    var joinsToLineAbove = false
 
     /// Answers every job with `text` applied to the job's text. Nil is a formatter that could not process the file.
     init(said: [String] = [], _ text: @escaping @Sendable (String) -> String?) {

@@ -77,8 +77,14 @@ struct FileFormatter: Sendable {
     /// otherwise. An answer for a whole file, with no ranges, has nothing to be held against.
     func take(_ answer: String, for ranges: [LineRange]?, of source: Source, _ file: FormattedFile) -> FormattedFile {
         guard let formatted = Self.change(answer, to: source.text) else { return file }
-        if let ranges, !Self.holds(formatted, linesOutside: ranges, of: source.text) { return failed(file, [Self.reachedPast(ranges)]) }
+        if let ranges, !Self.holds(formatted, linesOutside: reach(of: ranges), of: source.text) { return failed(file, [Self.reachedPast(ranges)]) }
         return write(formatted, over: source, file)
+    }
+
+    /// The lines an answer for `ranges` may differ in: the ranges, each with the line directly above it for a
+    /// formatter that joins a range's first line to that line.
+    func reach(of ranges: [LineRange]) -> [LineRange] {
+        tool.joinsToLineAbove ? ranges.map { LineRange(max($0.first - 1, 1), $0.last) } : ranges
     }
 
     /// What to write for the formatter's answer: nil when the file stays as it is, because the answer is the same
