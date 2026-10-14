@@ -7,8 +7,8 @@ import XcdevTestSupport
     @Test func parsesRecordedDuOutput() {
         // `du -sk` with three paths, one missing: the missing one only appears on stderr (and du exits 1).
         let recorded = "296\t/Users/dev/My Apps/du one/.xcdev\n0\t/Users/dev/My Apps/du two/.xcdev\n"
-        #expect(DiskUsage.parse(recorded) == ["/Users/dev/My Apps/du one/.xcdev": 296 * 1024,
-                                              "/Users/dev/My Apps/du two/.xcdev": 0])
+        let expected: [String: Int64] = ["/Users/dev/My Apps/du one/.xcdev": 296 * 1024, "/Users/dev/My Apps/du two/.xcdev": 0]
+        #expect(DiskUsage.parse(recorded) == expected)
     }
 
     @Test func measuresExistingPathsAndSkipsMissingOnes() async throws {
