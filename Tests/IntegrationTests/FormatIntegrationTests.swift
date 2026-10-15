@@ -6,16 +6,34 @@ import XcdevTestSupport
 private let enabled = ProcessInfo.processInfo.environment["XCD_INTEGRATION"] == "1"
 private let swiftFormat = ToolLocator(environment: ProcessInfo.processInfo.environment).locate("swiftformat", path: nil, worktreeRoot: "/")
 /// Whether the selected Xcode has Apple's swift-format, asked the way xcd asks.
-private let hasAppleSwiftFormat: Bool = {
+private let hasAppleSwiftFormat = xcrun(["--find", "swift-format"])?.status == 0
+/// Whether that swift-format reads `.swift-format-ignore`, which it does from 6.4 on. It
+/// is asked to format a file such a file names, in a throwaway folder: one that reads it prints nothing.
+private let appleSwiftFormatReadsIgnoreFiles: Bool = {
+    guard enabled, hasAppleSwiftFormat else { return false }
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("xcdev-ignore-check-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let file = folder.appendingPathComponent("A.swift")
+    guard (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil,
+          (try? Data("A.swift\n".utf8).write(to: folder.appendingPathComponent(".swift-format-ignore"))) != nil,
+          (try? Data("let   a = 1\n".utf8).write(to: file)) != nil,
+          let run = xcrun(["swift-format", "format", file.path]) else { return false }
+    return run.status == 0 && run.stdout.isEmpty
+}()
+
+/// `xcrun` with `arguments`: its exit status and what it printed. Nil when it could not be started.
+private func xcrun(_ arguments: [String]) -> (status: Int32, stdout: Data)? {
     let xcrun = Process()
     xcrun.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
-    xcrun.arguments = ["--find", "swift-format"]
-    xcrun.standardOutput = FileHandle.nullDevice
+    xcrun.arguments = arguments
+    let stdout = Pipe()
+    xcrun.standardOutput = stdout
     xcrun.standardError = FileHandle.nullDevice
-    guard (try? xcrun.run()) != nil else { return false }
+    guard (try? xcrun.run()) != nil else { return nil }
+    let printed = stdout.fileHandleForReading.readDataToEndOfFile()
     xcrun.waitUntilExit()
-    return xcrun.terminationStatus == 0
-}()
+    return (xcrun.terminationStatus, printed)
+}
 
 /// `xcd format` with the real git, SwiftFormat, and swift-format, on a throwaway repository. No simulator, no build.
 /// The project has a config file for each formatter in its root (four spaces) and
@@ -188,8 +206,9 @@ struct FormatIntegrationTests {
     }
 
     /// swift-format exits 0 and prints nothing for a file its `.swift-format-ignore` names. xcd leaves the file as
-    /// it is; written back, that answer would empty it.
-    @Test func aFileApplesIgnoreFileNamesIsLeftAsItIs() async throws {
+    /// it is; written back, that answer would empty it. A swift-format older than 6.4 reads no such file.
+    @Test(.enabled(if: appleSwiftFormatReadsIgnoreFiles, "this swift-format reads no .swift-format-ignore: that came with 6.4"))
+    func aFileApplesIgnoreFileNamesIsLeftAsItIs() async throws {
         let project = try project(.appleSwiftFormat)
         defer { project.remove() }
         try change(project)
