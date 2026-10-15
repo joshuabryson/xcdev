@@ -46,14 +46,19 @@ public struct SwiftLintLinter: Sendable {
                       transcript: current.transcript + base.transcript)
     }
 
-    /// The base versions of `files`, each linted as it was at `forkPoint`, keyed by the file's path today. A file
-    /// git cannot show there has no version, so all of its findings count as new.
+    /// The base versions of `files`, each linted as it was at `forkPoint`, keyed by the file's path today. A file git
+    /// says is not there has no version, so all of its findings count as new. Any other failure of git's is thrown.
     func lintBase(of files: [ScopedFile], at forkPoint: String) async throws -> (versions: [String: FileFindings], transcript: String) {
         var contents: [String: Data] = [:]
         for file in files {
             guard let path = file.basePath else { continue }
-            let shown = try await tool.runner.run(.git(["show", "\(forkPoint):\(path)"], in: worktreeRoot))
-            if shown.succeeded { contents[path] = shown.stdout }
+            let show = Invocation.git(["show", "\(forkPoint):\(path)"], in: worktreeRoot)
+            let shown = try await tool.runner.run(show)
+            if shown.succeeded {
+                contents[path] = shown.stdout
+            } else if !Self.isNotThere(shown) {
+                throw XcdError.subprocess(show, shown)
+            }
         }
         guard !contents.isEmpty else { return ([:], "") }
         let base = try await run(on: contents)
@@ -74,6 +79,13 @@ public struct SwiftLintLinter: Sendable {
         for (path, data) in contents { try folder.write(data, to: path) }
         try folder.copyConfig(from: worktreeRoot, for: Array(contents.keys), args: tool.args)
         return try await tool.lint(folder)
+    }
+
+    /// git's answer that a path is not in a commit: `path '<path>' does not exist in '<commit>'`, or, for a file
+    /// that is on disk, `path '<path>' exists on disk, but not in '<commit>'`.
+    static func isNotThere(_ shown: ProcessOutput) -> Bool {
+        let said = shown.stderrString
+        return shown.exitCode == 128 && (said.contains("' does not exist in '") || said.contains("' exists on disk, but not in '"))
     }
 
     /// A file's text, for telling one line from another. Bytes that are not UTF-8 are replaced: SwiftLint reports
