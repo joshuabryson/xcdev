@@ -35,11 +35,13 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
     case cloneFailed = "clone_failed"
     case simulatorFailed = "simulator_failed"
     case subprocessFailed = "subprocess_failed"
+    case gitFailed = "git_failed"
     case timeout
     case doctorProblems = "doctor_problems"
     case internalError = "internal"
 
-    /// 1 = the task failed (fix the code), 2 = fix the invocation or config, 3 = fix the environment (`xcd doctor`).
+    /// 1 = the task failed (fix the code), 2 = fix the invocation or config, 3 = fix the environment: do what `next:`
+    /// says (often `xcd doctor`).
     public var exitCode: Int32 {
         switch self {
         case .buildFailed, .testFailed, .appCrashed, .elementNotFound, .elementNotHittable, .waitTimeout, .hookFailed,
@@ -50,7 +52,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
              .notConfigured, .arrivalUnproven:
             return 2
         case .xcodeMissing, .xcodeRuntimeMismatch, .runtimeMissing, .cloneFailed, .simulatorFailed,
-             .subprocessFailed, .timeout, .doctorProblems, .internalError, .runnerFailed, .toolMissing:
+             .subprocessFailed, .gitFailed, .timeout, .doctorProblems, .internalError, .runnerFailed, .toolMissing:
             return 3
         }
     }
@@ -90,6 +92,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .cloneFailed: return "simctl could not create, clone, or pair a simulator."
         case .simulatorFailed: return "A simctl command failed (boot, install, launch, …)."
         case .subprocessFailed: return "An external tool failed in a way xcd doesn't recognize; details carry its command, exit code, and stderr."
+        case .gitFailed: return "git itself failed, rather than answering \"no\"; git's message follows."
         case .timeout: return "An external command ran past its deadline and was stopped."
         case .doctorProblems: return "`xcd doctor` or `xcd prune` found problems that remain; each one says how to fix it."
         case .internalError: return "A bug in xcd, or a corrupt state file."
@@ -113,7 +116,8 @@ public struct ErrorsReport: Reportable {
 
     public var text: String {
         let width = (errors.map(\.code.count).max() ?? 0) + 2
-        var lines = ["exit codes: 1 = the task failed (fix the code), 2 = fix the command line or config, 3 = fix the environment (`xcd doctor`)"]
+        var lines = ["exit codes: 1 = the task failed (fix the code), 2 = fix the command line or config, "
+                         + "3 = fix the environment: do what `next:` says (often `xcd doctor`)"]
         lines += errors.map { $0.code.padding(toLength: width, withPad: " ", startingAt: 0) + "\($0.exitCode)  " + $0.summary }
         lines.append("every failure ends with `next:` (JSON: error.next) saying what to do")
         return lines.joined(separator: "\n")

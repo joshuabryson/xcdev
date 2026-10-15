@@ -123,7 +123,7 @@ extension FormatService {
         let changed: ChangedPart
         do {
             changed = try await part(of: file, in: target, root)
-        } catch let error as XcdError where error.code == .subprocessFailed || error.code == .timeout {
+        } catch let error as XcdError where [.gitFailed, .subprocessFailed, .timeout].contains(error.code) {
             let why = error.details.dropFirst(2).last.map { ": " + $0 } ?? ""
             let line = "\(file.path): git could not say which of its lines changed, so it was left as it was" + why
             return one.failed(FormattedFile(path: file.path), [line])

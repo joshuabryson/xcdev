@@ -171,7 +171,7 @@ import XcdevTestSupport
         let (project, _) = try project()
         defer { project.remove() }
         let error = await #expect(throws: XcdError.self) { _ = try await part(project, "0000000000000000000000000000000000000001") }
-        #expect(error?.code == .subprocessFailed)
+        #expect(error?.code == .gitFailed)
     }
 }
 

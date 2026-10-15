@@ -125,7 +125,7 @@ import XcdevTestSupport
         let svc = service(project)
         let main = try await svc.open(from: project.root)
         let error = await #expect(throws: XcdError.self) { try await svc.create(name: "feat", from: "no-such-ref", in: main) }
-        #expect(error?.code == .subprocessFailed)
+        #expect(error?.code == .gitFailed && error?.message == "git failed: invalid reference: no-such-ref")
         #expect(try svc.list(projectRoot: project.root).map(\.name) == ["main"])
     }
 
@@ -150,7 +150,7 @@ import XcdevTestSupport
         let svc = service(project)
         let main = try await svc.open(from: project.root)
         let error = await #expect(throws: XcdError.self) { try await svc.create(name: "foo", in: main) }
-        #expect(error?.code == .subprocessFailed)
+        #expect(error?.code == .gitFailed)
         #expect(FileManager.default.fileExists(atPath: target + "/marker.txt"))
         #expect(try svc.list(projectRoot: project.root).map(\.name) == ["main"])
     }
@@ -242,8 +242,7 @@ import XcdevTestSupport
         let project = try TempProject.make(config: Self.config)
         defer { project.remove() }
         let svc = service(project)
-        let main = try await svc.open(from: project.root)
-        let (feat, _) = try await svc.create(name: "feat", in: main)
+        let feat = try await svc.create(name: "feat", in: try await svc.open(from: project.root)).state
         try FileManager.default.removeItem(atPath: feat.path)
         let error = await #expect(throws: XcdError.self) { try await svc.open(from: project.root, worktreeName: "feat") }
         #expect(error?.code == .worktreeNotFound)

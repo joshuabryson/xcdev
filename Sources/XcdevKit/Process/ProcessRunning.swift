@@ -21,6 +21,9 @@ extension XcdError {
     public static func subprocess(_ invocation: Invocation, _ output: ProcessOutput,
                                   code: ErrorCode = .subprocessFailed, message: String? = nil,
                                   next: String? = nil) -> XcdError {
+        if code == .subprocessFailed, GitFailure.isGit(invocation) {
+            return GitFailure.error(invocation, output, message: message, next: next)
+        }
         let tail = output.stderrString
             .split(separator: "\n", omittingEmptySubsequences: true)
             .suffix(20)
