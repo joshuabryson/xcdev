@@ -3,6 +3,15 @@ import Testing
 import XcdevTestSupport
 @testable import XcdevKit
 
+/// Answers every git command as a git that found no repository and stopped at a mount point, with `stderr`.
+struct MountPointGit: ProcessRunning {
+    let stderr: String
+
+    func run(_ invocation: Invocation) async throws -> ProcessOutput {
+        ProcessOutput(exitCode: 128, stderr: stderr)
+    }
+}
+
 /// Finding the project from a directory, when git cannot. Real git.
 @Suite struct ProjectLocationTests {
     let locator = WorktreeLocator(runner: SystemProcessRunner())
@@ -25,6 +34,19 @@ import XcdevTestSupport
         let error = await failure(from: dir + "/deeper")
         #expect(error?.code == .notInProject && error?.message == "\(dir)/deeper is not inside a git repository")
         #expect(error?.next == "cd into a project that has a .xcdev.yml (or run `git init`, then `xcd init`)")
+    }
+
+    /// git says "(or any parent up to mount point …)" where the search stops at a filesystem boundary, as under `/dev`.
+    @Test func aFolderOnAnotherVolumeWithNoGitAboveItIsNotInAProject() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xcd-mount-\(UUID().uuidString)").path
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let stderr = "fatal: not a git repository (or any parent up to mount point /)\n"
+            + "Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\n"
+        let error = await #expect(throws: XcdError.self) {
+            _ = try await WorktreeLocator(runner: MountPointGit(stderr: stderr)).locate(from: dir)
+        }
+        #expect(error?.code == .notInProject && error?.message == "\(dir) is not inside a git repository")
     }
 
     /// git says "not a git repository" for a repository whose HEAD is damaged too, where `git init` is the wrong advice.

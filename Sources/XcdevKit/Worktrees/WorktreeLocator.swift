@@ -37,7 +37,7 @@ public struct WorktreeLocator: Sendable {
     /// moved or deleted. Anything else is git's failure.
     static func failure(_ invocation: Invocation, _ output: ProcessOutput, from directory: String) -> XcdError {
         let entry = nearestGitEntry(from: directory)
-        if entry == nil, output.stderrString.contains("not a git repository (or any of the parent directories)") {
+        if entry == nil, output.stderrString.contains("not a git repository (or any") {
             return XcdError(.notInProject, "\(directory) is not inside a git repository",
                             next: "cd into a project that has a .xcdev.yml (or run `git init`, then `xcd init`)")
         }
