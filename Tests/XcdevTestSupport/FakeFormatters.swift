@@ -5,8 +5,9 @@ import XcdevKit
 /// what it did with the answer. Their one rule: a line loses the blanks at its end, and each tab it starts with
 /// becomes four spaces. A run with no range also ends the text with a newline. What they do at the edges is what
 /// the real tools were seen to do:
-/// - swift-format reads the file named last, prints nothing for a file the worktree's `.swift-format-ignore` names,
-///   and for a file it cannot read as Swift exits 1 with nothing on stdout and the file's full path in its error.
+/// - swift-format reads the file named last, takes each range as UTF-8 offsets and formats every line a range
+///   touches, prints nothing for a file the worktree's `.swift-format-ignore` names, and for a file it cannot read as
+///   Swift exits 1 with nothing on stdout and the file's full path in its error.
 /// - SwiftFormat reads standard input, takes one range per run, and for such a file exits 70 with its input printed
 ///   back and an error that names no file.
 /// A file "cannot be read as Swift" here when a line starts with `<<<<<<<`, as in an unresolved conflict, and each
@@ -51,7 +52,7 @@ public final class FakeFormatters: Sendable {
         runner.stub(["swift-format"]) { [self] invocation in
             let file = invocation.arguments.last ?? ""
             let text = (try? String(contentsOfFile: file, encoding: .utf8)) ?? ""
-            let ranges = Self.values(after: "--lines", in: invocation.arguments, separator: ":")
+            let ranges = Self.lines(touchedBy: Self.values(after: "--offsets", in: invocation.arguments, separator: ":"), in: text)
             return answer(Run(tool: "swift-format", file: file, ranges: ranges, text: text, inputFile: nil), in: invocation.workingDirectory ?? "")
         }
         runner.stub(["swiftformat"]) { [self] invocation in
@@ -65,6 +66,14 @@ public final class FakeFormatters: Sendable {
     /// The arguments that follow each `flag`, each split at `separator` into whole numbers.
     static func values(after flag: String, in arguments: [String], separator: Character) -> [[Int]] {
         values(after: flag, in: arguments).map { $0.split(separator: separator).compactMap { Int($0) } }
+    }
+
+    /// The first and last line of `text` that each pair of UTF-8 offsets touches, both offsets counted in.
+    static func lines(touchedBy offsets: [[Int]], in text: String) -> [[Int]] {
+        var starts = [0]
+        for (offset, byte) in text.utf8.enumerated() where byte == UInt8(ascii: "\n") { starts.append(offset + 1) }
+        func line(_ offset: Int) -> Int { (starts.lastIndex { $0 <= offset } ?? 0) + 1 }
+        return offsets.filter { $0.count == 2 }.map { [line($0[0]), line($0[1])] }
     }
 
     static func values(after flag: String, in arguments: [String]) -> [String] {

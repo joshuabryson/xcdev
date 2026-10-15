@@ -27,15 +27,31 @@ import XcdevTestSupport
         #expect(answer.transcript == "$ swift-format format --configuration ci/format.json '/work/My App/Sources/App/A.swift'\nexit 0\n")
     }
 
-    @Test func everyRangeGoesIntoTheOneCall() async throws {
+    /// Each range as UTF-8 offsets, which every swift-format takes: the one in Xcode 26 has no `--lines`.
+    @Test func everyRangeGoesIntoTheOneCallAsOffsets() async throws {
         runner.stub(["swift-format"], stdout: "let a = 1\n")
-        _ = try await tool(args: ["--configuration", "ci/format.json"]).format(job([LineRange(3, 5), LineRange(9, 9)]))
+        let nine = "struct A {\n    let a=1\n    let b=2\n    let c=3\n    let d=4\n    let e=5\n    let f=6\n    let g=7\n    let h=8\n}\n"
+        _ = try await tool(args: ["--configuration", "ci/format.json"]).format(job([LineRange(3, 5), LineRange(9, 9)], text: nine))
         #expect(runner.calls.count == 1)
         #expect(runner.calls.first?.arguments
-                == ["format", "--lines", "3:5", "--lines", "9:9", "--configuration", "ci/format.json", "/work/My App/Sources/App/A.swift"])
+                == ["format", "--offsets", "23:58", "--offsets", "95:106", "--configuration", "ci/format.json", "/work/My App/Sources/App/A.swift"])
     }
 
-    /// No ranges is not "no range": without `--lines` swift-format would format the whole file.
+    /// The offsets swift-format 6.4 works out for its own `--lines`: from the first byte of the first line to the byte
+    /// before the line after the last, or before the end of the text when there is no such line. They count bytes.
+    @Test func theOffsetsAreTheOnesSwiftFormatGivesItsOwnLines() {
+        func offsets(_ text: String, _ first: Int, _ last: Int) -> [String] {
+            AppleSwiftFormatTool.offsets(of: [LineRange(first, last)], in: text)
+        }
+        #expect(offsets("let a=1\n", 1, 1) == ["0:7"])
+        #expect(offsets("let a=1\nlet b=2\n", 2, 2) == ["8:15"])
+        #expect(offsets("let a=1\nlet b", 2, 2) == ["8:12"])
+        #expect(offsets("// Été\nlet b=2\n", 2, 2) == ["9:16"])
+        #expect(offsets("let s = \"🙂\"\nlet t=1\n", 2, 2) == ["15:22"])
+        #expect(offsets("let a=1\n", 2, 2) == ["8:8"])
+    }
+
+    /// No ranges is not "no range": without `--offsets` swift-format would format the whole file.
     @Test func noRangesAtAllRunsNothing() async throws {
         let answer = try await tool().format(job([]))
         #expect(answer.text == "let a=1\n" && runner.calls.isEmpty)

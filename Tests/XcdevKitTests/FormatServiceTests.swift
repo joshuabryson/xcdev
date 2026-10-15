@@ -196,9 +196,9 @@ struct FormatProject {
         #expect(report.tool == "swift-format" && report.changed.first?.lines == [LineRange(3, 3), LineRange(7, 7)])
         let found = try #require(project.fake.calls.first { $0.argv.first == "xcrun" })
         #expect(found.environment == ["DEVELOPER_DIR": pinned + "/Contents/Developer"])
-        let run = try #require(project.fake.calls.first { $0.argv.first == "swift-format" && $0.arguments.contains("--lines") })
+        let run = try #require(project.fake.calls.first { $0.argv.first == "swift-format" && $0.arguments.contains("--offsets") })
         #expect(run.executable == project.inXcode && run.workingDirectory == project.root)
-        #expect(run.arguments == ["format", "--lines", "3:3", "--lines", "7:7", project.root + "/Sources/App/A.swift"])
+        #expect(run.arguments == ["format", "--offsets", "28:44", "--offsets", "78:94", project.root + "/Sources/App/A.swift"])
         #expect(formatters.runs.allSatisfy { $0.tool == "swift-format" && $0.inputFile == nil })
     }
 

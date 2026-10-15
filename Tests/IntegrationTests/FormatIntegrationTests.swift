@@ -314,19 +314,34 @@ extension FormatIntegrationTests {
         #expect(try read("Sources/App/Login.swift", project) == Self.changed)
     }
 
-    /// Apple's swift-format prints a file without its byte order mark, and a `String` drops it: xcd keeps it.
-    @Test(arguments: FormatterKind.allCases)
-    func aFileThatStartsWithAByteOrderMarkKeepsItAndIsFormattedOnItsChangedLine(_ kind: FormatterKind) async throws {
+    /// A file that starts with a byte order mark, and the line of it that the change touches.
+    struct Marked: Sendable, CustomTestStringConvertible {
+        let testDescription: String
+        let path: String
+        let body: String
+        let line: Int
+
+        static let all = [
+            Marked(testDescription: "between lines as the formatter leaves them", path: "Sources/App/Marked.swift",
+                   body: "struct Marked {\n    let a: Int\n    let b:Int\n    let c: Int\n}\n", line: 3),
+            Marked(testDescription: "under accents and an emoji, between lines the formatter would change", path: "Sources/App/Noël.swift",
+                   body: "// Été à Noël 🙂\nstruct Noël {\n    let é:Int\n    let b:Int\n    let c:Int\n}\n", line: 4),
+        ]
+    }
+
+    /// Apple's swift-format prints a file without its byte order mark, and a `String` drops it: xcd keeps it. swift-format
+    /// is given the changed line as offsets, which count bytes: the accented letters and the emoji above it take more
+    /// than one each, and the mark is not counted.
+    @Test(arguments: FormatterKind.allCases, Marked.all)
+    func aFileThatStartsWithAByteOrderMarkKeepsItAndIsFormattedOnItsChangedLine(_ kind: FormatterKind, _ marked: Marked) async throws {
         let project = try project(kind)
         defer { project.remove() }
-        let path = "Sources/App/Marked.swift"
         let mark = Data([0xEF, 0xBB, 0xBF])
-        let body = "struct Marked {\n    let a: Int\n    let b:Int\n    let c: Int\n}\n"
-        try commitToMain(mark + Data(body.utf8), at: path, project)
-        try write(mark + Data(body.replacingOccurrences(of: "let b:Int", with: "let d:Int").utf8), at: path, project)
+        try commitToMain(mark + Data(marked.body.utf8), at: marked.path, project)
+        try write(mark + Data(marked.body.replacingOccurrences(of: "let b:Int", with: "let d:Int").utf8), at: marked.path, project)
         let report = try await format(FormatOptions(), project)
         #expect(report.failure == nil && report.failed.isEmpty, "\(report.text)")
-        #expect(try bytes(path, project) == mark + Data(body.replacingOccurrences(of: "let b:Int", with: "let d: Int").utf8))
-        #expect(lines(report) == [path + " 3"])
+        #expect(try bytes(marked.path, project) == mark + Data(marked.body.replacingOccurrences(of: "let b:Int", with: "let d: Int").utf8))
+        #expect(lines(report) == ["\(marked.path) \(marked.line)"])
     }
 }
