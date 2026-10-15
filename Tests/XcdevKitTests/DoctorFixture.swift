@@ -1,0 +1,72 @@
+import Foundation
+import Testing
+import XcdevTestSupport
+@testable import XcdevKit
+
+/// What the doctor suites share: a fake simulator on `fake`, a project with its main worktree registered, git run
+/// for real, and doctor on both.
+protocol DoctorFixture {
+    var fake: FakeProcessRunner { get }
+}
+
+extension DoctorFixture {
+    /// A project with its main worktree registered, simulators from the simctl-list fixture (no xcd devices yet),
+    /// and git run for real.
+    func setup(config: String = WorktreeServiceTests.config) async throws -> (TempProject, FakeSimulators, WorktreeService, WorktreeContext) {
+        let project = try TempProject.make(config: config)
+        let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        let worktrees = WorktreeService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home))
+        return (project, sims, worktrees, try await worktrees.open(from: project.root))
+    }
+
+    func doctor(_ project: TempProject, discovery: XcodeDiscovery? = nil,
+                sleep: @escaping @Sendable (Duration) async throws -> Void = { _ in /* doctor's pauses are skipped */ }) -> DoctorService {
+        DoctorService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home),
+                      discovery: discovery ?? XcodeDiscovery(runner: fake, applicationsDirectories: []), sleep: sleep)
+    }
+
+    /// Records `udid` as the worktree's clone of `device`.
+    func record(_ udid: String, as device: String, in ctx: inout WorktreeContext) throws {
+        ctx.state.devices[device] = ProvisionedDevice(udid: udid, deviceType: "iPhone 18 Pro", deviceTypeIdentifier: "t",
+                                                      runtime: "iOS 27.0", runtimeIdentifier: "r")
+        try WorktreeStateStore.save(ctx.state, ctx.paths)
+    }
+
+    var pkillCalls: Int { fake.calls.filter { $0.argv.first == "pkill" }.count }
+
+    /// Makes `path`'s folder look created `seconds` ago, and returns a dataPath inside it.
+    func agedDevice(_ path: String, seconds: TimeInterval) throws -> String {
+        try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.creationDate: Date().addingTimeInterval(-seconds)], ofItemAtPath: path)
+        return path + "/data"
+    }
+
+    /// What `xcd wt create <name>` leaves after `git worktree add`, whether it was killed there or is still running
+    /// its post-worktree-create hook: an incomplete entry, checkout, and state. Returns the checkout's path.
+    func halfCreated(_ name: String, in project: TempProject) async throws -> String {
+        let path = project.base + "/Sample App.worktrees/" + name
+        try TempProject.git(["worktree", "add", "-b", name, path, "HEAD"], in: project.root)
+        let state = WorktreeState(id: name + "-id", name: name, project: "Sample App", projectRoot: project.root,
+                                  path: Paths.canonical(path), branch: name, xcode: nil, devices: [:], status: .incomplete,
+                                  createdAt: Date())
+        try WorktreeStateStore.save(state, WorktreePaths(root: state.path))
+        try await Registry(paths: GlobalPaths(base: project.home)).upsert(RegistryEntry(state))
+        return path
+    }
+
+    /// Holds the lock at `path` (as another xcd's `wt create` or `wt remove` would) from before this returns until
+    /// the task is cancelled or `lease` runs out. The lease turns a doctor that waits for the lock into a failing
+    /// test instead of a hung one.
+    func holdLock(_ path: String, lease: Duration = .seconds(20)) async throws -> Task<Void, any Error> {
+        let (acquired, signal) = AsyncStream<Void>.makeStream()
+        let holder = Task {
+            defer { signal.finish() }
+            try await FileLock.withLock(at: path) {
+                signal.yield()
+                try await Task.sleep(for: lease)
+            }
+        }
+        for await _ in acquired { break }
+        return holder
+    }
+}
