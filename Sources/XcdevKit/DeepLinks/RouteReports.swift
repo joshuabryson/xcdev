@@ -114,6 +114,8 @@ public struct OpenReport: Reportable {
     public var appOutput: [String]?
     public var note: String?
     public let worktree: String
+    /// A parameter the route's `expect` could name, for the `next:` of an unproven arrival.
+    let unnamedParameter: String?
 
     enum CodingKeys: String, CodingKey {
         case route, kind, device, deviceSummary, dryRun, url, linkSent, arguments, environment, script, scriptLog, unset, preset, app,
@@ -127,6 +129,7 @@ public struct OpenReport: Reportable {
         self.dryRun = dryRun
         self.worktree = worktree
         preset = route.preset
+        unnamedParameter = route.unnamedParameter
         switch route.delivery {
         case .url(let link):
             url = link
@@ -218,14 +221,27 @@ public struct OpenReport: Reportable {
         }
     }
 
-    /// A process that ended is the failure, whatever the check saw. Else the check's failure, if it has one.
+    /// A process that ended is the failure, whatever the check saw. Else the check's failure, if it has one, and
+    /// else an element that was found though nothing shows the link brought it.
     public var failure: XcdError? {
-        guard let exitedAfter else { return checkFailure }
+        guard let exitedAfter else { return checkFailure ?? unproven }
         let after = DurationText.format(.seconds(exitedAfter))
         let ended = crash == nil ? "exited \(after) later without a crash report" : "crashed \(after) later"
         let next = crash == nil ? "check the app's output with `xcd logs --app` and its logs with `xcd logs`"
                                 : "fix the crash (see the frames and report above), then run `xcd open` again"
         return XcdError(.appCrashed, Self.endedText(kind, linkSent: linkSent, ended), next: next)
+    }
+
+    /// The failure of a check that found its element where it may have been all along: it was on screen before the
+    /// link went to a copy that was already up, or xcd could not look before.
+    var unproven: XcdError? {
+        guard let check, check.outcome == .inconclusive else { return nil }
+        var next = "open it again with `--cold` or a preset, which restart the app, to see the screen arrive"
+        if let unnamedParameter {
+            next += "; or give the route an `expect` that names one of its parameters, such as \"label~{\(unnamedParameter)}\""
+        }
+        return XcdError(.arrivalUnproven, "\(Self.sent(kind)), and \(check.target) is on screen, but that does not show the link brought it there",
+                        next: next)
     }
 
     /// What reached the app before it ended, then how it ended. A link that never went out is not called sent.

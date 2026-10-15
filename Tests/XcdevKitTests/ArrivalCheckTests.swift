@@ -66,7 +66,9 @@ import XcdevTestSupport
         #expect(arrival.looks.count == 1 && base.steps == ["spawn", "openurl"])        // the link still goes out
         #expect(report.check == OpenReport.Check(target: "label~Milk", outcome: .inconclusive, seconds: nil,
                                                  reason: "label~Milk was already on screen"))
-        #expect(report.failure == nil && report.text.hasSuffix("\ncheck: inconclusive (label~Milk was already on screen)"))
+        #expect(report.text.hasSuffix("\ncheck: inconclusive (label~Milk was already on screen)"))
+        #expect(report.failure?.code == .arrivalUnproven)
+        #expect(report.failure?.message == "the link was sent, and label~Milk is on screen, but that does not show the link brought it there")
     }
 
     /// A look before the link that could not see the app tells nothing about what was on its screen. The runner does
@@ -81,7 +83,7 @@ import XcdevTestSupport
         try await checkLookAfterABlindLook(before: .failure(Self.noRunner), why: "the iphone UI runner did not start within 2m00s")
     }
 
-    /// Two looks, the second finds the element at once: the check is inconclusive, and the command succeeds.
+    /// Two looks, the second finds the element at once: the check is inconclusive, and the command fails.
     func checkLookAfterABlindLook(before: Result<ArrivalSight, XcdError>, why: String) async throws {
         defer { base.worktree.remove() }
         var ctx = try context(pids: [500])
@@ -93,7 +95,7 @@ import XcdevTestSupport
         #expect(arrival.looks.map { $0.commandsBefore > link } == [false, true])       // one before the link, one after
         #expect(base.steps == ["spawn", "openurl"])
         #expect(report.check == OpenReport.Check(target: "label~Milk", outcome: .inconclusive, seconds: nil, reason: reason))
-        #expect(report.failure == nil && report.text.hasSuffix("\ncheck: inconclusive (" + reason + ")"))
+        #expect(report.failure?.code == .arrivalUnproven && report.text.hasSuffix("\ncheck: inconclusive (" + reason + ")"))
     }
 
     /// Not being able to look before does not excuse the element: if the look after misses it, that is today's failure.
@@ -232,7 +234,7 @@ import XcdevTestSupport
         let seen = looker(.success(.found(seconds: 0)))
         let vague = try await base.service(FakeProbe(runningChecks: 9), arrival: seen).open(checked, OpenOptions(), in: &ctx)
         #expect(vague.check?.outcome == .inconclusive && seen.looks.count == 1)        // on screen before the link: no look after it
-        #expect(vague.failure == nil && vague.exitedAfter == nil)
+        #expect(vague.failure?.code == .arrivalUnproven && vague.exitedAfter == nil)
     }
 
     /// A route with `expect` promises a check, so a runner that cannot run is a failure, not a skip. The link has

@@ -18,6 +18,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
     case elementNotFound = "element_not_found"
     case elementNotHittable = "element_not_hittable"
     case waitTimeout = "wait_timeout"
+    case arrivalUnproven = "arrival_unproven"
     case elementAmbiguous = "element_ambiguous"
     case staleRef = "stale_ref"
     case platformUnsupported = "platform_unsupported"
@@ -46,7 +47,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
             return 1
         case .usage, .notInProject, .configMissing, .configInvalid, .deviceUnknown,
              .deviceTypeUnknown, .worktreeNotFound, .worktreeDirty, .appNotBuilt, .elementAmbiguous, .staleRef, .platformUnsupported,
-             .notConfigured:
+             .notConfigured, .arrivalUnproven:
             return 2
         case .xcodeMissing, .xcodeRuntimeMismatch, .runtimeMissing, .cloneFailed, .simulatorFailed,
              .subprocessFailed, .timeout, .doctorProblems, .internalError, .runnerFailed, .toolMissing:
@@ -72,6 +73,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .elementNotFound: return "No element on screen matched the target within the timeout."
         case .elementNotHittable: return "The element exists but is off screen, disabled, or covered by a system alert or the keyboard, so it wasn't acted on."
         case .waitTimeout: return "`xcd ui wait` gave up: the element didn't appear (or, with --gone, didn't go away). Also a route's `expect` that didn't appear after `xcd open`."
+        case .arrivalUnproven: return "`xcd open` found the route's `expect` on screen but cannot show that the link brought it: it was there before the link was sent, or xcd could not look before."
         case .elementAmbiguous: return "More than one element matched the target; the error lists them with refs."
         case .staleRef: return "A ref from an earlier `xcd ui tree` no longer names one element; read the tree again."
         case .platformUnsupported: return "UI driving works on iPhone and iPad simulators running iOS 17 or later, some hardware buttons exist only on some devices, and a watchOS simulator opens no custom-scheme link."

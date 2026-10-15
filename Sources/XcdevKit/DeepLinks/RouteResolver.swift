@@ -28,6 +28,9 @@ public struct ResolvedRoute: Sendable, Equatable {
     public let expect: String?
     /// How long a script may take.
     public let timeout: Duration
+    /// A parameter the route's `expect` could name, when the route has parameters and its `expect` names none of
+    /// them: an element that is the same whichever value the link carries may be on screen before the link.
+    public var unnamedParameter: String?
 
     /// Whether this is an http or https link, which the system routes like one a person tapped.
     public var isWebLink: Bool {
@@ -64,7 +67,15 @@ public struct RouteResolver: Sendable {
         let values = try self.values(given, for: spec, route: name)
         let fill: (String) -> String = { values[$0] ?? config.linkVars[$0] ?? "" }
         return ResolvedRoute(name: name, delivery: try delivery(spec, values, route: name), preset: spec.preset,
-                             expect: try spec.expect.map { try expect($0, fill, route: name) }, timeout: spec.timeoutDuration)
+                             expect: try spec.expect.map { try expect($0, fill, route: name) }, timeout: spec.timeoutDuration,
+                             unnamedParameter: try unnamedParameter(of: spec))
+    }
+
+    /// The route's first parameter by name, when the route has parameters and its `expect` names none of them.
+    func unnamedParameter(of spec: RouteSpec) throws -> String? {
+        guard let expect = spec.expect, let first = spec.allParams.keys.sorted().first else { return nil }
+        let named = Set(try template(expect).names)
+        return spec.allParams.keys.contains(where: named.contains) ? nil : first
     }
 
     /// The route's `expect` with its values filled in. A value can leave it with nothing to look for: `label~{title}`

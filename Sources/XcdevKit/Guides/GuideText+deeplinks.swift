@@ -105,8 +105,9 @@ A mistake in a route, such as an unknown placeholder, two kinds, or an unknown p
 Sending a link only means it was sent. `expect` names an element that shows the route worked, in a form `xcd ui wait` takes: `id:<identifier>`, `label:<text>`, or `label~<part>`. After the delivery xcd waits up to 10 seconds for it.
 
 - **Give every https route an `expect`.** An https link reaches the app only where the app's associated domains work on that simulator. Otherwise Safari opens it, and the simulator still reports success. With `expect` the command fails with `wait_timeout` and says the app is in the background.
-- **Name something specific to the parameters**, like `"label~Item {id}"`. If the element is already on screen when a link goes to the running app, the check proves nothing, and the result says `check: inconclusive`. It says the same when xcd could not look at the app before the link was sent, for example because the app was in the background. For a definite answer, open the route with `--cold` or with a preset, since either restarts the app, or bring the app to the front first with `xcd launch`.
+- **Name something specific to the parameters**, like `"label~Item {id}"`. If the element is already on screen when a link goes to the running app, the check proves nothing: the result says `check: inconclusive`, and the command fails with `arrival_unproven`. It does the same when xcd could not look at the app before the link was sent, for example because the app was in the background. For a definite answer, open the route with `--cold` or with a preset, since either restarts the app, or bring the app to the front first with `xcd launch`.
 - **The first check takes longer.** On a simulator, the first check builds the UI runner once (about 30 seconds) and starts it. On a new simulator the start can take minutes. So the first `xcd open` of a route with `expect` can take much longer than later ones: give the command time.
+- **A script route's check** is one look after the script. xcd cannot know whether the script restarted the app, so it makes no look before, and a found element is `appeared` even if it was on screen before the script ran.
 - **The check is skipped**, and the result says so, for a Mac app and for a simulator that is not an iPhone or iPad on iOS 17 or later.
 - **A link given directly** has no check. Follow `xcd open '<url>'` with `xcd ui wait <target>`.
 
@@ -166,6 +167,7 @@ Every failure ends with `next:`. Do what it says first.
 | `platform_unsupported` | A custom-scheme link for an app on a watchOS simulator, which opens none. | Use a `launch` or `run` route on the watch, or another device with `--device`. |
 | `app_crashed` | The app ended while xcd watched it: in the seconds after the delivery, or before the arrival check was done. | Read the crash report in the error. |
 | `wait_timeout` | The route's `expect` did not appear. | The error lists what is on screen. "The app is in the background" means the link opened somewhere else. |
+| `arrival_unproven` | The route's `expect` was on screen, but it may have been there before the link was sent. | Open the route again with `--cold` or a preset. A route whose `expect` names none of its parameters is told to name one. |
 | `route_failed` | A script exited non-zero, or a `--cold` link did not start the app. | Read the script's log, or `xcd logs`. |
 | `runner_failed` | The arrival check could not run. The link had already been sent. | `xcd ui stop`, then `xcd ui wait <target>`, because running `xcd open` again sends the link a second time. If that fails too, `xcd doctor`. |
 """#

@@ -61,14 +61,15 @@ import Testing
         }
         // What an agent would otherwise learn by failing: the first check is slow, how to get past an inconclusive one,
         // that opening the route again after a runner failure sends the link twice, and that a script must be executable.
-        for advice in ["builds the UI runner once", "For a definite answer", "sends the link a second time", "chmod +x scripts/open-about.sh"] {
+        for advice in ["builds the UI runner once", "For a definite answer", "sends the link a second time", "chmod +x scripts/open-about.sh",
+                       "A script route's check"] {
             #expect(guide.markdown.contains(advice), "the deeplinks guide doesn't say: \(advice)")
         }
         for state in [AppArrival.running, .started, .restarted, .startedByLink, .untouched] {
             #expect(guide.markdown.contains("`\(state.rawValue)`"), "the deeplinks guide doesn't explain app=\(state.rawValue)")
         }
-        let codes: [ErrorCode] = [.usage, .configInvalid, .appNotBuilt, .platformUnsupported, .appCrashed, .waitTimeout, .routeFailed,
-                                  .runnerFailed]
+        let codes: [ErrorCode] = [.usage, .configInvalid, .appNotBuilt, .platformUnsupported, .appCrashed, .waitTimeout, .arrivalUnproven,
+                                  .routeFailed, .runnerFailed]
         for code in codes {
             #expect(guide.markdown.contains("| `\(code.rawValue)` |"), "the deeplinks guide has no row for \(code.rawValue)")
         }
