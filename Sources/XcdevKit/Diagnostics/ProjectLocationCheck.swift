@@ -16,9 +16,9 @@ public struct DoctorFixes: Sendable, Equatable {
     }
 
     public func repairs(_ problem: DoctorProblem) -> Bool {
-        guard located, problem.action != nil else { return false }
+        guard problem.action != nil else { return false }
         switch problem.scope {
-        case .project?, .goneProject?, .xcd?: return fix
+        case .project?, .goneProject?, .xcd?: return located && fix
         case .mac?: return restartSimulators
         case .otherProject?, nil: return false
         }

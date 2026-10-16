@@ -23,11 +23,18 @@ enum GitFailure {
 
     /// git's first line without its `fatal: ` or `error: `, or the command and its exit code when git said nothing.
     static func said(_ first: String?, _ invocation: Invocation, _ output: ProcessOutput) -> String {
-        guard let first else { return "`\(invocation.argv.prefix(3).joined(separator: " "))` failed (exit \(output.exitCode))" }
+        guard let first else { return "`\(words(of: invocation).joined(separator: " "))` failed (exit \(output.exitCode))" }
         for prefix in ["fatal: ", "error: "] where first.hasPrefix(prefix) {
             return "git failed: " + first.dropFirst(prefix.count)
         }
         return "git failed: " + first
+    }
+
+    /// `git` and the words after it that name the command, without a leading `-C <dir>`.
+    static func words(of invocation: Invocation) -> [String] {
+        var argv = invocation.argv
+        if argv.count > 2, argv[1] == "-C" { argv.removeSubrange(1...2) }
+        return Array(argv.prefix(3))
     }
 
     struct Cause {

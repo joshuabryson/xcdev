@@ -50,7 +50,7 @@ public struct DoctorReport: Reportable {
 
     public var text: String {
         let fixed = problems.count - remaining.count
-        var lines = ["doctor: \(problems.count) problem\(problems.count == 1 ? "" : "s")" + (fixMode ? ", \(fixed) fixed" : "")]
+        var lines = ["doctor: \(problems.count) problem\(problems.count == 1 ? "" : "s")" + (fixMode || restartSimulators ? ", \(fixed) fixed" : "")]
         for check in checks {
             if check.problems.isEmpty && check.inProgress.isEmpty { lines.append("ok       \(check.id)") }
             for note in check.inProgress { lines.append("busy     \(check.id)  \(note)") }
@@ -79,9 +79,9 @@ public struct DoctorReport: Reportable {
     /// The flag that would fix a problem no run has tried yet: `--restart-simulators` for CoreSimulator, and before a
     /// `--fix` run, `--fix` for what it reaches. Another project's problem says where instead.
     func hint(for problem: DoctorProblem) -> String? {
-        guard let fix = problem.fix, problem.action != nil, located else { return nil }
+        guard let fix = problem.fix, problem.action != nil else { return nil }
         if problem.scope == .mac { return "--restart-simulators: \(fix)" }
-        return !fixMode && plainFix.repairs(problem) ? "--fix: \(fix)" : nil
+        return located && !fixMode && plainFix.repairs(problem) ? "--fix: \(fix)" : nil
     }
 
     public var failure: XcdError? {
@@ -211,11 +211,13 @@ public struct DoctorService: Sendable {
         let busy = Set(registry.filter {
             FileLock.isHeld(at: worktrees.lockPath(projectRoot: $0.projectRoot, worktree: $0.name))
         }.map(\.id))
-        let (project, projectFailure) = await project(from: directory)
+        let (location, projectFailure) = await locate(directory)
+        let project = location.flatMap(read)
         var env = DoctorEnvironment(runner: runner, globalPaths: globalPaths, catalog: catalog, catalogFailure: catalogFailure,
                                  registry: registry, registryError: registryError, states: states,
                                  project: project, projectFailure: projectFailure, discovery: discovery, now: now(), sleep: sleep,
                                  busy: busy, fixing: fixing)
+        env.location = location
         env.useProcesses(detached: detached, runnerClient: runnerClient)
         return env
     }
@@ -242,12 +244,12 @@ public struct DoctorService: Sendable {
         }
     }
 
-    /// The project at `directory`, read-only: a missing or invalid .xcdev.yml is recorded, not thrown. Outside any
-    /// project there is none; when git fails to say which it is, its failure.
-    func project(from directory: String?) async -> (project: DoctorProject?, failure: XcdError?) {
+    /// Where `directory` is: the project git finds there, whatever its `.xcdev.yml` says. Outside any project there
+    /// is none; when git fails to say which it is, its failure.
+    func locate(_ directory: String?) async -> (location: ProjectLocation?, failure: XcdError?) {
         guard let directory else { return (nil, nil) }
         do {
-            return (read(try await WorktreeLocator(runner: runner).locate(from: directory)), nil)
+            return (try await WorktreeLocator(runner: runner).locate(from: directory), nil)
         } catch let error as XcdError where error.code == .notInProject {
             return (nil, nil)
         } catch let error as XcdError {

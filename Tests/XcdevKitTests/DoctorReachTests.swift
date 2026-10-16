@@ -118,6 +118,36 @@ import XcdevTestSupport
         #expect(sims.devices.contains { $0.udid == clone })
     }
 
+    /// CoreSimulator belongs to no project, so a restart does not need doctor to know which one it is in; `--fix` still
+    /// repairs nothing then.
+    @Test func aRestartDoesNotNeedDoctorToKnowItsProject() async throws {
+        let (project, sims, worktrees, main) = try await setup()
+        let old = try await another(project, named: "Old")
+        defer { project.remove(); old.remove() }
+        let (feat, _) = try await worktrees.create(name: "feat", in: main)
+        let clone = sims.add(name: "xcd · Old · main · iphone")
+        try FileManager.default.removeItem(atPath: old.root)
+        try FileManager.default.moveItem(atPath: project.root, toPath: project.base + "/Moved App")
+        let restarted = coreSimulatorThatAnswersOnceRestarted()
+        let plain = await doctor(project).run(fix: true, checks: [CoreSimulatorCheck()], from: feat.path, includeDisk: false)
+        #expect(plain.problems.map(\.fixed) == [false] && restarted.value == 0)
+        #expect(plain.text.contains("(--restart-simulators: "))
+        let report = await doctor(project).run(fix: true, restartSimulators: true, checks: [CoreSimulatorCheck()] + DoctorService.pruneChecks,
+                                               from: feat.path, includeDisk: false)
+        #expect(report.problems.first { $0.check == "coresimulator" }?.fixed == true && restarted.value == 1)
+        #expect(report.problems.filter { $0.check != "coresimulator" }.allSatisfy { !$0.fixed })
+        #expect(sims.devices.contains { $0.udid == clone })
+    }
+
+    /// A run that only restarts CoreSimulator counts what it fixed, as a `--fix` run does.
+    @Test func aRestartOnlyRunCountsWhatItFixed() async throws {
+        let (project, _, _, _) = try await setup()
+        defer { project.remove() }
+        _ = coreSimulatorThatAnswersOnceRestarted()
+        let report = await doctor(project).run(fix: false, restartSimulators: true, checks: [CoreSimulatorCheck()], from: project.root, includeDisk: false)
+        #expect(report.text.hasPrefix("doctor: 1 problem, 1 fixed\nfixed    coresimulator"))
+    }
+
     /// `--fix` waits out a boot only where it reaches the clone's project; elsewhere a booting clone is in progress, as
     /// under plain `doctor`, and nothing tells the agent to go and fix it.
     @Test func anotherProjectsBootingCloneIsInProgressUnderFix() async throws {

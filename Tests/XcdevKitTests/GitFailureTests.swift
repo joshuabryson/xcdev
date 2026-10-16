@@ -33,7 +33,7 @@ import XcdevTestSupport
     @Test func gitThatSaysNothingIsStillGitFailed() async {
         fake.stub(["git", "-C", "/r", "status"], exitCode: 129)
         let error = await failure(of: ["status", "--porcelain"])
-        #expect(error?.code == .gitFailed && error?.message == "`git -C /r` failed (exit 129)")
+        #expect(error?.code == .gitFailed && error?.message == "`git status --porcelain` failed (exit 129)")
     }
 
     /// Another user's repository: git names its own fix, which changes the person's global config, so the agent asks first.

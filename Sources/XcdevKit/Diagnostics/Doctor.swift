@@ -114,6 +114,8 @@ public struct DoctorEnvironment: Sendable {
     /// Registry id → that worktree's state, for checkouts that still exist.
     public let states: [String: WorktreeState]
     public let project: DoctorProject?
+    /// The project git found doctor in, with or without an `.xcdev.yml`: whose problems are "this project's".
+    public var location: ProjectLocation?
     /// Why git could not say which project doctor runs in, when it failed.
     public var projectFailure: XcdError?
     public let discovery: XcodeDiscovery

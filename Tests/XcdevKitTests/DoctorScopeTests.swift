@@ -22,15 +22,34 @@ import XcdevTestSupport
         try await register("feat", of: gone, at: project.base + "/Gone.worktrees/feat", home: project.home)
         try await register("feat", of: moved, at: project.base + "/Moved.worktrees/feat", home: project.home)
         try await register("main", of: unmounted, at: unmounted, home: project.home)
+        // Its main checkout is gone, and its only other checkout is on a volume that is not mounted: not gone for sure.
+        let stranded = project.base + "/Stranded"
+        let away = "/Volumes/xcd-no-such-volume-\(UUID().uuidString)/Stranded.worktrees/feat"
+        try await register("feat", of: stranded, at: away, home: project.home)
 
-        let roots: [String?] = [project.root, other, gone, moved, unmounted, nil]
+        let roots: [String?] = [project.root, other, gone, moved, unmounted, stranded, nil]
         let inside = DoctorScopes(env: await doctor(project).environment(from: project.root))
         let scoped = inside.assign(roots.map(problem(in:)), reach: .entries)
-        #expect(scoped.map(\.scope) == [.project, .otherProject, .goneProject, .otherProject, .otherProject, .otherProject])
+        #expect(scoped.map(\.scope) == [.project, .otherProject, .goneProject, .otherProject, .otherProject, .otherProject, .otherProject])
         #expect(scoped.map(\.projectRoot) == roots)
         // Outside any project, no problem is this project's.
         let outside = DoctorScopes(env: await doctor(project).environment(from: nil))
         #expect(outside.assign([problem(in: project.root)], reach: .entries).map(\.scope) == [.otherProject])
+    }
+
+    /// Git decides which project doctor runs in, not `.xcdev.yml`: without one, the checkout's own problems are still its own.
+    @Test func aCheckoutWithoutAConfigIsStillThisProject() async throws {
+        let (project, _, _, _) = try await setup()
+        defer { project.remove() }
+        try FileManager.default.removeItem(atPath: project.root + "/.xcdev.yml")
+        try await register("gone", of: project.root, at: project.base + "/Sample App.worktrees/gone", home: project.home)
+        let plain = await doctor(project).run(fix: false, checks: [MissingWorktreesCheck()], from: project.root, includeDisk: false)
+        let problem = try #require(plain.problems.first)
+        #expect(problem.scope == .project && problem.projectRoot == project.root)
+        #expect(plain.text.contains("  (--fix: "))
+        let fixed = await doctor(project).run(fix: true, checks: [MissingWorktreesCheck()], from: project.root, includeDisk: false)
+        #expect(fixed.problems.map(\.fixed) == [true])
+        #expect(try Registry(paths: GlobalPaths(base: project.home)).entries().map(\.name) == ["main"])
     }
 
     /// Agents work in worktrees: from one, the project is the same as from its main checkout.

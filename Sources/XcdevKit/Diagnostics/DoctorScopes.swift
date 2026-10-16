@@ -42,7 +42,7 @@ struct DoctorScopes {
                 problem.scope = .mac
             case .thisProject:
                 problem.scope = .project
-                problem.projectRoot = env.project?.location.projectRoot
+                problem.projectRoot = env.location?.projectRoot
             case .entries:
                 problem.scope = problem.scope ?? scope(of: problem.projectRoot)
                 problem.next = elsewhere(problem) ?? problem.next
@@ -73,7 +73,7 @@ struct DoctorScopes {
     /// another project's.
     func scope(of root: String?) -> DoctorProblem.Scope {
         guard let root else { return .otherProject }
-        if root == env.project?.location.projectRoot { return .project }
+        if root == env.location?.projectRoot { return .project }
         return isGone(root) ? .goneProject : .otherProject
     }
 
