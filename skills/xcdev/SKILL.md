@@ -50,5 +50,5 @@ it gives each git worktree its own simulator clones and DerivedData, so parallel
 - `xcd test` stops the UI runner when the run includes UI tests; the next `xcd ui` command starts it again.
 - Output is compact text by default; add `--json` (or set `XCD_OUTPUT=json`) for one JSON object per command.
 - Every failure ends with `next:`. Do what it says before trying anything else.
-- Exit codes: 1 = the task failed (fix the code), 2 = fix the command line or config, 3 = fix the environment
-  (`xcd doctor`). `xcd help errors` lists every error code.
+- Exit codes: 1 = the task failed (fix the code), 2 = fix the command line or config, 3 = fix the environment: do
+  what `next:` says (often `xcd doctor`). `xcd help errors` lists every error code.
