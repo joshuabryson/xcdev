@@ -32,6 +32,19 @@ import Testing
         #expect(WarningRecord().updated(compiled: [], warnings: [Diagnostic.warning(c, 3, "x")]).files[c]?.warnings.count == 1)
     }
 
+    /// A file that changed since its entry was made has an entry that says nothing about it now, so a warning added
+    /// for it replaces the entry rather than joining it.
+    @Test func aWarningForAFileThatChangedSinceItsEntryReplacesTheEntry() throws {
+        defer { folder.remove() }
+        let a = try folder.file("A.swift")
+        let first = WarningRecord().updated(compiled: [a], warnings: [Diagnostic.warning(a, 1, "unused")])
+        let changed = try folder.file("A.swift", "let a = 2 // changed\n")
+        #expect(FileStamp.of(changed) != first.files[a]?.stamp)
+        let after = first.updated(compiled: [], warnings: [Diagnostic.warning(changed, 2, "new")])
+        #expect(after.files[a]?.warnings == [RecordedWarning(line: 2, column: 5, message: "new")])
+        #expect(after.files[a]?.stamp == FileStamp.of(a))
+    }
+
     /// A header's warnings come through the files that include it, and an asset catalog's from a step the log does
     /// not name, so neither can be known to be gone: they are this build's only.
     @Test func onlyTheKindsOfFileTheLogNamesAreKept() throws {
