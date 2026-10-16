@@ -112,7 +112,8 @@ public struct TemplatesCheck: DoctorCheck {
 /// Recorded clones that are unavailable (their runtime was removed) or stuck booting or shutting down.
 ///
 /// The clones of a worktree another xcd is creating or removing are left to it. A plain `doctor` lists a clone
-/// that is still `Booting` as in progress, since a cold boot can take minutes; only `--fix` waits to see.
+/// that is still `Booting` as in progress, since a cold boot can take minutes; `--fix` waits to see only for a clone
+/// its run reaches: doctor located its project, and the clone's project is this one or a gone one.
 public struct StuckClonesCheck: DoctorCheck {
     public let id = "stuck-clones"
     static let transient: Set<String> = ["Booting", "Shutting Down", "Creating"]
@@ -135,7 +136,7 @@ public struct StuckClonesCheck: DoctorCheck {
                           projectRoot: Self.recorder(of: device.udid, env)?.projectRoot)
         }
         let settling = clones.filter {
-            $0.isAvailable && Self.transient.contains($0.state) && (env.fixing || $0.state != "Booting")
+            $0.isAvailable && Self.transient.contains($0.state) && (Self.waitsToSee($0.udid, env) || $0.state != "Booting")
         }
         guard !settling.isEmpty else { return problems }
         try? await env.sleep(patience)
@@ -150,7 +151,8 @@ public struct StuckClonesCheck: DoctorCheck {
         return problems
     }
 
-    /// Clones of busy worktrees that would otherwise be problems, and, without `--fix`, clones still booting.
+    /// Clones of busy worktrees that would otherwise be problems, and the clones still booting that `--fix` does not
+    /// wait on: all of them without `--fix`, and under it those of another project, or when doctor could not locate its own.
     public func inProgress(_ env: DoctorEnvironment) -> [String] {
         guard let catalog = env.catalog else { return [] }
         let recorded = env.recordedClones
@@ -161,9 +163,16 @@ public struct StuckClonesCheck: DoctorCheck {
                 let state = device.isAvailable ? device.state : "unavailable"
                 return "\(label) is \(state) while \(owner.project)/\(owner.name) is being created or removed by another xcd; left alone"
             }
-            guard !env.fixing, device.isAvailable, device.state == "Booting" else { return nil }
+            guard !Self.waitsToSee(device.udid, env), device.isAvailable, device.state == "Booting" else { return nil }
             return "\(label) is Booting, which can take a few minutes; `--fix` shuts it down if it is still booting after \(Self.settleMinutes) minutes"
         }
+    }
+
+    /// Whether this run's fix reaches `udid` and so waits out its boot (`DoctorFixes` agrees on what it reaches).
+    static func waitsToSee(_ udid: String, _ env: DoctorEnvironment) -> Bool {
+        guard env.fixing, env.projectFailure == nil else { return false }
+        let scope = DoctorScopes(env: env).scope(of: recorder(of: udid, env)?.projectRoot)
+        return scope == .project || scope == .goneProject
     }
 
     static var settleMinutes: Int64 { settleTimeout.components.seconds / 60 }

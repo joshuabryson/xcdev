@@ -111,6 +111,37 @@ import XcdevTestSupport
         #expect(sims.devices.contains { $0.udid == clone })
     }
 
+    /// `--fix` waits out a boot only where it reaches the clone's project; elsewhere a booting clone is in progress, as
+    /// under plain `doctor`, and nothing tells the agent to go and fix it.
+    @Test func anotherProjectsBootingCloneIsInProgressUnderFix() async throws {
+        let (project, sims, worktrees, _) = try await setup()
+        let nearby = try await another(project, named: "Nearby")
+        defer { project.remove(); nearby.remove() }
+        var nearbyMain = try await worktrees.open(from: nearby.root)
+        let booting = sims.add(name: "xcd · Nearby · main · iphone", state: "Booting")
+        try record(booting, as: "iphone", in: &nearbyMain)
+        let report = await doctor(project).run(fix: true, checks: [StuckClonesCheck()], from: project.root, includeDisk: false)
+        #expect(report.problems.isEmpty && report.failure == nil)
+        #expect(report.checks.first?.inProgress.count == 1 && report.checks.first?.inProgress.first?.contains("is Booting, which can take") == true)
+        #expect(sims.devices.first { $0.udid == booting }?.state == "Booting")
+        #expect(!fake.calls.contains { $0.argv.starts(with: ["xcrun", "simctl", "shutdown"]) || $0.argv.starts(with: ["xcrun", "simctl", "delete"]) })
+    }
+
+    @Test func aBootingCloneIsInProgressWhenDoctorCannotTellWhichProjectItIsIn() async throws {
+        let (project, sims, worktrees, main) = try await setup()
+        defer { project.remove() }
+        var (feat, _) = try await worktrees.create(name: "feat", in: main)
+        let booting = sims.add(name: "xcd · Sample App · feat · iphone", state: "Booting")
+        feat.devices["iphone"] = ProvisionedDevice(udid: booting, deviceType: "P", deviceTypeIdentifier: "p", runtime: "iOS", runtimeIdentifier: "r")
+        try WorktreeStateStore.save(feat, WorktreePaths(root: feat.path))
+        try FileManager.default.moveItem(atPath: project.root, toPath: project.base + "/Moved App")
+        let report = await doctor(project).run(fix: true, checks: [StuckClonesCheck()], from: feat.path, includeDisk: false)
+        #expect(report.problems.filter { $0.check == "stuck-clones" }.isEmpty)
+        #expect(report.checks.first?.inProgress.count == 1 && report.checks.first?.inProgress.first?.contains("is Booting, which can take") == true)
+        #expect(sims.devices.first { $0.udid == booting }?.state == "Booting")
+        #expect(!fake.calls.contains { $0.argv.starts(with: ["xcrun", "simctl", "shutdown"]) || $0.argv.starts(with: ["xcrun", "simctl", "delete"]) })
+    }
+
     @Test func theNextSaysWhatPlainFixReachesAndToAskBeforeARestart() {
         func scoped(_ problem: DoctorProblem, _ scope: DoctorProblem.Scope) -> DoctorProblem {
             var problem = problem
