@@ -69,7 +69,7 @@ struct WarningsIntegrationTests {
         #expect(fixed.changedFileWarnings == [] && fixed.warningCount == 1, "\(fixed.text)")
         #expect(fixed.text.contains("\n1 warning in other files (xcd build --warnings)\n"), "\(fixed.text)")
 
-        // The test bundle's build is recorded the same way, under the test scheme's own record.
+        // The test run shares the package scheme's record with the builds above, so it sees the same warnings.
         let tests = try await svc.tests.test(TestOptions(showWarnings: true), in: &ctx)
         #expect(tests.outcome == .passed && messages(tests.warnings).contains { $0.hasPrefix("Other.swift:2") }, "\(tests.text)")
     }
