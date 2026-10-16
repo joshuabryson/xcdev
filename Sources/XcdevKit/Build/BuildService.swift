@@ -19,6 +19,20 @@ public struct BuildOptions: Sendable {
     }
 }
 
+/// The Xcode and the project container a command builds with.
+struct BuildTools: Sendable {
+    let xcode: XcodeInstall
+    let container: ProjectContainer
+}
+
+/// What one xcodebuild run that writes a result bundle is for: the name of its log and bundle, the progress line,
+/// and how long it may take.
+struct BuildStep: Sendable {
+    let kind: String
+    let progress: String
+    let timeout: Duration
+}
+
 /// Everything needed to point xcodebuild at one target.
 public struct BuildPlan: Sendable {
     public let xcode: XcodeInstall
@@ -60,46 +74,52 @@ public struct BuildService: Sendable {
     /// Resolves the Xcode, the container, the target (cloning its simulator on first use), and the scheme.
     public func plan(device: String?, scheme: String?, role: SchemeRole,
                      in ctx: inout WorktreeContext) async throws -> BuildPlan {
-        let xcode = try await provisioner.ensureXcode(&ctx)
-        let container = try ProjectContainer.resolve(config: ctx.config, worktreeRoot: ctx.location.worktreeRoot)
-        let target = try await provisioner.buildTarget(device, container: container, in: &ctx)
-        let scheme = try await resolveScheme(scheme, role: role, container: container, xcode: xcode,
-                                             config: ctx.config, paths: ctx.paths)
-        return BuildPlan(xcode: xcode, container: container, target: target, scheme: scheme)
+        let tools = try await tools(in: &ctx)
+        let target = try await provisioner.buildTarget(device, container: tools.container, in: &ctx)
+        let scheme = try await resolveScheme(scheme, role: role, with: tools, in: ctx)
+        return BuildPlan(xcode: tools.xcode, container: tools.container, target: target, scheme: scheme)
+    }
+
+    func tools(in ctx: inout WorktreeContext) async throws -> BuildTools {
+        BuildTools(xcode: try await provisioner.ensureXcode(&ctx),
+                   container: try ProjectContainer.resolve(config: ctx.config, worktreeRoot: ctx.location.worktreeRoot))
     }
 
     public func build(_ options: BuildOptions, in ctx: inout WorktreeContext) async throws -> BuildReport {
         try await runPreBuild(device: options.device, in: &ctx)
         let plan = try await plan(device: options.device, scheme: options.scheme, role: .app, in: &ctx)
         let paths = ctx.paths
-        let run = try await runWithResultBundle(plan, kind: "build", paths: paths, timeout: options.timeout,
-                                                progress: "building \(plan.scheme) for \(plan.target.summary)") { bundle in
+        let step = BuildStep(kind: "build", progress: "building \(plan.scheme) for \(plan.target.summary)", timeout: options.timeout)
+        let run = try await runWithResultBundle(plan, step, paths: paths) { bundle in
             XcodebuildRequest(actions: options.clean ? [.clean, .build] : [.build], container: plan.container,
                               scheme: plan.scheme, destination: plan.target.destination,
                               configuration: options.configuration, paths: paths, resultBundle: bundle)
         }
-        let results = run.buildResults
-
-        var errors = results?.errors ?? []
-        var logTail: [String]?
-        if !run.output.succeeded && errors.isEmpty {
-            (errors, logTail) = Self.fallbackErrors(logFile: run.log, exitCode: run.output.exitCode)
-        }
-        var product: AppProduct?
-        if run.output.succeeded {
-            let settings = try await runner.runChecked(run.request.buildSettingsInvocation(developerDir: plan.xcode.developerDir),
-                                                       next: "run `xcodebuild -showBuildSettings` to see why")
-            product = try BuildSettings.app(from: settings.stdout, preferredTarget: plan.scheme)
-            var state = try AppStateStore.load(paths)
-            state.builds[plan.target.name] = BuildRecord(scheme: plan.scheme, configuration: options.configuration,
-                                                         product: product, finishedAt: now())
-            try AppStateStore.save(state, paths)
-        }
+        let product = run.output.succeeded ? try await recordProduct(of: run, plan, configuration: options.configuration, paths: paths) : nil
+        let (errors, logTail) = Self.errors(of: run)
         return BuildReport(succeeded: run.output.succeeded, scheme: plan.scheme, target: plan.target.name,
                            targetSummary: plan.target.summary, seconds: now().timeIntervalSince(run.started),
-                           errors: errors, warningCount: results?.warningCount ?? 0,
-                           warnings: options.showWarnings ? (results?.warnings ?? []) : nil, product: product,
+                           errors: errors, warningCount: run.buildResults?.warningCount ?? 0,
+                           warnings: options.showWarnings ? (run.buildResults?.warnings ?? []) : nil, product: product,
                            log: run.log, resultBundle: run.resultBundle, logTail: logTail, worktree: ctx.state.name)
+    }
+
+    /// The app a build that succeeded made, recorded as the latest build for its target.
+    func recordProduct(of run: ResultBundleRun, _ plan: BuildPlan, configuration: String?, paths: WorktreePaths) async throws -> AppProduct? {
+        let settings = try await runner.runChecked(run.request.buildSettingsInvocation(developerDir: plan.xcode.developerDir),
+                                                   next: "run `xcodebuild -showBuildSettings` to see why")
+        let product = try BuildSettings.app(from: settings.stdout, preferredTarget: plan.scheme)
+        var state = try AppStateStore.load(paths)
+        state.builds[plan.target.name] = BuildRecord(scheme: plan.scheme, configuration: configuration, product: product, finishedAt: now())
+        try AppStateStore.save(state, paths)
+        return product
+    }
+
+    /// The build's errors. For a run that failed without reporting one, xcodebuild's own, with the log's last lines.
+    static func errors(of run: ResultBundleRun) -> (errors: [Diagnostic], tail: [String]?) {
+        let errors = run.buildResults?.errors ?? []
+        guard !run.output.succeeded, errors.isEmpty else { return (errors, nil) }
+        return fallbackErrors(logFile: run.log, exitCode: run.output.exitCode)
     }
 
     /// `xcodebuild clean` for the app scheme (no destination, so nothing is cloned), or with `deep`,
@@ -115,13 +135,17 @@ public struct BuildService: Sendable {
             return CleanReport(deep: true, scheme: nil, removed: existed ? paths.derivedData : nil,
                                derivedData: paths.derivedData, log: nil, worktree: ctx.state.name)
         }
-        let xcode = try await provisioner.ensureXcode(&ctx)
-        let container = try ProjectContainer.resolve(config: ctx.config, worktreeRoot: ctx.location.worktreeRoot)
-        let schemeName = try await resolveScheme(scheme, role: .app, container: container, xcode: xcode,
-                                                config: ctx.config, paths: paths)
+        return try await cleanScheme(scheme, forgetting: state, in: &ctx)
+    }
+
+    /// `xcodebuild clean` for the app scheme. The builds `state` forgets are forgotten once it succeeded.
+    func cleanScheme(_ scheme: String?, forgetting state: AppState, in ctx: inout WorktreeContext) async throws -> CleanReport {
+        let paths = ctx.paths
+        let tools = try await tools(in: &ctx)
+        let schemeName = try await resolveScheme(scheme, role: .app, with: tools, in: ctx)
         let log = paths.newArtifact(in: paths.logs, kind: "clean", ext: "log", now: now())
-        let request = XcodebuildRequest(actions: [.clean], container: container, scheme: schemeName, paths: paths)
-        let output = try await runXcodebuild(request, xcode: xcode, log: log, timeout: .seconds(600))
+        let request = XcodebuildRequest(actions: [.clean], container: tools.container, scheme: schemeName, paths: paths)
+        let output = try await runXcodebuild(request, xcode: tools.xcode, log: log, timeout: .seconds(600))
         guard output.succeeded else {
             let (errors, tail) = Self.fallbackErrors(logFile: log, exitCode: output.exitCode)
             throw XcdError(.subprocessFailed, "xcodebuild clean failed (exit \(output.exitCode))",
@@ -133,11 +157,10 @@ public struct BuildService: Sendable {
                            worktree: ctx.state.name)
     }
 
-    func resolveScheme(_ requested: String?, role: SchemeRole, container: ProjectContainer, xcode: XcodeInstall,
-                       config: XcdevConfig, paths: WorktreePaths) async throws -> String {
-        if let scheme = Schemes.configured(requested, role: role, config: config) { return scheme }
-        let listed = try? await runner.run(Schemes.listInvocation(container, paths: paths,
-                                                                  developerDir: xcode.developerDir))
+    func resolveScheme(_ requested: String?, role: SchemeRole, with tools: BuildTools, in ctx: WorktreeContext) async throws -> String {
+        if let scheme = Schemes.configured(requested, role: role, config: ctx.config) { return scheme }
+        let listed = try? await runner.run(Schemes.listInvocation(tools.container, paths: ctx.paths,
+                                                                  developerDir: tools.xcode.developerDir))
         let available = listed.map { Schemes.parseList($0.stdout) } ?? []
         if available.count == 1 { return available[0] }
         throw Schemes.missing(role: role, available: available)
@@ -157,17 +180,16 @@ public struct BuildService: Sendable {
         var resultBundle: String? { FileManager.default.fileExists(atPath: bundle) ? bundle : nil }
     }
 
-    /// Creates the timestamped `<kind>` log and result bundle paths, reports `progress` with the log path,
-    /// runs the request `makeRequest` builds for that bundle, and reads the bundle's build results.
-    func runWithResultBundle(_ plan: BuildPlan, kind: String, paths: WorktreePaths, timeout: Duration,
-                             progress message: String,
+    /// Creates the timestamped log and result bundle paths of the step's kind, reports its progress with the log
+    /// path, runs the request `makeRequest` builds for that bundle, and reads the bundle's build results.
+    func runWithResultBundle(_ plan: BuildPlan, _ step: BuildStep, paths: WorktreePaths,
                              makeRequest: (_ resultBundle: String) -> XcodebuildRequest) async throws -> ResultBundleRun {
         let started = now()
-        let log = paths.newArtifact(in: paths.logs, kind: kind, ext: "log", now: started)
-        let bundle = paths.newArtifact(in: paths.results, kind: kind, ext: "xcresult", now: started)
+        let log = paths.newArtifact(in: paths.logs, kind: step.kind, ext: "log", now: started)
+        let bundle = paths.newArtifact(in: paths.results, kind: step.kind, ext: "xcresult", now: started)
         let request = makeRequest(bundle)
-        progress("\(message)  log: \(log)")
-        let output = try await runXcodebuild(request, xcode: plan.xcode, log: log, timeout: timeout)
+        progress("\(step.progress)  log: \(log)")
+        let output = try await runXcodebuild(request, xcode: plan.xcode, log: log, timeout: step.timeout)
         let results = await buildResults(bundle: bundle, xcode: plan.xcode)
         return ResultBundleRun(started: started, request: request, log: log, bundle: bundle, output: output,
                                buildResults: results)

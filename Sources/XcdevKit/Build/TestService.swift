@@ -35,8 +35,8 @@ public struct TestService: Sendable {
         let plan = try await builds.plan(device: options.device, scheme: options.scheme, role: .test, in: &ctx)
         let stopped = await stopRunner(for: plan, options, in: ctx)
         let paths = ctx.paths
-        let run = try await builds.runWithResultBundle(plan, kind: "test", paths: paths, timeout: options.timeout,
-                                                       progress: "testing \(plan.scheme) on \(plan.target.summary)") { bundle in
+        let step = BuildStep(kind: "test", progress: "testing \(plan.scheme) on \(plan.target.summary)", timeout: options.timeout)
+        let run = try await builds.runWithResultBundle(plan, step, paths: paths) { bundle in
             XcodebuildRequest(actions: [.test], container: plan.container, scheme: plan.scheme,
                               destination: plan.target.destination, configuration: options.configuration,
                               paths: paths, resultBundle: bundle, onlyTesting: options.only, skipTesting: options.skip)
