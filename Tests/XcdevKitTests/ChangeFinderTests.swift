@@ -55,6 +55,18 @@ import XcdevTestSupport
         #expect(try await files(project, since: fork).isEmpty)
     }
 
+    /// The files whose warnings a build result lists are of every kind: a header's warning is in the files you changed.
+    @Test func theFilesAChangeTouchedAreOfEveryKind() async throws {
+        let (project, fork) = try project()
+        defer { project.remove() }
+        try project.write("more notes\n", to: "Docs/notes.txt")
+        try project.write("int f(void);\n", to: "Sources/Obj/include/Obj.h")
+        try project.write("let a = 2\n", to: "Sources/App/A.swift")
+        try project.write("generated\n", to: "Generated/G.swift")
+        try FileManager.default.removeItem(atPath: project.root + "/Sources/App/B.swift")
+        #expect(try await finder.touched(in: project.root, since: fork) == ["Docs/notes.txt", "Sources/App/A.swift", "Sources/Obj/include/Obj.h"])
+    }
+
     @Test func aRenamedFileCountsUnderItsNewPathAndRemembersItsOldOne() async throws {
         let (project, fork) = try project()
         defer { project.remove() }

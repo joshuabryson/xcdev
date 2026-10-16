@@ -9,6 +9,8 @@ public struct Diagnostic: Codable, Sendable, Equatable {
     public let file: String?
     public let line: Int?
     public let column: Int?
+    /// True for a warning xcd kept from an earlier build of a file this build did not compile.
+    public var earlier: Bool?
 
     public init(_ severity: Severity, _ message: String, file: String? = nil, line: Int? = nil, column: Int? = nil) {
         self.severity = severity

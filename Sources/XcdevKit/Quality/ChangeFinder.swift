@@ -22,9 +22,18 @@ public struct ChangeFinder: Sendable {
     /// The Swift files the working tree changed against `forkPoint`: committed, staged, and unstaged work, and
     /// new files git does not track yet. Deleted files are left out, and a renamed file keeps its old path.
     public func changed(in root: String, since forkPoint: String) async throws -> [ScopedFile] {
+        Self.swiftFiles(try await changes(in: root, since: forkPoint), in: root)
+    }
+
+    /// The same, of every kind of file: the files whose warnings a build result lists.
+    public func touched(in root: String, since forkPoint: String) async throws -> [String] {
+        Self.regularFiles(try await changes(in: root, since: forkPoint), in: root).map(\.path)
+    }
+
+    func changes(in root: String, since forkPoint: String) async throws -> [ScopedFile] {
         let status = try await records(["diff", "--name-status", "-M", "-z", forkPoint], in: root)
         let untracked = try await records(["ls-files", "--others", "--exclude-standard", "-z"], in: root)
-        return Self.swiftFiles(Self.parse(nameStatus: status) + untracked.map { ScopedFile(path: $0, basePath: nil) }, in: root)
+        return Self.parse(nameStatus: status) + untracked.map { ScopedFile(path: $0, basePath: nil) }
     }
 
     /// Every Swift file git knows in the worktree: tracked, or untracked and not ignored.
@@ -52,14 +61,19 @@ public struct ChangeFinder: Sendable {
         return files
     }
 
-    /// The regular files among `files` that end in `.swift`, each once, in path order. A link is not a regular file,
-    /// and a file under a folder that is a link is not the worktree's: git lists a tracked folder that was replaced
-    /// by a link as files that were deleted, while their paths lead through the link to whatever is there.
+    /// The regular files among `files` that end in `.swift`, each once, in path order.
     static func swiftFiles(_ files: [ScopedFile], in root: String) -> [ScopedFile] {
+        regularFiles(files.filter { $0.path.hasSuffix(".swift") }, in: root)
+    }
+
+    /// The regular files among `files`, each once, in path order. A link is not a regular file, and a file under a
+    /// folder that is a link is not the worktree's: git lists a tracked folder that was replaced by a link as files
+    /// that were deleted, while their paths lead through the link to whatever is there.
+    static func regularFiles(_ files: [ScopedFile], in root: String) -> [ScopedFile] {
         var seen = Set<String>()
         var linked = LinkedFolders(root: root)
         return files.filter { file in
-            guard file.path.hasSuffix(".swift"), seen.insert(file.path).inserted, !linked.hold(file.path) else { return false }
+            guard seen.insert(file.path).inserted, !linked.hold(file.path) else { return false }
             let values = try? URL(fileURLWithPath: root + "/" + file.path).resourceValues(forKeys: [.isRegularFileKey])
             return values?.isRegularFile == true
         }.sorted { $0.path < $1.path }
