@@ -65,7 +65,7 @@ import XcdevTestSupport
         let report = try await service().open(item, OpenOptions(device: "mac"), in: &ctx)
         #expect(steps == [["open", "-g", "-a", app, Self.link]])            // by path, and kept in the background
         #expect(report.app == OpenReport.App(state: .running, pid: 500, bundleId: "dev.x.Mac", log: nil))
-        #expect(report.text == "opened item  device=mac (macOS)  app=running  pid=500\nurl: \(Self.link)")
+        #expect(report.text == "opened item  device=mac (macOS)  app=running  pid=500\nurl: \(Self.link)\nnote: \(RunReport.sharedData(of: "dev.x.Mac"))")
         #expect(report.linkSent == true && report.failure == nil)
     }
 
@@ -151,7 +151,8 @@ import XcdevTestSupport
     }
 
     /// UI driving does not reach a Mac app, so a route's `expect` is skipped there, and says so. An https link is
-    /// handed straight to the app on a Mac, so there is nothing to note about Safari.
+    /// handed straight to the app on a Mac, so there is nothing to note about Safari: the note says what every
+    /// worktree's build of the app shares.
     @Test func theArrivalCheckIsSkippedOnAMac() async throws {
         defer { worktree.remove() }
         var ctx = try context()
@@ -162,7 +163,8 @@ import XcdevTestSupport
                                                  reason: "the arrival check needs UI driving, which works on iPhone and iPad simulators only"))
         #expect(arrival.looks.isEmpty && report.failure == nil)
         let web = try await svc.open(.route(name: "web", values: [:]), OpenOptions(device: "mac"), in: &ctx)
-        #expect(web.note == nil && steps.last == ["open", "-g", "-a", app, "https://example.com/item"])
+        #expect(web.note == RunReport.sharedData(of: "dev.x.Mac") && steps.last == ["open", "-g", "-a", app, "https://example.com/item"])
+        #expect(report.note == web.note && report.text.hasSuffix("\nnote: " + (web.note ?? "")))
     }
 
     /// A skipped check makes no look, so the watch's 2 s window (9 checks) is all that xcd watches: a Mac app that

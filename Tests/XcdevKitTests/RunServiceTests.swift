@@ -208,7 +208,10 @@ import XcdevTestSupport
         #expect(install.action == "nothing to install")
         let report = try await service().launch(device: "mac", options: LaunchOptions(), in: &ctx)
         #expect(report.pid == 77 && report.targetSummary == "mac (macOS)")
-        #expect(report.note == nil)
+        #expect(report.note == "every worktree's build of this app has the bundle id dev.x.Mac, so they share its data on this Mac: its UserDefaults, "
+                    + "its container (~/Library/Containers/dev.x.Mac) if it is sandboxed or its Application Support and Caches folders if not, "
+                    + "its app group containers, and its keychain items; what a run in one worktree changes, a run in another sees")
+        #expect(report.text.hasSuffix("\nnote: " + (report.note ?? "")))
         #expect(!fake.calls.contains { $0.argv[0] == "kill" })
     }
 

@@ -242,7 +242,7 @@ public struct RunService: Sendable {
                          bundleId: app.product.bundleId, pid: started.pid, appLog: started.appLog,
                          crashWindow: DurationText.seconds(facts.crashWindow), exitedAfter: exitedAfter, crash: crash,
                          appOutput: status == .running ? nil : Self.tail(of: started.appLog, lines: 10),
-                         note: Self.captureNote(worktreeRoot: facts.ctx.location.worktreeRoot, target: app.target),
+                         note: Self.note(for: app, worktreeRoot: facts.ctx.location.worktreeRoot),
                          worktree: facts.ctx.state.name)
     }
 
@@ -250,6 +250,13 @@ public struct RunService: Sendable {
         let text = (try? String(contentsOfFile: file, encoding: .utf8)) ?? ""
         return Array(text.split(separator: "\n").map(String.init)
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.suffix(count))
+    }
+
+    /// What a launch's result notes: that a Mac app shares its data with every worktree's build of it, or that a
+    /// simulator cannot write the app's output where this worktree is.
+    static func note(for app: PreparedApp, worktreeRoot: String) -> String? {
+        guard app.target.device != nil else { return RunReport.sharedData(of: app.product.bundleId) }
+        return captureNote(worktreeRoot: worktreeRoot, target: app.target)
     }
 
     /// Simulators silently fail to write app output under temporary directories.

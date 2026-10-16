@@ -76,6 +76,14 @@ public struct RunReport: Reportable {
 
     public var envelopeWorktree: String? { worktree }
 
+    /// The note of a Mac app's launch: every worktree's build of the app has the same bundle id, so they share its
+    /// data on this Mac.
+    public static func sharedData(of bundleId: String) -> String {
+        "every worktree's build of this app has the bundle id \(bundleId), so they share its data on this Mac: its UserDefaults, "
+            + "its container (~/Library/Containers/\(bundleId)) if it is sandboxed or its Application Support and Caches folders if not, "
+            + "its app group containers, and its keychain items; what a run in one worktree changes, a run in another sees"
+    }
+
     public var failure: XcdError? {
         let after = DurationText.format(.seconds(exitedAfter ?? 0))
         switch status {

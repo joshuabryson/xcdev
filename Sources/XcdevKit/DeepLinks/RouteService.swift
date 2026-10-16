@@ -114,12 +114,16 @@ public struct RouteService: Sendable {
             report.crash = crash
             report.appOutput = delivered.captured ? RunService.tail(of: started.appLog, lines: 10) : nil
         }
-        // On a simulator the system decides where an https link goes, and with no check nothing looked. That is said
-        // of a link that went out to an app that is still there: when the app ended, the crash is the result.
-        if check == .none, delivered.linkSent, !report.appEnded, app.target.device != nil, plan.route.isWebLink {
-            report.note = RouteErrors.uncheckedWebLink
-        }
+        report.note = Self.note(for: app, uncheckedWebLink: check == .none && delivered.linkSent && !report.appEnded && plan.route.isWebLink)
         return report
+    }
+
+    /// What the result notes. A Mac app shares its data with every worktree's build of it. On a simulator the system
+    /// decides where an https link goes, and with no check nothing looked: that is
+    /// said of a link that went out to an app that is still there, since when the app ended, the crash is the result.
+    static func note(for app: PreparedApp, uncheckedWebLink: Bool) -> String? {
+        guard app.target.device != nil else { return RunReport.sharedData(of: app.product.bundleId) }
+        return uncheckedWebLink ? RouteErrors.uncheckedWebLink : nil
     }
 
     /// The check for this delivery: none for a link that never went out or an app that crashed as it started, since

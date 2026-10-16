@@ -201,6 +201,7 @@ import XcdevTestSupport
         let arrival = FakeArrival()
         let report = try await service(arrival: arrival).open(.route(name: "settings/about", values: [:]), OpenOptions(device: "mac"), in: &ctx)
         #expect(report.check?.outcome == .skipped && arrival.looks.isEmpty && report.failure == nil)
+        #expect(report.note == nil)                                                   // xcd leaves the app to the script
     }
 
     /// A script that opens another route must not hand its own values on.
