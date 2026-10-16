@@ -1,6 +1,6 @@
 import Foundation
 
-public struct TestReport: Reportable {
+public struct TestReport: Reportable, ShowsWarnings {
     public enum Outcome: String, Codable, Sendable {
         case passed, failed
         case buildFailed = "build_failed"
@@ -28,6 +28,14 @@ public struct TestReport: Reportable {
     public let worktree: String
     /// What xcd did around the run that the reader should know, e.g. that it stopped the UI runner.
     public var notes: [String] = []
+    /// Every warning xcd knows for this scheme, device, and configuration.
+    public var warningCount = 0
+    /// Only with `--warnings`: every warning xcd knows, this build's first.
+    public var warnings: [Diagnostic]?
+    /// The warnings in the files the change touched, this build's first. Nil when those files are not known.
+    public var changedFileWarnings: [Diagnostic]?
+    /// Touched files whose warnings are not known: they changed, and this build did not compile them.
+    public var unknownChangedFiles: [String]?
 
     public init(outcome: Outcome, scheme: String, target: String, targetSummary: String, seconds: Double,
                 counts: TestCounts, failures: [TestFailure], buildErrors: [Diagnostic], filtered: Bool,
@@ -48,6 +56,13 @@ public struct TestReport: Reportable {
         self.worktree = worktree
     }
 
+    /// Takes the warnings xcd knows; with `all`, every one of them is listed.
+    mutating func show(_ known: KnownWarnings, all: Bool) {
+        warningCount = known.count
+        warnings = all ? known.all : nil
+        take(known)
+    }
+
     public var text: String {
         let title: String
         switch outcome {
@@ -64,6 +79,7 @@ public struct TestReport: Reportable {
         }
         lines += failures.map(\.diagnostic.text)
         lines += buildErrors.map(\.text)
+        lines += shownWarnings(errors: nil, more: "xcd test --warnings")
         lines += (logTail ?? []).map { "  " + $0 }
         lines += notes.map { "note: " + $0 }
         if let resultBundle { lines.append("result: \(resultBundle)") }

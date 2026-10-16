@@ -97,11 +97,13 @@ public struct BuildService: Sendable {
         }
         let product = run.output.succeeded ? try await recordProduct(of: run, plan, configuration: options.configuration, paths: paths) : nil
         let (errors, logTail) = Self.errors(of: run)
-        return BuildReport(succeeded: run.output.succeeded, scheme: plan.scheme, target: plan.target.name,
-                           targetSummary: plan.target.summary, seconds: now().timeIntervalSince(run.started),
-                           errors: errors, warningCount: run.buildResults?.warningCount ?? 0,
-                           warnings: options.showWarnings ? (run.buildResults?.warnings ?? []) : nil, product: product,
-                           log: run.log, resultBundle: run.resultBundle, logTail: logTail, worktree: ctx.state.name)
+        let known = await WarningKeeper(runner: runner).keep(run, of: plan, configuration: options.configuration, in: ctx)
+        var report = BuildReport(succeeded: run.output.succeeded, scheme: plan.scheme, target: plan.target.name,
+                                 targetSummary: plan.target.summary, seconds: now().timeIntervalSince(run.started),
+                                 errors: errors, warningCount: known.count, warnings: options.showWarnings ? known.all : nil,
+                                 product: product, log: run.log, resultBundle: run.resultBundle, logTail: logTail, worktree: ctx.state.name)
+        report.take(known)
+        return report
     }
 
     /// The app a build that succeeded made, recorded as the latest build for its target.

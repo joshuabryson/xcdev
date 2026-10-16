@@ -142,7 +142,8 @@ import XcdevTestSupport
         // App.xcodeproj is an empty folder here, so xcd can't tell what the scheme tests.
         let (report, detached, ctx) = try await runBesideARunner(yaml: BuildServiceTests.config, container: "App.xcodeproj")
         #expect(report.outcome == .passed && detached.stops == [.init(pid: 4242, signal: SIGTERM)] && ctx.paths.runnerFiles.isEmpty)
-        #expect(report.notes == ["stopped the iphone UI runner first: these tests may drive the UI themselves; the next `xcd ui` command starts it again"])
+        #expect(report.notes.first == "stopped the iphone UI runner first: these tests may drive the UI themselves; the next `xcd ui` command starts it again")
+        #expect(report.notes.filter { $0.contains("UI runner") }.count == 1)
         #expect(report.text.contains("\nnote: stopped the iphone UI runner first: these tests may drive the UI themselves;"))
     }
 
@@ -150,14 +151,14 @@ import XcdevTestSupport
         defer { worktree.remove() }
         try Fixture.copy("ProjectFiles/Phone", to: worktree.root)              // its scheme tests PhoneTests, a unit-test bundle
         let (report, detached, ctx) = try await runBesideARunner(yaml: Self.phoneConfig, container: "Phone.xcodeproj")
-        #expect(report.outcome == .passed && detached.stops.isEmpty && report.notes.isEmpty)
+        #expect(report.outcome == .passed && detached.stops.isEmpty && !report.notes.contains { $0.contains("UI runner") })
         #expect(ctx.paths.runnerFiles == [ctx.paths.runnerFile(device: "iphone")])
-        #expect(!report.text.contains("note:"))
+        #expect(!report.text.contains("UI runner"))
     }
 
     @Test func withoutARunnerNothingIsStoppedOrNoted() async throws {
         defer { worktree.remove() }
         let (report, _) = try await run(.init(testSummary: Self.passingSummary))
-        #expect(report.notes.isEmpty && !report.text.contains("note:"))
+        #expect(!report.notes.contains { $0.contains("UI runner") } && !report.text.contains("UI runner"))
     }
 }

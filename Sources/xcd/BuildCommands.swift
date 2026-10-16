@@ -8,7 +8,7 @@ struct BuildCommand: AsyncParsableCommand {
     @OptionGroup var target: TargetOptions
     @OptionGroup var scheme: SchemeOptions
     @Flag(help: "Clean before building.") var clean = false
-    @Flag(help: "List every warning, not just the count.") var warnings = false
+    @Flag(help: "List every warning, not only those in the files you changed.") var warnings = false
     @OptionGroup var options: GlobalOptions
 
     func run() async throws {
@@ -32,6 +32,7 @@ struct TestCommand: AsyncParsableCommand {
     @Option(help: "Run only this test, class, or target, e.g. AppTests/LoginTests or AppTests/works(). Repeatable.")
     var only: [String] = []
     @Option(help: "Skip this test, class, or target. Repeatable.") var skip: [String] = []
+    @Flag(help: "List every warning, not only those in the files you changed.") var warnings = false
     @OptionGroup var options: GlobalOptions
 
     func run() async throws {
@@ -41,7 +42,7 @@ struct TestCommand: AsyncParsableCommand {
             let timeout = try DurationText.option(scheme.timeout, flag: "--timeout") ?? .seconds(3600)
             return try await services.tests.test(
                 TestOptions(device: target.device, scheme: scheme.scheme, configuration: scheme.configuration,
-                            only: only, skip: skip, timeout: timeout),
+                            only: only, skip: skip, timeout: timeout, showWarnings: warnings),
                 in: &ctx)
         }
     }

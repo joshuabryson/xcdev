@@ -8,15 +8,18 @@ public struct TestOptions: Sendable {
     public var only: [String]
     public var skip: [String]
     public var timeout: Duration
+    /// List every warning xcd knows, not only those in the files the change touched.
+    public var showWarnings: Bool
 
     public init(device: String? = nil, scheme: String? = nil, configuration: String? = nil, only: [String] = [],
-                skip: [String] = [], timeout: Duration = .seconds(3600)) {
+                skip: [String] = [], timeout: Duration = .seconds(3600), showWarnings: Bool = false) {
         self.device = device
         self.scheme = scheme
         self.configuration = configuration
         self.only = only
         self.skip = skip
         self.timeout = timeout
+        self.showWarnings = showWarnings
     }
 }
 
@@ -52,6 +55,8 @@ public struct TestService: Sendable {
                                 logTail: verdict.logTail, worktree: ctx.state.name)
         report.notes = stopped.map { "\($0) first: these tests may drive the UI themselves; the next `xcd ui` command starts it again" }
             + SetupNotes.build(in: ctx.location.worktreeRoot)
+        report.show(await WarningKeeper(runner: builds.runner).keep(run, of: plan, configuration: options.configuration, in: ctx),
+                    all: options.showWarnings)
         return report
     }
 

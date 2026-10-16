@@ -91,3 +91,33 @@ extension WarningRecord {
         files[path].map { $0.stamp == FileStamp.of(path) } ?? false
     }
 }
+
+/// A result that shows the warnings xcd knows: `xcd build`, the build of `xcd run`, and `xcd test`.
+protocol ShowsWarnings {
+    /// Every warning xcd knows for the scheme, device, and configuration.
+    var warningCount: Int { get }
+    /// With `--warnings`: every warning xcd knows, this build's first.
+    var warnings: [Diagnostic]? { get }
+    var changedFileWarnings: [Diagnostic]? { get set }
+    var unknownChangedFiles: [String]? { get set }
+    var notes: [String] { get set }
+}
+
+extension ShowsWarnings {
+    var known: KnownWarnings {
+        KnownWarnings(count: warningCount, changed: changedFileWarnings, unknown: unknownChangedFiles ?? [], all: warnings ?? [])
+    }
+
+    /// The warnings, their count, and the touched files whose warnings are not known. `errors` is the count of a
+    /// build's errors when it failed, and `more` the command that lists every warning.
+    func shownWarnings(errors: Int?, more: String) -> [String] {
+        let listedAll = warnings != nil
+        return known.listing(all: listedAll) + [known.countLine(errors: errors, more: more, listedAll: listedAll), known.unknownLine].compactMap { $0 }
+    }
+
+    mutating func take(_ known: KnownWarnings) {
+        changedFileWarnings = known.changed
+        unknownChangedFiles = known.unknown.isEmpty ? nil : known.unknown
+        notes += known.notes
+    }
+}

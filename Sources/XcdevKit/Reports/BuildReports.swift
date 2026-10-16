@@ -1,13 +1,18 @@
-public struct BuildReport: Reportable {
+public struct BuildReport: Reportable, ShowsWarnings {
     public let succeeded: Bool
     public let scheme: String
     public let target: String
     public let targetSummary: String
     public let seconds: Double
     public let errors: [Diagnostic]
+    /// Every warning xcd knows for this scheme, device, and configuration.
     public let warningCount: Int
-    /// Only with `--warnings`.
+    /// Only with `--warnings`: every warning xcd knows, this build's first.
     public let warnings: [Diagnostic]?
+    /// The warnings in the files the change touched, this build's first. Nil when those files are not known.
+    public var changedFileWarnings: [Diagnostic]?
+    /// Touched files whose warnings are not known: they changed, and this build did not compile them.
+    public var unknownChangedFiles: [String]?
     public let product: AppProduct?
     public let log: String
     public let resultBundle: String?
@@ -39,16 +44,13 @@ public struct BuildReport: Reportable {
         "build \(succeeded ? "succeeded" : "failed")  scheme=\(scheme) device=\(targetSummary)  \(DurationText.format(.seconds(seconds)))"
     }
 
+    /// The warning lines, after the errors, and under the build line of `xcd run`.
+    var warningLines: [String] { shownWarnings(errors: succeeded ? nil : errors.count, more: "xcd build --warnings") }
+
     public var text: String {
         var lines = [headline]
         lines += errors.map(\.text)
-        lines += (warnings ?? []).map(\.text)
-        if !succeeded || warningCount > 0 {
-            var counts = succeeded ? "" : "\(errors.count) error\(errors.count == 1 ? "" : "s"), "
-            counts += "\(warningCount) warning\(warningCount == 1 ? "" : "s")"
-            if warnings == nil && warningCount > 0 { counts += " (xcd build --warnings)" }
-            lines.append(counts)
-        }
+        lines += warningLines
         if let product { lines.append("app: \(product.path)  bundle=\(product.bundleId)") }
         lines += (logTail ?? []).map { "  " + $0 }
         lines += notes.map { "note: " + $0 }
