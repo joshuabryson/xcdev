@@ -24,6 +24,13 @@ enum Disk {
         access(path, F_OK) == 0
     }
 
+    /// `path` with its links resolved and every name as the disk spells it, or nil when nothing is there.
+    static func realPath(_ path: String) -> String? {
+        guard let resolved = realpath(path, nil) else { return nil }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
+
     static func isRegularFile(_ path: String) -> Bool {
         (try? URL(fileURLWithPath: path).resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
     }
