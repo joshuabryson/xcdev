@@ -14,6 +14,13 @@ import XcdevTestSupport
         return other
     }
 
+    /// The clone is listed in progress, still booting, and was neither shut down nor deleted.
+    func expectLeftBooting(_ report: DoctorReport, _ udid: String, _ sims: FakeSimulators) {
+        #expect(report.checks.first?.inProgress.count == 1 && report.checks.first?.inProgress.first?.contains("is Booting, which can take") == true)
+        #expect(sims.devices.first { $0.udid == udid }?.state == "Booting")
+        #expect(!fake.calls.contains { $0.argv.starts(with: ["xcrun", "simctl", "shutdown"]) || $0.argv.starts(with: ["xcrun", "simctl", "delete"]) })
+    }
+
     @Test func fixInOneProjectLeavesAnothersCloneAloneAndSaysWhereToFixIt() async throws {
         let (project, sims, _, _) = try await setup()
         let nearby = try await another(project, named: "Nearby")
@@ -122,9 +129,7 @@ import XcdevTestSupport
         try record(booting, as: "iphone", in: &nearbyMain)
         let report = await doctor(project).run(fix: true, checks: [StuckClonesCheck()], from: project.root, includeDisk: false)
         #expect(report.problems.isEmpty && report.failure == nil)
-        #expect(report.checks.first?.inProgress.count == 1 && report.checks.first?.inProgress.first?.contains("is Booting, which can take") == true)
-        #expect(sims.devices.first { $0.udid == booting }?.state == "Booting")
-        #expect(!fake.calls.contains { $0.argv.starts(with: ["xcrun", "simctl", "shutdown"]) || $0.argv.starts(with: ["xcrun", "simctl", "delete"]) })
+        expectLeftBooting(report, booting, sims)
     }
 
     @Test func aBootingCloneIsInProgressWhenDoctorCannotTellWhichProjectItIsIn() async throws {
@@ -137,9 +142,7 @@ import XcdevTestSupport
         try FileManager.default.moveItem(atPath: project.root, toPath: project.base + "/Moved App")
         let report = await doctor(project).run(fix: true, checks: [StuckClonesCheck()], from: feat.path, includeDisk: false)
         #expect(report.problems.filter { $0.check == "stuck-clones" }.isEmpty)
-        #expect(report.checks.first?.inProgress.count == 1 && report.checks.first?.inProgress.first?.contains("is Booting, which can take") == true)
-        #expect(sims.devices.first { $0.udid == booting }?.state == "Booting")
-        #expect(!fake.calls.contains { $0.argv.starts(with: ["xcrun", "simctl", "shutdown"]) || $0.argv.starts(with: ["xcrun", "simctl", "delete"]) })
+        expectLeftBooting(report, booting, sims)
     }
 
     @Test func theNextSaysWhatPlainFixReachesAndToAskBeforeARestart() {
