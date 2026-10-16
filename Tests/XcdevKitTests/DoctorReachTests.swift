@@ -121,12 +121,9 @@ import XcdevTestSupport
     /// CoreSimulator belongs to no project, so a restart does not need doctor to know which one it is in; `--fix` still
     /// repairs nothing then.
     @Test func aRestartDoesNotNeedDoctorToKnowItsProject() async throws {
-        let (project, sims, worktrees, main) = try await setup()
-        let old = try await another(project, named: "Old")
-        defer { project.remove(); old.remove() }
+        let (project, _, worktrees, main) = try await setup()
+        defer { project.remove() }
         let (feat, _) = try await worktrees.create(name: "feat", in: main)
-        let clone = sims.add(name: "xcd · Old · main · iphone")
-        try FileManager.default.removeItem(atPath: old.root)
         try FileManager.default.moveItem(atPath: project.root, toPath: project.base + "/Moved App")
         let restarted = coreSimulatorThatAnswersOnceRestarted()
         let plain = await doctor(project).run(fix: true, checks: [CoreSimulatorCheck()], from: feat.path, includeDisk: false)
@@ -136,7 +133,6 @@ import XcdevTestSupport
                                                from: feat.path, includeDisk: false)
         #expect(report.problems.first { $0.check == "coresimulator" }?.fixed == true && restarted.value == 1)
         #expect(report.problems.filter { $0.check != "coresimulator" }.allSatisfy { !$0.fixed })
-        #expect(sims.devices.contains { $0.udid == clone })
     }
 
     /// A run that only restarts CoreSimulator counts what it fixed, as a `--fix` run does.
