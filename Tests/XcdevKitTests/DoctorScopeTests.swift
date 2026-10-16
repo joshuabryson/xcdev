@@ -7,13 +7,6 @@ import XcdevTestSupport
 @Suite struct DoctorScopeTests: DoctorFixture {
     let fake = FakeProcessRunner()
 
-    /// Registers worktree `name` of the project at `root` (named after its folder) at `path`, as `xcd wt create` does.
-    func register(_ name: String, of root: String, at path: String, home: String) async throws {
-        let state = WorktreeState(id: UUID().uuidString, name: name, project: (root as NSString).lastPathComponent, projectRoot: root,
-                                  path: path, branch: name, xcode: nil, devices: [:], status: .ready, createdAt: Date())
-        try await Registry(paths: GlobalPaths(base: home)).upsert(RegistryEntry(state))
-    }
-
     func problem(in root: String?) -> DoctorProblem {
         DoctorProblem(check: "some-check", message: "something", action: .dropRegistryEntry, fix: "drop it", projectRoot: root)
     }
@@ -61,7 +54,7 @@ import XcdevTestSupport
         let own = scopes.assign([some], reach: .thisProject)
         #expect(own.map(\.scope) == [.project] && own.map(\.projectRoot) == [project.root])
         let reaches = DoctorService.allChecks.map { "\($0.id)=\($0.reach)" }
-        #expect(reaches == ["coresimulator=mac", "missing-worktrees=entries", "incomplete-worktrees=entries", "orphaned-clones=entries",
+        #expect(reaches == ["project=thisProject", "coresimulator=mac", "missing-worktrees=entries", "incomplete-worktrees=entries", "orphaned-clones=entries",
                             "stuck-clones=entries", "templates=xcd", "recordings=entries", "ui-runners=entries", "init-scratch=xcd",
                             "package-caches=xcd", "quality-setup=thisProject", "quality-tools=thisProject", "project=thisProject",
                             "swiftlint=thisProject"])

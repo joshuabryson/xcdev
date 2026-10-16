@@ -25,6 +25,25 @@ extension DoctorFixture {
                       discovery: discovery ?? XcodeDiscovery(runner: fake, applicationsDirectories: []), sleep: sleep)
     }
 
+    /// Registers worktree `name` of the project at `root` (named after its folder) at `path`, as `xcd wt create` does.
+    func register(_ name: String, of root: String, at path: String, home: String) async throws {
+        let state = WorktreeState(id: UUID().uuidString, name: name, project: (root as NSString).lastPathComponent, projectRoot: root,
+                                  path: path, branch: name, xcode: nil, devices: [:], status: .ready, createdAt: Date())
+        try await Registry(paths: GlobalPaths(base: home)).upsert(RegistryEntry(state))
+    }
+
+    /// A CoreSimulator that fails `simctl list` until `pkill` restarts it. Returns the count of restarts.
+    func coreSimulatorThatAnswersOnceRestarted() -> Counter {
+        let listing = Fixture.string("simctl-list.json")
+        let restarted = Counter()
+        fake.stub(["xcrun", "simctl", "list", "-j"]) { _ in
+            restarted.value == 0 ? ProcessOutput(exitCode: 1, stderr: "Failed to initialize simulator device set.")
+                                 : ProcessOutput(stdout: listing)
+        }
+        fake.stub(["pkill"]) { _ in restarted.increment(); return ProcessOutput() }
+        return restarted
+    }
+
     /// Records `udid` as the worktree's clone of `device`.
     func record(_ udid: String, as device: String, in ctx: inout WorktreeContext) throws {
         ctx.state.devices[device] = ProvisionedDevice(udid: udid, deviceType: "iPhone 18 Pro", deviceTypeIdentifier: "t",

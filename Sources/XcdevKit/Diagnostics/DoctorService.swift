@@ -38,6 +38,11 @@ public struct DoctorReport: Reportable {
     public let fixMode: Bool
     public let checks: [CheckResult]
     public let disk: DiskSummary?
+    var restartSimulators = false
+    /// False when git failed to say which project doctor ran in.
+    var located = true
+
+    enum CodingKeys: String, CodingKey { case fixMode, checks, disk }
 
     public var problems: [DoctorProblem] { checks.flatMap(\.problems) }
     /// Problems that are still there.
@@ -58,7 +63,7 @@ public struct DoctorReport: Reportable {
                     line = "failed   \(check.id)  \(problem.message)  (fix failed: \(error))"
                 } else {
                     line = "problem  \(check.id)  \(problem.message)"
-                    if let fix = problem.fix, !fixMode { line += "  (--fix: \(fix))" }
+                    if let hint = hint(for: problem) { line += "  (\(hint))" }
                     if let next = problem.next { line += "  next: \(next)" }
                 }
                 lines.append(line)
@@ -68,16 +73,36 @@ public struct DoctorReport: Reportable {
         return lines.joined(separator: "\n")
     }
 
+    /// What plain `--fix` would repair.
+    var plainFix: DoctorFixes { DoctorFixes(fix: true, restartSimulators: false, located: located) }
+
+    /// The flag that would fix a problem no run has tried yet: `--restart-simulators` for CoreSimulator, and before a
+    /// `--fix` run, `--fix` for what it reaches. Another project's problem says where instead.
+    func hint(for problem: DoctorProblem) -> String? {
+        guard let fix = problem.fix, problem.action != nil, located else { return nil }
+        if problem.scope == .mac { return "--restart-simulators: \(fix)" }
+        return !fixMode && plainFix.repairs(problem) ? "--fix: \(fix)" : nil
+    }
+
     public var failure: XcdError? {
         guard !remaining.isEmpty else { return nil }
-        let fixable = remaining.filter { $0.action != nil && $0.fixError == nil }
-        let next: String
-        if !fixMode, !fixable.isEmpty {
-            next = "run `xcd doctor --fix` to fix \(fixable.count) of them" + (fixable.count < remaining.count ? "; the others say what to do" : "")
-        } else {
-            next = remaining.first { $0.next != nil }?.next ?? "read the problems above; `xcd doctor` checks again"
-        }
         return XcdError(.doctorProblems, "\(remaining.count) problem\(remaining.count == 1 ? "" : "s") remain", next: next)
+    }
+
+    /// Plain `--fix` for what it reaches, before a `--fix` run; asking the user before restarting CoreSimulator; or
+    /// else the first remaining problem's own `next`. When git could not say which project doctor ran in, git's.
+    var next: String {
+        let first = remaining.first { $0.next != nil && (located || $0.check == ProjectLocationCheck().id) }?.next
+        guard located else { return first ?? "read the problems above; `xcd doctor` checks again" }
+        var parts: [String] = []
+        let fixable = remaining.filter { plainFix.repairs($0) && $0.fixError == nil }
+        if !fixMode, !fixable.isEmpty {
+            parts.append("run `xcd doctor --fix` to fix \(fixable.count) of them" + (fixable.count < remaining.count ? "; the others say what to do" : ""))
+        }
+        if remaining.contains(where: { $0.scope == .mac && $0.action != nil && $0.fixError == nil }) {
+            parts.append("ask the user before running `xcd doctor --restart-simulators`: it shuts down every booted simulator on this Mac, other agents' too")
+        }
+        return parts.isEmpty ? first ?? "read the problems above; `xcd doctor` checks again" : parts.joined(separator: "; ")
     }
 }
 
@@ -109,25 +134,28 @@ public struct DoctorService: Sendable {
     /// folders and package caches depend on nothing else, so they come after the simulators, before the project's
     /// `lint:` section, its own setup, and its SwiftLint config.
     public static var allChecks: [any DoctorCheck] {
-        [CoreSimulatorCheck(), MissingWorktreesCheck(), IncompleteWorktreesCheck(), OrphanedClonesCheck(),
+        [ProjectLocationCheck(), CoreSimulatorCheck(), MissingWorktreesCheck(), IncompleteWorktreesCheck(), OrphanedClonesCheck(),
          StuckClonesCheck(), TemplatesCheck(), RecordingsCheck(), StaleUIRunnersCheck(),
          InitScratchCheck(), PackageCacheCheck(),
          QualitySetupCheck(), QualityToolsCheck(), ProjectCheck(), SwiftLintCheck()]
     }
 
-    /// `xcd prune`: worktrees that are gone, and clones nothing owns.
-    public static var pruneChecks: [any DoctorCheck] { [MissingWorktreesCheck(), OrphanedClonesCheck()] }
+    /// `xcd prune`: worktrees that are gone, and clones nothing owns, with the same reach as `--fix`.
+    public static var pruneChecks: [any DoctorCheck] { [ProjectLocationCheck(), MissingWorktreesCheck(), OrphanedClonesCheck()] }
 
-    /// `directory` is where doctor was run; inside a project, its setup is checked too.
-    public func run(fix: Bool, checks: [any DoctorCheck] = allChecks, from directory: String?,
+    /// `directory` is where doctor was run; inside a project, its setup is checked too. `fix` repairs that project's
+    /// problems, those of projects that are gone, and xcd's own; `restartSimulators` restarts CoreSimulator when it
+    /// is not answering.
+    public func run(fix: Bool, restartSimulators: Bool = false, checks: [any DoctorCheck] = allChecks, from directory: String?,
                     includeDisk: Bool = true) async -> DoctorReport {
         var env = await environment(from: directory, fixing: fix)
+        let fixes = DoctorFixes(fix: fix, restartSimulators: restartSimulators, located: env.projectFailure == nil)
         var results: [DoctorReport.CheckResult] = []
         for check in checks where check.applies(env) {
             var problems = DoctorScopes(env: env).assign(await check.detect(env), reach: check.reach)
             var inProgress = check.inProgress(env)
-            if fix, problems.contains(where: { $0.action != nil }) {
-                let fixed = await applyFixes(of: check, to: problems, env)
+            if problems.contains(where: fixes.repairs) {
+                let fixed = await applyFixes(of: check, to: problems, fixes, env)
                 problems = fixed.problems
                 inProgress += fixed.leftAlone
                 let before = env
@@ -136,17 +164,18 @@ public struct DoctorService: Sendable {
             }
             results.append(.init(id: check.id, problems: problems, inProgress: inProgress))
         }
-        return DoctorReport(fixMode: fix, checks: results, disk: includeDisk ? await disk(env) : nil)
+        return DoctorReport(fixMode: fix, checks: results, disk: includeDisk ? await disk(env) : nil,
+                            restartSimulators: restartSimulators, located: fixes.located)
     }
 
-    /// Runs the fix of every problem that has one. Returns the problems to list, each fixed or with why its fix
+    /// Runs the fix of every problem `fixes` reaches. Returns the problems to list, each fixed or with why its fix
     /// failed, and the notes of the ones a fix found it must leave alone, which are no longer listed as problems.
-    func applyFixes(of check: any DoctorCheck, to problems: [DoctorProblem],
+    func applyFixes(of check: any DoctorCheck, to problems: [DoctorProblem], _ fixes: DoctorFixes,
                     _ env: DoctorEnvironment) async -> (problems: [DoctorProblem], leftAlone: [String]) {
         var listed: [DoctorProblem] = []
         var leftAlone: [String] = []
         for var problem in problems {
-            if problem.action != nil {
+            if fixes.repairs(problem) {
                 do {
                     try await check.fix(problem, env)
                     problem.fixed = true
@@ -182,9 +211,10 @@ public struct DoctorService: Sendable {
         let busy = Set(registry.filter {
             FileLock.isHeld(at: worktrees.lockPath(projectRoot: $0.projectRoot, worktree: $0.name))
         }.map(\.id))
+        let (project, projectFailure) = await project(from: directory)
         var env = DoctorEnvironment(runner: runner, globalPaths: globalPaths, catalog: catalog, catalogFailure: catalogFailure,
                                  registry: registry, registryError: registryError, states: states,
-                                 project: await project(from: directory), discovery: discovery, now: now(), sleep: sleep,
+                                 project: project, projectFailure: projectFailure, discovery: discovery, now: now(), sleep: sleep,
                                  busy: busy, fixing: fixing)
         env.useProcesses(detached: detached, runnerClient: runnerClient)
         return env
@@ -212,9 +242,22 @@ public struct DoctorService: Sendable {
         }
     }
 
-    /// The project at `directory`, read-only: a missing or invalid .xcdev.yml is recorded, not thrown.
-    func project(from directory: String?) async -> DoctorProject? {
-        guard let directory, let location = try? await WorktreeLocator(runner: runner).locate(from: directory) else { return nil }
+    /// The project at `directory`, read-only: a missing or invalid .xcdev.yml is recorded, not thrown. Outside any
+    /// project there is none; when git fails to say which it is, its failure.
+    func project(from directory: String?) async -> (project: DoctorProject?, failure: XcdError?) {
+        guard let directory else { return (nil, nil) }
+        do {
+            return (read(try await WorktreeLocator(runner: runner).locate(from: directory)), nil)
+        } catch let error as XcdError where error.code == .notInProject {
+            return (nil, nil)
+        } catch let error as XcdError {
+            return (nil, error)
+        } catch {
+            return (nil, XcdError(.internalError, "\(error)"))
+        }
+    }
+
+    func read(_ location: ProjectLocation) -> DoctorProject? {
         let paths = WorktreePaths(root: location.worktreeRoot)
         do {
             let config = try ConfigLoader.load(worktreeRoot: location.worktreeRoot, projectRoot: location.projectRoot)

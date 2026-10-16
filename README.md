@@ -54,8 +54,9 @@ xcd help                  # every command, project command, and plugin
 - Ctrl-C (or SIGTERM, or SIGHUP when the terminal closes) stops what xcd started, xcodebuild and its compilers
   included, and exits 130 (143 for SIGTERM, 129 for SIGHUP) with one `xcd: interrupted` line on stderr.
 - `xcd doctor` checks simulators, worktrees, xcd's scratch folders and leftover package caches, and the project's
-  setup; `xcd doctor --fix` repairs what it can. It may restart CoreSimulator, which shuts down every agent's
-  simulators, so read the problems first.
+  setup; `xcd doctor --fix` repairs this project's problems, those of projects whose folders are gone, and xcd's own
+  leftovers, and says where to fix another project's. `xcd doctor --restart-simulators` restarts CoreSimulator when it
+  isn't answering, which shuts down every agent's simulators, so ask the user first.
 - SwiftLint searches hidden folders, so it would lint `.xcdev/` (DerivedData and package checkouts) on every build.
   `xcd init` adds `.xcdev` to the `excluded` list of the project's `.swiftlint.yml`, and `xcd doctor` reports a
   config that lacks it (`--fix` adds it). Until then `xcd build`, `xcd run`, and `xcd test` say so in a `note:`.

@@ -12,6 +12,7 @@ public enum DoctorReach: Sendable {
     case mac
 }
 
+extension ProjectLocationCheck { public var reach: DoctorReach { .thisProject } }
 extension CoreSimulatorCheck { public var reach: DoctorReach { .mac } }
 extension TemplatesCheck { public var reach: DoctorReach { .xcd } }
 extension InitScratchCheck { public var reach: DoctorReach { .xcd } }
@@ -44,8 +45,27 @@ struct DoctorScopes {
                 problem.projectRoot = env.project?.location.projectRoot
             case .entries:
                 problem.scope = problem.scope ?? scope(of: problem.projectRoot)
+                problem.next = elsewhere(problem) ?? problem.next
             }
             return problem
+        }
+    }
+
+    /// Where a problem `--fix` could repair is fixed when it is another project's: from that project's own folder.
+    /// A project whose folder cannot be reached, or whose main checkout is gone while another checkout is not, is
+    /// left to the user.
+    func elsewhere(_ problem: DoctorProblem) -> String? {
+        guard problem.action != nil, problem.scope == .otherProject, let root = problem.projectRoot else { return nil }
+        switch CheckoutPresence.of(root) {
+        case .present:
+            return "run `xcd doctor --fix` in \(root)"
+        case .unreachable:
+            return "\(root) can't be reached: it may be on a volume that isn't mounted, or in a folder xcd may not look into; "
+                + "mount it or fix the permissions, then run `xcd doctor` again"
+        case .missing:
+            let still = env.registry.first { $0.projectRoot == root && CheckoutPresence.of($0.path) != .missing }?.path ?? root
+            return "\((root as NSString).lastPathComponent)'s main checkout is no longer at \(root), but \(still) still is: "
+                + "ask the user whether it was moved or deleted"
         }
     }
 

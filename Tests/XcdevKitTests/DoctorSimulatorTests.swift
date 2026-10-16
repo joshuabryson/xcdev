@@ -54,20 +54,14 @@ import XcdevTestSupport
     /// Returns the check's one problem.
     func restart(_ project: TempProject, counting restarted: Counter) async throws -> DoctorProblem {
         fake.stub(["pkill"]) { _ in restarted.increment(); return ProcessOutput() }
-        let report = await doctor(project).run(fix: true, checks: [CoreSimulatorCheck()], from: nil)
+        let report = await doctor(project).run(fix: false, restartSimulators: true, checks: [CoreSimulatorCheck()], from: nil)
         return try #require(report.problems.first)
     }
 
     @Test func anUnresponsiveCoreSimulatorIsRestarted() async throws {
         let (project, _, _, _) = try await setup()
         defer { project.remove() }
-        let listing = Fixture.string("simctl-list.json")
-        let restarted = Counter()
-        fake.stub(["xcrun", "simctl", "list", "-j"]) { _ in
-            restarted.value == 0 ? ProcessOutput(exitCode: 1, stderr: "Failed to initialize simulator device set.")
-                                 : ProcessOutput(stdout: listing)
-        }
-        let problem = try await restart(project, counting: restarted)
+        let problem = try await restart(project, counting: coreSimulatorThatAnswersOnceRestarted())
         #expect(problem.message == "CoreSimulator didn't answer `simctl list`: `xcrun simctl list` failed (exit 1): Failed to initialize simulator device set.")
         #expect(problem.fixed)
         #expect(fake.calls.contains { $0.argv == ["pkill", "-9", "-f", "com.apple.CoreSimulator.CoreSimulatorService"] })
@@ -97,7 +91,7 @@ import XcdevTestSupport
                                    : ProcessOutput(stdout: listing)
         }
         fake.stub(["pkill"]) { _ in ProcessOutput() }
-        let report = await doctor(project).run(fix: true, checks: [CoreSimulatorCheck()], from: nil)
+        let report = await doctor(project).run(fix: false, restartSimulators: true, checks: [CoreSimulatorCheck()], from: nil)
         #expect(report.problems.isEmpty && report.failure == nil)
         #expect(pkillCalls == 0)
     }
@@ -110,7 +104,7 @@ import XcdevTestSupport
         fake.stub(["xcrun", "simctl", "list", "-j"], exitCode: 72,
                   stderr: "xcrun: error: unable to find utility \"simctl\", not a developer tool or in PATH")
         fake.stub(["pkill"]) { _ in ProcessOutput() }
-        let report = await doctor(project).run(fix: true, checks: [CoreSimulatorCheck()], from: nil)
+        let report = await doctor(project).run(fix: false, restartSimulators: true, checks: [CoreSimulatorCheck()], from: nil)
         let problem = try #require(report.problems.first)
         #expect(problem.action == nil && problem.next != nil && !problem.fixed)
         #expect(problem.message.hasPrefix("simctl couldn't list simulators: `xcrun simctl list` failed (exit 72): xcrun: error:"))
@@ -125,7 +119,7 @@ import XcdevTestSupport
         fake.stub(["xcrun", "simctl", "list", "-j"],
                   stdout: #"{"devicetypes": [], "runtimes": [], "devices": {"com.apple.CoreSimulator.SimRuntime.iOS-27-0": [{"udid": 7}]}}"#)
         fake.stub(["pkill"]) { _ in ProcessOutput() }
-        let report = await doctor(project).run(fix: true, checks: [CoreSimulatorCheck()], from: nil)
+        let report = await doctor(project).run(fix: false, restartSimulators: true, checks: [CoreSimulatorCheck()], from: nil)
         let problem = try #require(report.problems.first)
         #expect(problem.message.hasPrefix("simctl couldn't list simulators: could not parse `simctl list -j` output: "))
         #expect(problem.message.contains("com.apple.CoreSimulator.SimRuntime.iOS-27-0"))
@@ -161,7 +155,7 @@ import XcdevTestSupport
         fake.stub(["xcrun", "simctl", "list", "-j"], exitCode: 1,
                   stderr: "error: could not open a connection to the license agreement server")
         fake.stub(["pkill"]) { _ in ProcessOutput() }
-        let report = await doctor(project).run(fix: true, checks: [CoreSimulatorCheck()], from: nil)
+        let report = await doctor(project).run(fix: false, restartSimulators: true, checks: [CoreSimulatorCheck()], from: nil)
         #expect(report.problems.first?.action == nil)
         #expect(pkillCalls == 0)
         // A connection to the service that broke still counts.

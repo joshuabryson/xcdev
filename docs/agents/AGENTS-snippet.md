@@ -24,6 +24,6 @@ working in parallel never collide.
   lists the lint findings your change introduced, each with the project's own tool. Fix those findings, and leave
   the older ones it counts alone. `xcd guide quality` explains both results.
 - Every failure ends with `next:`; do that. `--json` gives one JSON object per command; `xcd help errors` lists codes.
-- If simulators or worktrees misbehave: `xcd doctor`, then `xcd doctor --fix`. Read the problems first: `--fix` may
-  restart CoreSimulator, which shuts down every agent's simulators.
+- If simulators or worktrees misbehave: `xcd doctor`, then `xcd doctor --fix`, which repairs only this project.
+  `xcd doctor --restart-simulators` shuts down every agent's simulators: ask the user first.
 - No `.xcdev.yml` yet? Follow `xcd guide setup`.

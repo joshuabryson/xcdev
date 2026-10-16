@@ -17,7 +17,7 @@ import XcdevTestSupport
         try record(broken, as: "watch", in: &main)
         let slept = Mutex(Duration.zero)
 
-        let report = await doctor(project, sleep: { d in slept.withLock { $0 += d } }).run(fix: true, from: nil)
+        let report = await doctor(project, sleep: { d in slept.withLock { $0 += d } }).run(fix: true, from: project.root)
         #expect(report.problems.filter { $0.check == "stuck-clones" }.map(\.message).sorted() == [
             "xcd · Sample App · main · iphone (\(stuck)) is stuck in Booting",
             "xcd · Sample App · main · watch (\(broken)) is unavailable; its runtime may have been removed",
@@ -43,7 +43,7 @@ import XcdevTestSupport
             if naps.increment() == 3 { simulators.setState("Booted", udid: booting) }   // the second poll of the fix sees it
         })
 
-        let report = await service.run(fix: true, checks: [StuckClonesCheck()], from: nil, includeDisk: false)
+        let report = await service.run(fix: true, checks: [StuckClonesCheck()], from: project.root, includeDisk: false)
         #expect(report.problems.isEmpty && report.failure == nil)
         #expect(report.checks.first?.inProgress == ["xcd · Sample App · main · iphone (\(booting)) is now Booted; left alone"])
         #expect(sims.devices.first { $0.udid == booting }?.state == "Booted")
@@ -69,7 +69,7 @@ import XcdevTestSupport
         try WorktreeStateStore.save(feat, WorktreePaths(root: feat.path))
 
         let holder = try await holdLock(worktrees.lockPath(projectRoot: project.root, worktree: "feat"))
-        let report = await doctor(project).run(fix: true, checks: [StuckClonesCheck()], from: nil, includeDisk: false)
+        let report = await doctor(project).run(fix: true, checks: [StuckClonesCheck()], from: project.root, includeDisk: false)
         holder.cancel()
         _ = await holder.result
         #expect(report.problems.isEmpty && report.failure == nil)
@@ -104,7 +104,7 @@ import XcdevTestSupport
         let stuck = sims.add(name: "xcd · Sample App · main · iphone", state: "Shutting Down")
         try record(stuck, as: "iphone", in: &main)
         fake.stub(["xcrun", "simctl", "shutdown"], exitCode: 149, stderr: "Unable to shutdown device in current state: Shutting Down")
-        let report = await doctor(project).run(fix: true, checks: [StuckClonesCheck()], from: nil)
+        let report = await doctor(project).run(fix: true, checks: [StuckClonesCheck()], from: project.root)
         #expect(report.problems.first?.fixed == true)
         #expect(!sims.devices.contains { $0.udid == stuck })
         #expect(try WorktreeStateStore.load(main.paths)?.devices.isEmpty == true)

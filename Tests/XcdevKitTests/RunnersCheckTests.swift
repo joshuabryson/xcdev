@@ -43,7 +43,7 @@ extension FakeProcessRunner {
         #expect(check.problems.map(\.action) == [.stopRunner, .forgetRunner])            // deaf, ended (sorted by file name)
         #expect(check.problems.allSatisfy { $0.projectRoot == ctx.location.projectRoot })
         #expect(detached.stops.isEmpty)
-        let fixed = await service.run(fix: true, from: nil)
+        let fixed = await service.run(fix: true, from: project.root)
         #expect(fixed.checks.first { $0.id == "ui-runners" }?.problems.allSatisfy(\.fixed) == true)
         #expect(detached.stops == [.init(pid: 12, signal: SIGTERM)])
         #expect(ctx.paths.runnerFiles == [ctx.paths.runnerFile(device: "fine")])
@@ -69,7 +69,7 @@ extension FakeProcessRunner {
                                     detached: FakeDetachedProcesses())
         let lock = Runners.lockPath(globalPaths: globalPaths, worktreeRoot: ctx.paths.root, device: "starting")
         let check = try await FileLock.withLock(at: lock) {
-            await service.run(fix: true, from: nil).checks.first { $0.id == "ui-runners" }
+            await service.run(fix: true, from: project.root).checks.first { $0.id == "ui-runners" }
         }
         #expect(check?.problems.isEmpty == true)
         #expect(check?.inProgress == ["\(ctx.state.project)/\(ctx.state.name)'s starting UI runner is being started by another xcd; left alone"])

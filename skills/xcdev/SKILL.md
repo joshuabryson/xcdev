@@ -32,7 +32,7 @@ it gives each git worktree its own simulator clones and DerivedData, so parallel
 | Format and lint what you changed | `xcd format` reformats the lines your change touched, with the project's own formatter (`xcd format --check` only lists them). Then `xcd lint` lists the findings your change introduced, with the project's own linter. `--files` widens either to the changed files, and `--all` to the project. Read `xcd guide quality` when one of them says it is not set up |
 | Context for scripts | `xcd context` (prints XCD_* variables) |
 | Explain a config key | `xcd config explain <key>` |
-| Fix simulators or worktrees | `xcd doctor`, then `xcd doctor --fix` (read the problems first: it may restart CoreSimulator, which shuts down every agent's simulators) |
+| Fix simulators or worktrees | `xcd doctor`, then `xcd doctor --fix`, which repairs only this project. `xcd doctor --restart-simulators` shuts down every agent's simulators: ask the user first. |
 
 ## Reading results
 

@@ -65,7 +65,7 @@ import XcdevTestSupport
         try WorktreeStateStore.save(feat, WorktreePaths(root: feat.path))
         try FileManager.default.removeItem(atPath: feat.path)
 
-        let report = await doctor(project).run(fix: true, from: nil)
+        let report = await doctor(project).run(fix: true, checks: DoctorService.pruneChecks, from: project.root)
         #expect(report.problems.map(\.check) == ["missing-worktrees", "orphaned-clones"])
         #expect(report.problems.allSatisfy { $0.fixed })
         #expect(try worktrees.list(projectRoot: project.root).map(\.name) == ["main"])
@@ -141,7 +141,7 @@ import XcdevTestSupport
         defer { project.remove() }
         let path = try await halfCreated("half", in: project)
 
-        let report = await doctor(project).run(fix: true, from: nil)
+        let report = await doctor(project).run(fix: true, from: project.root)
         let problem = try #require(report.problems.first { $0.check == "incomplete-worktrees" })
         #expect(problem.fixed)
         #expect(!FileManager.default.fileExists(atPath: path))
@@ -156,7 +156,7 @@ import XcdevTestSupport
         let note = "Sample App/busy is being created or removed by another xcd; left alone"
 
         let holder = try await holdLock(worktrees.lockPath(projectRoot: project.root, worktree: "busy"))
-        let report = await doctor(project).run(fix: true, from: nil)
+        let report = await doctor(project).run(fix: true, checks: [IncompleteWorktreesCheck()], from: project.root)
         holder.cancel()
         _ = await holder.result
         #expect(report.problems.isEmpty && report.failure == nil)
@@ -166,7 +166,7 @@ import XcdevTestSupport
         #expect(try worktrees.list(projectRoot: project.root).map(\.name) == ["busy", "main"])
 
         // Once that create is gone (killed), the same entry is a half-created worktree.
-        let later = await doctor(project).run(fix: true, from: nil)
+        let later = await doctor(project).run(fix: true, checks: [IncompleteWorktreesCheck()], from: project.root)
         #expect(later.problems.first { $0.check == "incomplete-worktrees" }?.fixed == true)
         #expect(!FileManager.default.fileExists(atPath: path))
     }
@@ -178,7 +178,7 @@ import XcdevTestSupport
         try FileManager.default.removeItem(atPath: feat.path)
         // `wt remove feat` after deleting the checkout, before dropping the entry: it holds the worktree's lock.
         let holder = try await holdLock(worktrees.lockPath(projectRoot: main.location.projectRoot, worktree: "feat"))
-        let report = await doctor(project).run(fix: true, checks: DoctorService.pruneChecks, from: nil, includeDisk: false)
+        let report = await doctor(project).run(fix: true, checks: DoctorService.pruneChecks, from: project.root, includeDisk: false)
         holder.cancel()
         _ = await holder.result
         #expect(report.problems.isEmpty)
@@ -336,7 +336,7 @@ import XcdevTestSupport
         defer { project.remove() }
         sims.add(name: "xcd-template · iPhone 18 Pro · iOS 27.0", state: "Booted")
         let orphan = sims.add(name: "xcd · Sample App · gone · iphone")
-        let report = await doctor(project).run(fix: true, checks: DoctorService.pruneChecks, from: nil, includeDisk: false)
+        let report = await doctor(project).run(fix: true, checks: DoctorService.pruneChecks, from: project.root, includeDisk: false)
         #expect(report.checks.map(\.id) == ["missing-worktrees", "orphaned-clones"])
         #expect(report.problems.count == 1 && report.problems[0].subject == orphan && report.problems[0].fixed)
         #expect(report.disk == nil)

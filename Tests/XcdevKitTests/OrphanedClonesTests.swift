@@ -20,7 +20,7 @@ import XcdevTestSupport
         let inFlight = sims.add(name: "xcd · Sample App · main · ipad", dataPath: young + "/data")
 
         let before = sims.devices
-        let report = await doctor(project).run(fix: false, from: nil)
+        let report = await doctor(project).run(fix: false, checks: [OrphanedClonesCheck()], from: project.root)
         let orphans = report.problems.filter { $0.check == "orphaned-clones" }
         #expect(orphans.compactMap(\.subject).sorted() == [gone, other].sorted())
         #expect(orphans.first { $0.subject == gone }?.message == "xcd · Sample App · deleted · iphone (\(gone)) is orphaned: its worktree no longer exists")
@@ -29,7 +29,7 @@ import XcdevTestSupport
         #expect(sims.devices == before)                                           // nothing changed without --fix
 
         // `other` is from a project this registry doesn't know: maybe another XCDEV_HOME's, so it is only reported.
-        let fixed = await doctor(project).run(fix: true, from: nil)
+        let fixed = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: project.root)
         #expect(fixed.problems.filter(\.fixed).map(\.subject) == [gone])
         #expect(fixed.remaining.map(\.subject) == [other] && fixed.remaining[0].fixError == nil)
         #expect(Set(sims.devices.map(\.udid)).isSuperset(of: [owned, inFlight, other]))
@@ -45,7 +45,7 @@ import XcdevTestSupport
         let clone = sims.add(name: "xcd · Sample App · main · iphone",
                              dataPath: try agedDevice(project.base + "/old-device", seconds: 3600))
 
-        let report = await doctor(project).run(fix: true, from: nil)
+        let report = await doctor(project).run(fix: true, from: project.root)
         #expect(sims.devices.contains { $0.udid == clone })
         let problem = try #require(report.problems.first { $0.check == "orphaned-clones" })
         #expect(problem.message == "xcd · Sample App · main · iphone (\(clone)) is orphaned: no worktree in this registry is from its project")
@@ -61,7 +61,7 @@ import XcdevTestSupport
         defer { project.remove() }
         let clone = sims.add(name: "xcd · Sample App · gone · iphone",
                              dataPath: try agedDevice(project.base + "/old-device", seconds: 601))
-        let report = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: nil)
+        let report = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: project.root)
         #expect(report.problems.map(\.message) == ["xcd · Sample App · gone · iphone (\(clone)) is orphaned: its worktree no longer exists"])
         #expect(report.problems.allSatisfy { $0.fixed } && report.failure == nil)
         #expect(!sims.devices.contains { $0.udid == clone })
@@ -104,7 +104,7 @@ import XcdevTestSupport
         let clone = sims.add(name: "xcd · Sample App · main · ipad",
                              dataPath: try agedDevice(project.base + "/old-device", seconds: 3600))
 
-        let report = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: nil)
+        let report = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: project.root)
         #expect(report.problems.isEmpty)
         #expect(sims.devices.contains { $0.udid == clone })
 
@@ -129,7 +129,7 @@ import XcdevTestSupport
         let name = sims.add(name: "xcd · Odd · Name · main · iphone",
                             dataPath: try agedDevice(project.base + "/young-2", seconds: 5))
 
-        let report = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: nil)
+        let report = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: project.root)
         #expect(report.problems.isEmpty)
         #expect(Set(sims.devices.map(\.udid)).isSuperset(of: [key, name]))
     }
@@ -155,7 +155,7 @@ import XcdevTestSupport
                             dataPath: try agedDevice(project.base + "/old-1", seconds: 3600))
         let inUse = sims.add(name: "xcd · Sample App · main · iphone", state: "Booted",
                              dataPath: try agedDevice(project.base + "/old-2", seconds: 3600))
-        let report = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: nil, includeDisk: false)
+        let report = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: project.root, includeDisk: false)
         #expect(report.problems.first { $0.subject == idle }?.fixed == true)
         let booted = try #require(report.problems.first { $0.subject == inUse })
         #expect(booted.message == "xcd · Sample App · main · iphone (\(inUse)) is orphaned: Sample App/main doesn't record it, and it is Booted")
@@ -184,7 +184,7 @@ import XcdevTestSupport
         let clone = sims.add(name: "xcd · Sample App · feat · iphone",
                              dataPath: try agedDevice(project.base + "/old-device", seconds: 3600))
         let holder = try await holdLock(worktrees.lockPath(projectRoot: project.root, worktree: "feat"))
-        let report = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: nil, includeDisk: false)
+        let report = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: project.root, includeDisk: false)
         holder.cancel()
         _ = await holder.result
         #expect(report.problems.isEmpty)
@@ -199,7 +199,7 @@ import XcdevTestSupport
         let clone = sims.add(name: "xcd · Sample App · main · iphone")
         try Data("{ not json".utf8).write(to: URL(fileURLWithPath: GlobalPaths(base: project.home).registryFile))
 
-        let report = await doctor(project).run(fix: true, from: nil)
+        let report = await doctor(project).run(fix: true, from: project.root)
         #expect(sims.devices.contains { $0.udid == clone })
         #expect(report.problems.filter { $0.check == "orphaned-clones" }.isEmpty)
         let unreadable = try #require(report.problems.first { $0.check == "missing-worktrees" })

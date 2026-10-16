@@ -40,8 +40,8 @@ public struct DoctorProblem: Codable, Sendable, Equatable {
     public let action: Action?
     /// What `--fix` does, in words.
     public let fix: String?
-    /// What to do by hand when there is no fix.
-    public let next: String?
+    /// What to do by hand when there is no fix, or, for another project's problem, where to fix it.
+    public var next: String?
     /// What the fix acts on: a simulator's udid, a registry id, a worktree path, the cache directory, or a package cache.
     public let subject: String?
     /// What the fix did, in words, for the line of a fixed problem.
@@ -114,6 +114,8 @@ public struct DoctorEnvironment: Sendable {
     /// Registry id → that worktree's state, for checkouts that still exist.
     public let states: [String: WorktreeState]
     public let project: DoctorProject?
+    /// Why git could not say which project doctor runs in, when it failed.
+    public var projectFailure: XcdError?
     public let discovery: XcodeDiscovery
     public let now: Date
     public let sleep: @Sendable (Duration) async throws -> Void

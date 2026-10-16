@@ -32,7 +32,7 @@ import XcdevTestSupport
         #expect(check.inProgress.count == 1 && check.inProgress[0].contains("is recording fresh to "))
         #expect(detached.stops.isEmpty)
 
-        let fixed = await service.run(fix: true, from: nil)
+        let fixed = await service.run(fix: true, from: project.root)
         #expect(fixed.checks.first { $0.id == "recordings" }?.problems.allSatisfy(\.fixed) == true)
         #expect(detached.stops == [.init(pid: 2, signal: SIGINT)])
         #expect(ctx.paths.recordingFiles == [ctx.paths.recordingFile(device: "fresh")])
