@@ -124,7 +124,7 @@ public struct DoctorService: Sendable {
         var env = await environment(from: directory, fixing: fix)
         var results: [DoctorReport.CheckResult] = []
         for check in checks where check.applies(env) {
-            var problems = await check.detect(env)
+            var problems = DoctorScopes(env: env).assign(await check.detect(env), reach: check.reach)
             var inProgress = check.inProgress(env)
             if fix, problems.contains(where: { $0.action != nil }) {
                 let fixed = await applyFixes(of: check, to: problems, env)

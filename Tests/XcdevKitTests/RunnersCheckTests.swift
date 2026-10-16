@@ -41,6 +41,7 @@ extension FakeProcessRunner {
         let report = await service.run(fix: false, from: nil)
         let check = try #require(report.checks.first { $0.id == "ui-runners" })
         #expect(check.problems.map(\.action) == [.stopRunner, .forgetRunner])            // deaf, ended (sorted by file name)
+        #expect(check.problems.allSatisfy { $0.projectRoot == ctx.location.projectRoot })
         #expect(detached.stops.isEmpty)
         let fixed = await service.run(fix: true, from: nil)
         #expect(fixed.checks.first { $0.id == "ui-runners" }?.problems.allSatisfy(\.fixed) == true)

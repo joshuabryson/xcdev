@@ -10,23 +10,39 @@ import XcdevTestSupport
     @Test func templatesMustBeShutDownAvailableAndUnique() async throws {
         let (project, sims, _, _) = try await setup()
         defer { project.remove() }
+        let duplicate = "xcd-template · iPhone 16 · iOS 27.0"
+        sims.add(name: duplicate)
+        sims.add(name: duplicate)
+        let gone = sims.add(name: "xcd-template · iPhone 16 · iOS 26.5", isAvailable: false)
+        let report = await doctor(project).run(fix: true, checks: [TemplatesCheck()], from: nil)
+        #expect(report.problems.count == 2 && report.problems.allSatisfy { $0.fixed && $0.scope == .xcd })
+        let left = sims.devices.filter { $0.name.hasPrefix(SimNaming.templatePrefix) }
+        #expect(left.filter { $0.name == duplicate }.count == 1)                        // one copy is kept
+        #expect(!left.contains { $0.udid == gone })
+    }
+
+    /// xcd never boots a template, so someone else did, and may be using it.
+    @Test func aTemplateThatIsNotShutDownIsLeftToTheUser() async throws {
+        let (project, sims, _, _) = try await setup()
+        defer { project.remove() }
         let booted = sims.add(name: "xcd-template · iPhone 18 Pro · iOS 27.0", state: "Booted")
         let duplicate = "xcd-template · iPhone 16 · iOS 27.0"
         sims.add(name: duplicate)
-        sims.add(name: duplicate, state: "Booted")
-        let gone = sims.add(name: "xcd-template · iPhone 16 · iOS 26.5", isAvailable: false)
+        let bootedCopy = sims.add(name: duplicate, state: "Booted")
         let report = await doctor(project).run(fix: true, checks: [TemplatesCheck()], from: nil)
-        #expect(report.problems.count == 3 && report.problems.allSatisfy { $0.fixed })
-        let left = sims.devices.filter { $0.name.hasPrefix(SimNaming.templatePrefix) }
-        #expect(left.filter { $0.name == duplicate }.map(\.state) == ["Shutdown"])      // the usable copy is kept
-        #expect(left.first { $0.udid == booted }?.state == "Shutdown")
-        #expect(!left.contains { $0.udid == gone })
+        #expect(report.problems.count == 2 && report.problems.allSatisfy { $0.action == nil && !$0.fixed })
+        let messages = Dictionary(uniqueKeysWithValues: report.problems.map { ($0.subject ?? "", $0.message) })
+        #expect(messages == [bootedCopy: "\(duplicate) (\(bootedCopy)) is a duplicate template, and it is Booted",
+                             booted: "xcd-template · iPhone 18 Pro · iOS 27.0 (\(booted)) is Booted; clones need a shut-down template"])
+        #expect(report.problems.first { $0.subject == bootedCopy }?.next
+                    == "xcd never boots a template, so someone else did: ask the user before shutting it down (`xcrun simctl shutdown \(bootedCopy)`)")
+        #expect(sims.devices.filter { $0.state == "Booted" }.count == 2)
     }
 
     @Test func templateProblemsAreOnlyReportedWithoutFix() async throws {
         let (project, sims, _, _) = try await setup()
         defer { project.remove() }
-        sims.add(name: "xcd-template · iPhone 18 Pro · iOS 27.0", state: "Booted")
+        sims.add(name: "xcd-template · iPhone 18 Pro · iOS 26.5", isAvailable: false)
         let before = sims.devices
         let report = await doctor(project).run(fix: false, checks: [TemplatesCheck()], from: nil)
         #expect(report.problems.count == 1 && !report.problems[0].fixed)

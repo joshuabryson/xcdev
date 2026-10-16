@@ -169,7 +169,7 @@ import XcdevTestSupport
         let late = sims.add(name: "xcd · Sample App · main · watch",
                             dataPath: try agedDevice(project.base + "/old-3", seconds: 3600))
         let env = await doctor(project).environment(from: nil, fixing: true)
-        let problem = try #require(await OrphanedClonesCheck().detect(env).first { $0.subject == late })
+        let problem = try #require(OrphanedClonesCheck().detect(env).first { $0.subject == late })
         #expect(problem.action == .deleteSimulator)
         sims.setState("Booted", udid: late)
         await #expect(throws: DoctorLeftAlone.self) { try await OrphanedClonesCheck().fix(problem, env) }

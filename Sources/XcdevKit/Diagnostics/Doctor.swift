@@ -21,6 +21,19 @@ public struct DoctorProblem: Codable, Sendable, Equatable {
         case addFormatSection = "add_format_section"
     }
 
+    /// Whose problem it is, which decides where `--fix` may repair it.
+    public enum Scope: String, Codable, Sendable {
+        /// The project doctor runs in.
+        case project
+        case otherProject = "other-project"
+        /// A project none of whose checkouts is there any more.
+        case goneProject = "gone-project"
+        /// What xcd keeps for every project on this Mac.
+        case xcd
+        /// The CoreSimulator service.
+        case mac
+    }
+
     /// The check's id, e.g. "orphaned-clones".
     public let check: String
     public let message: String
@@ -35,9 +48,13 @@ public struct DoctorProblem: Codable, Sendable, Equatable {
     public let done: String?
     public var fixed = false
     public var fixError: String?
+    /// Set by doctor from the check's reach and `projectRoot`.
+    public var scope: Scope?
+    /// The main checkout of the project the problem is in, when it is a project's.
+    public var projectRoot: String?
 
     public init(check: String, message: String, action: Action? = nil, fix: String? = nil, next: String? = nil,
-                subject: String? = nil, done: String? = nil) {
+                subject: String? = nil, done: String? = nil, projectRoot: String? = nil) {
         self.check = check
         self.message = message
         self.action = action
@@ -45,12 +62,15 @@ public struct DoctorProblem: Codable, Sendable, Equatable {
         self.next = next
         self.subject = subject
         self.done = done
+        self.projectRoot = projectRoot
     }
 }
 
 /// A doctor check: finds problems and, for those with an action, repairs them.
 public protocol DoctorCheck: Sendable {
     var id: String { get }
+    /// What the check's problems are about, which decides whose they are. Every check's is in `DoctorScopes.swift`.
+    var reach: DoctorReach { get }
     /// False when the check has nothing to look at (the project check outside a project), so it isn't listed.
     func applies(_ env: DoctorEnvironment) -> Bool
     func detect(_ env: DoctorEnvironment) async -> [DoctorProblem]

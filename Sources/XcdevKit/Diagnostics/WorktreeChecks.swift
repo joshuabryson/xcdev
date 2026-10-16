@@ -32,18 +32,25 @@ public struct MissingWorktreesCheck: DoctorCheck {
     public init() {}
 
     public func detect(_ env: DoctorEnvironment) async -> [DoctorProblem] {
-        let unreadable = env.registryError.map { [DoctorProblem(check: id, message: $0.message, next: $0.next)] } ?? []
         let gone = missing(env).filter { !env.isBusy($0) }.map { entry in
             DoctorProblem(check: id, message: "\(entry.project)/\(entry.name): \(entry.path) no longer exists",
                           action: .dropRegistryEntry, fix: "drop it from the registry and prune git's record of it",
-                          subject: entry.id)
+                          subject: entry.id, projectRoot: entry.projectRoot)
         }
         let unreachable = env.registry.filter { CheckoutPresence.of($0.path) == .unreachable }.map { entry in
             DoctorProblem(check: id, message: "\(entry.project)/\(entry.name): \(entry.path) can't be reached",
                           next: "it may be on a volume that isn't mounted, or in a folder xcd may not look into; mount it or fix the permissions, then run `xcd doctor` again",
-                          subject: entry.id)
+                          subject: entry.id, projectRoot: entry.projectRoot)
         }
-        return unreadable + gone + unreachable
+        return unreadable(env) + gone + unreachable
+    }
+
+    /// The registry itself, when it cannot be read: xcd's, not any project's.
+    func unreadable(_ env: DoctorEnvironment) -> [DoctorProblem] {
+        guard let error = env.registryError else { return [] }
+        var problem = DoctorProblem(check: id, message: error.message, next: error.next)
+        problem.scope = .xcd
+        return [problem]
     }
 
     /// A `wt remove` between deleting the checkout and dropping its entry, or a `wt create` before its checkout exists.
@@ -70,7 +77,7 @@ public struct IncompleteWorktreesCheck: DoctorCheck {
         incomplete(env).filter { !env.isBusy($0) }.map { entry in
             DoctorProblem(check: id, message: "\(entry.project)/\(entry.name) at \(entry.path) was left half-created by an interrupted `xcd wt create`",
                           action: .discardWorktree, fix: "remove it if it is clean and xcd's (otherwise only its registry entry)",
-                          subject: entry.id)
+                          subject: entry.id, projectRoot: entry.projectRoot)
         }
     }
 

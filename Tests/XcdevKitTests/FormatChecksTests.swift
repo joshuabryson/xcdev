@@ -21,7 +21,7 @@ import XcdevTestSupport
 
         let report = await quality.doctor(project).run(fix: false, checks: [QualitySetupCheck()], from: project.root)
         #expect(report.problems == [DoctorProblem(check: "quality-setup", message: Self.problem, action: .addFormatSection, fix: Self.fix,
-                                                  subject: project.root + "/.xcdev.yml", done: Self.done)])
+                                                  subject: project.root + "/.xcdev.yml", done: Self.done).inProject(project.root)])
         #expect(report.text.contains("problem  quality-setup  \(Self.problem)  (--fix: \(Self.fix))"))
         #expect(try quality.config(project) == Self.base)                        // reported only, without --fix
 
@@ -54,7 +54,7 @@ import XcdevTestSupport
             check: "quality-setup",
             message: ".xcdev.yml has no `format:` section, and the project has a .swift-format and .swiftformat, so `xcd format` is not set up",
             next: "add `format: { tool: swift-format }` or `format: { tool: swiftformat }` to .xcdev.yml, whichever the project uses",
-            subject: project.root + "/.xcdev.yml")])
+            subject: project.root + "/.xcdev.yml").inProject(project.root)])
         #expect(report.failure?.code == .doctorProblems)
         #expect(try quality.config(project) == Self.base)
     }
@@ -123,7 +123,7 @@ import XcdevTestSupport
         let report = await quality.doctor(project).run(fix: true, checks: [missing], from: project.root)
         #expect(report.problems == [DoctorProblem(check: "quality-tools",
                                                   message: "swiftformat is not installed: it is not in PATH, /opt/homebrew/bin, or /usr/local/bin",
-                                                  next: "brew install swiftformat, or set format.path in .xcdev.local.yml")])
+                                                  next: "brew install swiftformat, or set format.path in .xcdev.local.yml").inProject(project.root)])
         try project.write("#!/bin/sh\n", to: "bin/swiftformat", in: project.base)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: project.base + "/bin/swiftformat")
         #expect(await quality.doctor(project).run(fix: false, checks: [missing], from: project.root).problems.isEmpty)

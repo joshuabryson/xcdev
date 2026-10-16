@@ -36,11 +36,12 @@ public struct StaleUIRunnersCheck: DoctorCheck {
             let owner = "\(item.entry.project)/\(item.entry.name)"
             if !env.detached.inspector.isRunning(item.record.process, marker: Runners.marker) {
                 problems.append(DoctorProblem(check: id, message: "\(owner) has a record of a \(item.record.device) UI runner that already ended",
-                                              action: .forgetRunner, fix: "delete the record", subject: item.file))
+                                              action: .forgetRunner, fix: "delete the record", subject: item.file,
+                                              projectRoot: item.entry.projectRoot))
             } else if !(await answers(item.record, env)) {
                 problems.append(DoctorProblem(check: id, message: "\(owner)'s \(item.record.device) UI runner is running but not answering",
                                               action: .stopRunner, fix: "stop it; the next `xcd ui` command starts a new one",
-                                              subject: item.file))
+                                              subject: item.file, projectRoot: item.entry.projectRoot))
             }
         }
         return problems

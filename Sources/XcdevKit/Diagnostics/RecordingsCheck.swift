@@ -33,13 +33,15 @@ public struct RecordingsCheck: DoctorCheck {
             let owner = "\(item.entry.project)/\(item.entry.name)"
             guard env.detached.inspector.isRunning(item.record.process, marker: Recordings.marker) else {
                 return DoctorProblem(check: id, message: "\(owner) has a record of a \(item.record.device) recording that already ended",
-                                     action: .forgetRecording, fix: "delete the record (the video is kept)", subject: item.file)
+                                     action: .forgetRecording, fix: "delete the record (the video is kept)", subject: item.file,
+                                     projectRoot: item.entry.projectRoot)
             }
             guard age(item, env) > limit(item.entry) else { return nil }
             return DoctorProblem(check: id,
                                  message: "\(owner) has been recording \(item.record.device) for \(DurationText.format(age(item, env))), "
                                      + "longer than ui.record.maxDuration (\(DurationText.format(limit(item.entry))))",
-                                 action: .stopRecording, fix: "stop it; the video is kept at \(item.record.path)", subject: item.file)
+                                 action: .stopRecording, fix: "stop it; the video is kept at \(item.record.path)", subject: item.file,
+                                 projectRoot: item.entry.projectRoot)
         }
     }
 

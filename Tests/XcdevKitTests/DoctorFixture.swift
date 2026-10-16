@@ -70,3 +70,13 @@ extension DoctorFixture {
         return holder
     }
 }
+
+extension DoctorProblem {
+    /// The problem as doctor reports it when run in the project whose main checkout is `root`: that project's.
+    func inProject(_ root: String) -> DoctorProblem {
+        var problem = self
+        problem.scope = .project
+        problem.projectRoot = root
+        return problem
+    }
+}

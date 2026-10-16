@@ -37,7 +37,7 @@ import XcdevTestSupport
         #expect(report.checks.map(\.id).last == "swiftlint")
         #expect(report.problems.filter { $0.check == "swiftlint" } == [
             DoctorProblem(check: "swiftlint", message: Self.lintProblem, action: .excludeFromSwiftLint,
-                          fix: "add `.xcdev` to its `excluded` list", subject: project.root + "/.swiftlint.yml")])
+                          fix: "add `.xcdev` to its `excluded` list", subject: project.root + "/.swiftlint.yml").inProject(project.root)])
         #expect(report.text.contains("problem  swiftlint  \(Self.lintProblem)  (--fix: add `.xcdev` to its `excluded` list)"))
         #expect(try lintConfig(project) == "excluded:\n  - Pods\n")              // reported only, without --fix
 
@@ -55,7 +55,7 @@ import XcdevTestSupport
         try project.write("excluded: Pods\n", to: ".swiftlint.yml")
         let report = await doctor(project).run(fix: true, checks: [SwiftLintCheck()], from: project.root)
         #expect(report.problems == [DoctorProblem(check: "swiftlint", message: Self.lintProblem,
-                                                  next: "add `.xcdev` to the `excluded` list in .swiftlint.yml")])
+                                                  next: "add `.xcdev` to the `excluded` list in .swiftlint.yml").inProject(project.root)])
         #expect(report.failure?.next == "add `.xcdev` to the `excluded` list in .swiftlint.yml")
         #expect(try lintConfig(project) == "excluded: Pods\n")
     }

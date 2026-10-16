@@ -21,7 +21,7 @@ public struct CoreSimulatorCheck: DoctorCheck {
                                   next: "run `xcrun simctl list` to see the error, and check `xcode-select -p` points at an installed Xcode")]
         }
         return [DoctorProblem(check: id, message: "CoreSimulator didn't answer `simctl list`: \(reason)",
-                              action: .restartCoreSimulator, fix: "restart the CoreSimulator service (booted simulators shut down)",
+                              action: .restartCoreSimulator, fix: "restart the CoreSimulator service; every booted simulator on this Mac shuts down",
                               next: "if it still fails, quit Device Hub (Simulator.app before Xcode 27) and Xcode, or restart the Mac")]
     }
 
@@ -65,7 +65,8 @@ public struct CoreSimulatorCheck: DoctorCheck {
     }
 }
 
-/// Templates must be available, shut down, and unique; missing ones are simply re-created on next use.
+/// Templates must be available, shut down, and unique; missing ones are simply re-created on next use. xcd never boots
+/// a template, so one that is not shut down was booted by someone else, who may be using it: it is left to the user.
 public struct TemplatesCheck: DoctorCheck {
     public let id = "templates"
     public init() {}
@@ -81,103 +82,29 @@ public struct TemplatesCheck: DoctorCheck {
         for template in templates {
             let label = "\(template.name) (\(template.udid))"
             if !seen.insert(template.name).inserted {
-                problems.append(DoctorProblem(check: id, message: "\(label) is a duplicate template", action: .deleteSimulator,
-                                              fix: "delete it", subject: template.udid))
+                problems.append(template.state == "Shutdown"
+                    ? DoctorProblem(check: id, message: "\(label) is a duplicate template", action: .deleteSimulator, fix: "delete it",
+                                    subject: template.udid)
+                    : booted(template, "\(label) is a duplicate template, and it is \(template.state)"))
             } else if !template.isAvailable {
                 problems.append(DoctorProblem(check: id, message: "\(label) is unavailable; its runtime may have been removed",
                                               action: .deleteSimulator, fix: "delete it; it is re-created when next needed",
                                               subject: template.udid))
             } else if template.state != "Shutdown" {
-                problems.append(DoctorProblem(check: id, message: "\(label) is \(template.state); clones need a shut-down template",
-                                              action: .shutDownSimulator, fix: "shut it down", subject: template.udid))
+                problems.append(booted(template, "\(label) is \(template.state); clones need a shut-down template"))
             }
         }
         return problems
     }
 
-    public func fix(_ problem: DoctorProblem, _ env: DoctorEnvironment) async throws {
-        guard let udid = problem.subject else { return }
-        if problem.action == .shutDownSimulator {
-            try await env.simctl.shutdown(udid: udid)
-        } else {
-            try await env.simctl.delete(udid: udid)
-        }
-    }
-}
-
-/// xcd-named clones that no worktree records.
-///
-/// Only a clone of a project this registry knows is deleted by `--fix`. Another xcd state folder (a different
-/// `XCDEV_HOME`, or a fresh one with no registry.json yet) has its own registry and clones, which this one can't
-/// tell apart from orphans, so a clone of an unknown project is reported with the command to delete it by hand,
-/// and never fixed. Entries an earlier fix in this run dropped (`formerEntries`) still count as known.
-///
-/// A clone is left alone while any registry entry it could belong to says so: that worktree is being created or
-/// removed, its checkout can't be reached (`CheckoutPresence`), its worktree.json can't be read, or the clone is
-/// younger than `graceSeconds` (or of unknown age), as another agent may be cloning it right now. A clone whose
-/// worktree exists is deleted only while it is shut down; a booted one may be in use, so it is only reported.
-/// Nothing at all is reported while the registry can't be read. Ownership is decided by name prefix against every
-/// entry, since project and device names may contain " · ".
-public struct OrphanedClonesCheck: DoctorCheck {
-    public let id = "orphaned-clones"
-    public let graceSeconds: TimeInterval
-    public init(graceSeconds: TimeInterval = 600) { self.graceSeconds = graceSeconds }
-
-    public func detect(_ env: DoctorEnvironment) async -> [DoctorProblem] {
-        guard env.registryError == nil, let catalog = env.catalog else { return [] }
-        let recorded = env.recordedClones
-        // Entries this run dropped still name their clones' owner: a gone worktree, whose clones can go too.
-        let known = env.registry + env.formerEntries
-        return catalog.devices.compactMap { device in
-            guard device.name.hasPrefix(SimNaming.clonePrefix), !recorded.contains(device.udid) else { return nil }
-            let label = "\(device.name) (\(device.udid)) is orphaned"
-            guard known.contains(where: { device.name.hasPrefix(SimNaming.clonePrefix + $0.project + " · ") }) else {
-                return DoctorProblem(check: id, message: "\(label): no worktree in this registry is from its project",
-                                     next: "it may belong to another xcd state folder (XCDEV_HOME); if not, delete it with `xcrun simctl delete \(device.udid)`",
-                                     subject: device.udid)
-            }
-            let entries = known.filter {
-                device.name.hasPrefix(SimNaming.clone(project: $0.project, worktree: $0.name, device: ""))
-            }
-            var owner: RegistryEntry?
-            for entry in entries {
-                if env.isBusy(entry) { return nil }
-                switch CheckoutPresence.of(entry.path) {
-                case .missing: continue
-                case .unreachable: return nil                                  // it may be fine where we can't see
-                case .present: break
-                }
-                guard env.states[entry.id] != nil else { return nil }          // its worktree.json is unreadable, or it was dropped
-                guard let age = env.age(of: device), age >= graceSeconds else { return nil }
-                owner = owner ?? entry
-            }
-            guard let owner else {
-                return DoctorProblem(check: id, message: "\(label): its worktree no longer exists",
-                                     action: .deleteSimulator, fix: "shut it down and delete it", subject: device.udid)
-            }
-            // Its worktree exists, so a booted clone may be in use (booted by hand, or by an agent's own script).
-            let why = "\(owner.project)/\(owner.name) doesn't record it"
-            guard device.state == "Shutdown" else {
-                return DoctorProblem(check: id, message: "\(label): \(why), and it is \(device.state)",
-                                     next: "if nothing is using it, delete it with `xcrun simctl shutdown \(device.udid); xcrun simctl delete \(device.udid)`",
-                                     subject: device.udid)
-            }
-            return DoctorProblem(check: id, message: "\(label): \(why)",
-                                 action: .deleteSimulator, fix: "delete it", subject: device.udid)
-        }
+    func booted(_ template: SimDevice, _ message: String) -> DoctorProblem {
+        DoctorProblem(check: id, message: message,
+                      next: "xcd never boots a template, so someone else did: ask the user before shutting it down (`xcrun simctl shutdown \(template.udid)`)",
+                      subject: template.udid)
     }
 
-    /// Deletes the clone, unless it was booted since `detect` while a worktree it may belong to exists.
     public func fix(_ problem: DoctorProblem, _ env: DoctorEnvironment) async throws {
         guard let udid = problem.subject else { return }
-        if let device = try await env.simctl.catalog().device(udid: udid), device.state != "Shutdown",
-           env.registry.contains(where: {
-               device.name.hasPrefix(SimNaming.clone(project: $0.project, worktree: $0.name, device: ""))
-                   && CheckoutPresence.of($0.path) != .missing
-           }) {
-            throw DoctorLeftAlone(note: "\(device.name) (\(udid)) is now \(device.state); left alone")
-        }
-        _ = try? await env.simctl.shutdown(udid: udid)
         try await env.simctl.delete(udid: udid)
     }
 }
@@ -204,7 +131,8 @@ public struct StuckClonesCheck: DoctorCheck {
         let clones = catalog.devices.filter { recorded.contains($0.udid) && Self.busyOwner(of: $0.udid, env) == nil }
         var problems = clones.filter { !$0.isAvailable }.map { device in
             DoctorProblem(check: id, message: "\(device.name) (\(device.udid)) is unavailable; its runtime may have been removed",
-                          action: .deleteSimulator, fix: "delete it; it is cloned again on next use", subject: device.udid)
+                          action: .deleteSimulator, fix: "delete it; it is cloned again on next use", subject: device.udid,
+                          projectRoot: Self.recorder(of: device.udid, env)?.projectRoot)
         }
         let settling = clones.filter {
             $0.isAvailable && Self.transient.contains($0.state) && (env.fixing || $0.state != "Booting")
@@ -217,7 +145,7 @@ public struct StuckClonesCheck: DoctorCheck {
             problems.append(DoctorProblem(check: id, message: "\(device.name) (\(device.udid)) is stuck in \(now.state)",
                                           action: .shutDownSimulator,
                                           fix: "if it is still stuck in \(Self.settleMinutes) minutes, shut it down, or delete it if that fails (it is cloned again on next use)",
-                                          subject: device.udid))
+                                          subject: device.udid, projectRoot: Self.recorder(of: device.udid, env)?.projectRoot))
         }
         return problems
     }
@@ -242,9 +170,16 @@ public struct StuckClonesCheck: DoctorCheck {
 
     /// The worktree recording `udid` whose `wt create` or `wt remove` is running, if any.
     static func busyOwner(of udid: String, _ env: DoctorEnvironment) -> RegistryEntry? {
-        env.registry.first { entry in
-            env.isBusy(entry) && env.states[entry.id]?.devices.values.contains { $0.udid == udid } == true
-        }
+        env.registry.first { env.isBusy($0) && records($0, udid, env) }
+    }
+
+    /// The worktree that records `udid`.
+    static func recorder(of udid: String, _ env: DoctorEnvironment) -> RegistryEntry? {
+        env.registry.first { records($0, udid, env) }
+    }
+
+    static func records(_ entry: RegistryEntry, _ udid: String, _ env: DoctorEnvironment) -> Bool {
+        env.states[entry.id]?.devices.values.contains { $0.udid == udid } == true
     }
 
     public func fix(_ problem: DoctorProblem, _ env: DoctorEnvironment) async throws {

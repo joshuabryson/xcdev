@@ -27,6 +27,7 @@ import XcdevTestSupport
         let report = await service.run(fix: false, from: nil)
         let check = try #require(report.checks.first { $0.id == "recordings" })
         #expect(check.problems.map(\.action) == [.forgetRecording, .stopRecording])
+        #expect(check.problems.allSatisfy { $0.projectRoot == ctx.location.projectRoot })
         #expect(check.problems[1].message.contains("has been recording overdue for 1h00m"))
         #expect(check.inProgress.count == 1 && check.inProgress[0].contains("is recording fresh to "))
         #expect(detached.stops.isEmpty)

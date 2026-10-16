@@ -44,7 +44,7 @@ import XcdevTestSupport
         #expect(report.checks.map(\.id).suffix(4) == ["quality-setup", "quality-tools", "project", "swiftlint"])
         #expect(report.problems.filter { $0.check == "quality-setup" } == [
             DoctorProblem(check: "quality-setup", message: Self.problem, action: .addLintSection, fix: Self.fix,
-                          subject: project.root + "/.xcdev.yml", done: Self.done)])
+                          subject: project.root + "/.xcdev.yml", done: Self.done).inProject(project.root)])
         #expect(!report.text.contains("added `lint:"))
         #expect(report.text.contains("problem  quality-setup  \(Self.problem)  (--fix: \(Self.fix))"))
         #expect(try config(project) == Self.base)                               // reported only, without --fix
@@ -127,7 +127,7 @@ import XcdevTestSupport
         let report = await doctor(project).run(fix: true, checks: [missing], from: project.root)
         #expect(report.problems == [DoctorProblem(check: "quality-tools",
                                                   message: "swiftlint is not installed: it is not in PATH, /opt/homebrew/bin, or /usr/local/bin",
-                                                  next: "brew install swiftlint, or set lint.path in .xcdev.local.yml")])
+                                                  next: "brew install swiftlint, or set lint.path in .xcdev.local.yml").inProject(project.root)])
         #expect(report.failure?.next == "brew install swiftlint, or set lint.path in .xcdev.local.yml")
 
         let found = QualityToolsCheck(locator: try locator(project, installed: true))
