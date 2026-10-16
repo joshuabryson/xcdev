@@ -115,12 +115,17 @@ struct DeepLinksIntegrationTests {
             #expect(warm.check?.outcome == .appeared && warm.failure == nil, "\(warm.text)")
             #expect(try await arrival(of: "sampleapp://sample/item?id=43", &ctx, svc) == "warm")
 
-            // An `expect` that any link satisfies was on screen already, so it proves nothing, and the result says so.
-            // The link is still sent, encoded.
+            // An `expect` that any link satisfies was on screen already, so it proves nothing: the command fails with
+            // `arrival_unproven`, and says to name a parameter. The link is still sent, encoded.
             let vague = try await svc.routes.open(.route(name: "shown", values: ["id": "a b", "tab": "notes"]), OpenOptions(), in: &ctx)
-            #expect(vague.check?.outcome == .inconclusive && vague.failure == nil, "\(vague.text)")
+            #expect(vague.check?.outcome == .inconclusive && vague.failure?.code == .arrivalUnproven, "\(vague.text)")
             #expect(vague.check?.reason == "id:arrivalValue was already on screen", "\(vague.text)")
+            #expect(vague.failure?.next?.hasSuffix("such as \"label~{id}\"") == true, "\(vague.text)")
             #expect(try await arrival(of: "sampleapp://sample/item?id=a%20b&tab=notes", &ctx, svc) == "warm")
+
+            // With --cold the link itself starts the app, so the same element is seen to arrive.
+            let proven = try await svc.routes.open(.route(name: "shown", values: ["id": "c d"]), OpenOptions(cold: true), in: &ctx)
+            #expect(proven.app?.state == .startedByLink && proven.check?.outcome == .appeared && proven.failure == nil, "\(proven.text)")
 
             // A launch route restarts the app with its arguments.
             let launched = try await svc.routes.open(.route(name: "start", values: ["step": "3"]), OpenOptions(), in: &ctx)
