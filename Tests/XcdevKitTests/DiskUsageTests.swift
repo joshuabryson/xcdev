@@ -39,7 +39,7 @@ import XcdevTestSupport
     @Test func worktreeListShowsEachWorktreesStateFolderSize() async throws {
         let project = try TempProject.make(config: WorktreeServiceTests.config)
         defer { project.remove() }
-        let svc = WorktreeService(runner: RoutingRunner(fake: FakeProcessRunner(), realExecutables: ["git", "cp", "du"]),
+        let svc = WorktreeService(runner: RoutingRunner(fake: FakeProcessRunner(), realExecutables: ["git", "cp", "mv", "du"]),
                                   globalPaths: GlobalPaths(base: project.home))
         let main = try await svc.open(from: project.root)
         try Data(count: 200_000).write(to: URL(fileURLWithPath: main.paths.logs + "-blob"))

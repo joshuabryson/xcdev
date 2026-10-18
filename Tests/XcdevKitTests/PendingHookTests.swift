@@ -15,7 +15,7 @@ import XcdevTestSupport
         + "overwrite: ask the user. It runs on the first xcd command at which the worktree has none."
 
     let fake = FakeProcessRunner()
-    var routing: RoutingRunner { RoutingRunner(fake: fake, realExecutables: ["git", "cp", "sh"]) }
+    var routing: RoutingRunner { RoutingRunner(fake: fake, realExecutables: ["git", "cp", "mv", "sh"]) }
 
     func service(_ project: TempProject) -> WorktreeService {
         WorktreeService(runner: routing, globalPaths: GlobalPaths(base: project.home), hooks: HookRunner(runner: routing))
@@ -62,6 +62,7 @@ import XcdevTestSupport
         let error = await #expect(throws: XcdError.self) { try await service(project).open(from: path) }
         #expect(error?.code == .hookFailed)
         #expect(error?.next == FirstUseSetup.failedNext)
+        #expect(FirstUseSetup.failedNext.contains("`hooks: { post-worktree-create: \"\" }` in its .xcdev.local.yml, which then replaces the main checkout's .xcdev.local.yml here"))
         #expect(try WorktreeStateStore.load(WorktreePaths(root: path))?.hookPending == true)
         try FileManager.default.removeItem(atPath: project.base + "/fail")
         _ = try await service(project).open(from: path)
@@ -132,5 +133,46 @@ import XcdevTestSupport
         #expect(main.state.hookPending == nil)
         let made = try await svc.create(name: "made", in: main)
         #expect(made.state.hookPending == nil && runs(project) == ["post-worktree-create made"])
+    }
+
+    @Test func aBorrowingWorktreeStaysPendingWhateverTheMainConfigHasAndRunsNothing() async throws {
+        let project = try TempProject.make(config: WorktreeServiceTests.config)
+        defer { project.remove() }
+        let path = try BorrowedConfigTests.worktreeWithoutConfig(project)
+        #expect(try await service(project).open(from: path).state.hookPending == true)
+        #expect(try await service(project).open(from: path).state.hookPending == true)
+        #expect(runs(project).isEmpty)
+    }
+
+    @Test func anOwnHookThatIsBlankIsNoHook() async throws {
+        let project = try TempProject.make(config: WorktreeServiceTests.config + "\nhooks:\n  post-worktree-create: ' '\n")
+        defer { project.remove() }
+        let state = try await service(project).open(from: try worktree(project), runsPendingHook: false).state
+        #expect(state.hookPending == nil)
+    }
+
+    @Test func aLocalEmptyOverrideClearsAFailingPendingHookWithoutRunningIt() async throws {
+        let project = try TempProject.make(config: Self.config)
+        defer { project.remove() }
+        let path = try worktree(project)
+        try project.write("", to: "fail", in: project.base)
+        _ = await #expect(throws: XcdError.self) { try await service(project).open(from: path) }
+        try project.write("hooks:\n  post-worktree-create: \"\"\n", to: ".xcdev.local.yml", in: path)
+        try FileManager.default.removeItem(atPath: project.base + "/fail")
+        #expect(try await service(project).open(from: path).state.hookPending == nil)
+        #expect(runs(project).isEmpty)
+    }
+
+    @Test func aStateRemovedWhileTheCommandWaitedFailsInsteadOfBeingSavedAgain() async throws {
+        let project = try TempProject.make(config: Self.config)
+        defer { project.remove() }
+        let svc = service(project)
+        let path = try worktree(project)
+        let ctx = try await svc.open(from: path, runsPendingHook: false)
+        #expect(ctx.state.hookPending == true)
+        try FileManager.default.removeItem(atPath: path + "/.xcdev/worktree.json")
+        let error = await #expect(throws: XcdError.self) { try await FirstUseSetup(service: svc).runPendingHook(ctx) }
+        #expect(error?.code == .worktreeNotFound)
+        #expect(!FileManager.default.fileExists(atPath: path + "/.xcdev/worktree.json"))
     }
 }

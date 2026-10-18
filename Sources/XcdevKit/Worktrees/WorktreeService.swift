@@ -69,7 +69,7 @@ public struct WorktreeService: Sendable {
         }
     }
 
-    /// Runs a new checkout's hook and marks it ready, outside the per-project lock; rolls it back when either fails.
+    /// Runs a new checkout's hook outside the per-project lock, then marks it ready under it; rolls it back when either fails.
     private func finish(_ checkout: Checkout, in ctx: WorktreeContext) async throws -> WorktreeState {
         let projectRoot = ctx.location.projectRoot
         do {
@@ -122,16 +122,6 @@ public struct WorktreeService: Sendable {
         String(lockPath(projectRoot: projectRoot).dropLast(".lock".count)) + "--" + worktree + ".lock"
     }
 
-    /// The checkout's own config, which its hooks (and their scripts) come from, or nil when it has no
-    /// .xcdev.yml. Never the caller's config: the hook's script may not exist on this checkout's branch.
-    func hookConfig(worktree: String, projectRoot: String) throws -> XcdevConfig? {
-        do {
-            return try ConfigLoader.load(worktreeRoot: worktree, projectRoot: projectRoot)
-        } catch let error as XcdError where error.code == .configMissing {
-            return nil
-        }
-    }
-
     /// Runs the new checkout's `post-worktree-create`, logging to the calling worktree so the log survives a rollback.
     private func runPostCreateHook(_ state: WorktreeState, in ctx: WorktreeContext) async throws {
         guard let hooks, let config = try hookConfig(worktree: state.path, projectRoot: ctx.location.projectRoot) else {
@@ -150,7 +140,7 @@ public struct WorktreeService: Sendable {
 
     private func addCheckout(name: String, from ref: String?, in ctx: WorktreeContext) async throws -> Checkout {
         let projectRoot = ctx.location.projectRoot
-        let existing = try registry.entries().first(where: { $0.projectRoot == projectRoot && $0.name == name })
+        let existing = try checkName(name, in: ctx)
         if let existing, existing.status == .ready, FileManager.default.fileExists(atPath: existing.path) {
             return Checkout(state: try await reopen(existing), created: false, branchCreated: false)
         }
@@ -205,11 +195,14 @@ public struct WorktreeService: Sendable {
 
     /// The project's resolved packages are copied into a new checkout, so it doesn't resolve them again.
     func seedSourcePackages(from projectRoot: String, into paths: WorktreePaths) async throws {
+        Disk.remove(paths.partialSourcePackages)
         let seed = WorktreePaths(root: projectRoot).sourcePackages
         guard FileManager.default.fileExists(atPath: seed) else { return }
         guard !Disk.exists(paths.sourcePackages) else { return }
-        // APFS clonefile copy: instant and space-free until files diverge.
-        try await runner.runChecked(Invocation("/bin/cp", ["-c", "-R", seed, paths.sourcePackages]))
+        // APFS clonefile copy: instant and space-free until files diverge. Copied beside it and moved in, so an
+        // interrupted copy never looks like the packages.
+        try await runner.runChecked(Invocation("/bin/cp", ["-c", "-R", seed, paths.partialSourcePackages]))
+        try await runner.runChecked(Invocation("/bin/mv", [paths.partialSourcePackages, paths.sourcePackages]))
     }
 
     /// Undoes a creation attempt: only what it created, never a checkout or branch that was already there.

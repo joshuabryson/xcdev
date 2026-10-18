@@ -9,7 +9,7 @@ import XcdevTestSupport
     /// A project whose committed .xcdev.yml has `hooks`, with git, cp, and sh run for real.
     func setup(hooks: String) async throws -> (TempProject, WorktreeService, WorktreeContext) {
         let project = try TempProject.make(config: WorktreeServiceTests.config + "\nhooks:\n" + hooks)
-        let runner = RoutingRunner(fake: fake, realExecutables: ["git", "cp", "sh"])
+        let runner = RoutingRunner(fake: fake, realExecutables: ["git", "cp", "mv", "sh"])
         let svc = WorktreeService(runner: runner, globalPaths: GlobalPaths(base: project.home),
                                   hooks: HookRunner(runner: runner))
         return (project, svc, try await svc.open(from: project.root))
@@ -155,7 +155,7 @@ import XcdevTestSupport
     func setupWithFakeHooks() async throws -> (TempProject, WorktreeService, WorktreeContext, FakeSimulators) {
         let project = try TempProject.make(config: WorktreeServiceTests.config
             + "\nhooks:\n  post-worktree-create: ./bootstrap.sh\n  pre-worktree-remove: ./teardown.sh\n")
-        let runner = RoutingRunner(fake: fake, realExecutables: ["git", "cp"])
+        let runner = RoutingRunner(fake: fake, realExecutables: ["git", "cp", "mv"])
         let svc = WorktreeService(runner: runner, globalPaths: GlobalPaths(base: project.home),
                                   hooks: HookRunner(runner: runner))
         let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))

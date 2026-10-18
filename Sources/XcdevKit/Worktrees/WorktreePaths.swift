@@ -25,6 +25,8 @@ public struct WorktreePaths: Sendable, Equatable {
     public var stateFile: String { stateDirectory + "/worktree.json" }
     public var derivedData: String { stateDirectory + "/DerivedData" }
     public var sourcePackages: String { stateDirectory + "/SourcePackages" }
+    /// Where the packages are copied to before they are moved to `sourcePackages`.
+    public var partialSourcePackages: String { sourcePackages + ".partial" }
     public var logs: String { stateDirectory + "/logs" }
     public var results: String { stateDirectory + "/results" }
 

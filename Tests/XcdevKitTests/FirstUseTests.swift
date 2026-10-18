@@ -134,4 +134,31 @@ import XcdevTestSupport
         #expect(try WorktreeStateStore.load(ctx.paths) != nil)
         #expect(svc.notes.all == [FirstUseSetup.packagesNotCopied])
     }
+
+    /// A worktree with a leftover `SourcePackages.partial` (and `own` files already in its `SourcePackages`), opened.
+    func openWithLeftover(_ project: TempProject, own: Bool) async throws -> String {
+        try project.write("pin\n", to: ".xcdev/SourcePackages/workspace-state.json")
+        let path = try plainWorktree(project, at: "codex/a1b2/pkg")
+        if own { try project.write("theirs\n", to: ".xcdev/SourcePackages/theirs.json", in: path) }
+        try project.write("half\n", to: ".xcdev/SourcePackages.partial/half.json", in: path)
+        _ = try await service(project).open(from: path)
+        #expect(!FileManager.default.fileExists(atPath: path + "/.xcdev/SourcePackages.partial"))
+        return path + "/.xcdev/SourcePackages/"
+    }
+
+    @Test func aLeftoverPartialCopyBesideExistingPackagesIsRemovedAndThePackagesAreKept() async throws {
+        let project = try TempProject.make(config: WorktreeServiceTests.config)
+        defer { project.remove() }
+        let packages = try await openWithLeftover(project, own: true)
+        #expect(FileManager.default.fileExists(atPath: packages + "theirs.json"))
+    }
+
+    /// A copy Ctrl-C cut short leaves `SourcePackages.partial`, which the next first use removes before copying again.
+    @Test func aLeftoverPartialCopyIsRemovedAndThePackagesAreCopied() async throws {
+        let project = try TempProject.make(config: WorktreeServiceTests.config)
+        defer { project.remove() }
+        let packages = try await openWithLeftover(project, own: false)
+        #expect(FileManager.default.fileExists(atPath: packages + "workspace-state.json"))
+        #expect(!FileManager.default.fileExists(atPath: packages + "half.json"))
+    }
 }

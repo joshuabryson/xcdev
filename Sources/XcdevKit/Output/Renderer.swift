@@ -26,6 +26,14 @@ public enum Renderer {
         notes.map { "note: \($0)\n" }.joined()
     }
 
+    /// What a result whose text is data writes to stderr: its notes, then the `next:` of its failure. Empty for any
+    /// other result and in JSON, which carry both in the report.
+    public static func standardErrorLines<P: Reportable>(for payload: P, format: OutputFormat,
+                                                         notes: [String] = Notes.current?.all ?? []) -> String {
+        guard format == .text, payload.textIsData else { return "" }
+        return noteLines(notes) + (payload.failure?.next.map { "next: \($0)\n" } ?? "")
+    }
+
     /// A failure: the code and message, the details, the command's notes (as in `report`), then `next:`.
     public static func failure(_ error: XcdError, command: String, worktree: String? = nil,
                                format: OutputFormat, notes: [String] = Notes.current?.all ?? []) -> String {

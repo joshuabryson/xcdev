@@ -22,7 +22,7 @@ import XcdevTestSupport
         defer { project.remove() }
         try FileManager.default.createDirectory(atPath: project.root + "/.xcdev-media/main/main", withIntermediateDirectories: true)
         try Data(count: 300_000).write(to: URL(fileURLWithPath: project.root + "/.xcdev-media/main/main/a.png"))
-        let service = DoctorService(runner: RoutingRunner(fake: fake, realExecutables: ["git", "cp", "du"]),
+        let service = DoctorService(runner: RoutingRunner(fake: fake, realExecutables: ["git", "cp", "mv", "du"]),
                                     globalPaths: GlobalPaths(base: project.home),
                                     discovery: XcodeDiscovery(runner: fake, applicationsDirectories: []))
         let disk = try #require(await service.run(fix: false, from: nil).disk)

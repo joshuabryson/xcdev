@@ -10,9 +10,10 @@ command, the project's own commands (from `.xcdev.yml`), and installed plugins.
   simulator clones and build folder on its first command. The main checkout gets clones of its own too, apart from the
   user's simulators.
 - Make another worktree (`xcd wt create <name>`) only when the user asks for one, then work in the path it prints.
-- `xcd wt status` shows what xcd set up here: the checkout's name, branch, pinned Xcode, and clones. `hook=pending` means the project's `post-worktree-create` hook has not run in this checkout yet: it runs
-  on the first xcd command that does more than look, once the branch has its own `.xcdev.yml` and the worktree has no
-  uncommitted changes.
+- `xcd wt status` shows what xcd set up here: the checkout's name, branch, pinned Xcode, and clones. `hook=pending`
+  means the project's `post-worktree-create` hook has not run in this checkout yet: it runs on the first xcd command
+  that works in the checkout (any but `wt`, `config`, `context`, `doctor`, `prune`, `guide`, `help`, and `init`), once the
+  branch has its own `.xcdev.yml` and the worktree has no uncommitted changes.
 - A `note:` saying the branch has no `.xcdev.yml` means xcd is using the main checkout's. Its hooks don't run here until
   the branch has its own.
 - A `note:` saying `post-worktree-create` hasn't run because the worktree has uncommitted changes means: ask the user.

@@ -51,7 +51,7 @@ public struct RoutingRunner: ProcessRunning {
     public let realExecutables: Set<String>
     private let real = SystemProcessRunner()
 
-    public init(fake: FakeProcessRunner, realExecutables: Set<String> = ["git", "cp"]) {
+    public init(fake: FakeProcessRunner, realExecutables: Set<String> = ["git", "cp", "mv"]) {
         self.fake = fake
         self.realExecutables = realExecutables
     }

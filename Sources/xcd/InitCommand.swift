@@ -28,7 +28,7 @@ struct InitCommand: AsyncParsableCommand {
             try await Emit.run("init", options) { services in try await services.setup.plan(from: services.currentDirectory) }
         } else {
             try await Emit.run("init", options) { services in
-                try await services.setup.write(answers: try InitAnswers.parse(answers), force: force,
+                try await services.setup.write(answers: try InitAnswers.parse(answers), force: force, defaults: defaults,
                                                from: services.currentDirectory)
             }
         }

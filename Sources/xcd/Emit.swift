@@ -19,7 +19,7 @@ enum Emit {
         do {
             let result = try await body(services)
             await services.interrupts.output { print(Renderer.report(result, command: command, format: format)) }
-            if format == .text, result.textIsData { StandardError.write(Renderer.noteLines()) }
+            StandardError.write(Renderer.standardErrorLines(for: result, format: format))
             if let failure = result.failure { throw ExitCode(failure.code.exitCode) }
         } catch let exit as ExitCode {
             await services.interrupts.output {}                              // the handler's code wins

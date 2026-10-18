@@ -7,6 +7,12 @@ private struct DataText: Reportable {
     var textIsData: Bool { true }
 }
 
+private struct FailedData: Reportable {
+    var text: String { "/c" }
+    var textIsData: Bool { true }
+    var failure: XcdError? { XcdError(.usage, "no container", next: "launch the app first") }
+}
+
 private struct OwnNext: Reportable {
     var text: String { "app  state=not_running\nnext: start the app with `xcd run` or `xcd launch`" }
 }
@@ -26,6 +32,14 @@ private struct FailedBuild: Reportable {
 
 @Suite struct NotesTests {
     static let borrowed = "this branch has no .xcdev.yml, so xcd uses the main checkout's (/p/.xcdev.yml)"
+
+    @Test func aFailedDataResultIsItsTextAloneAndItsNextGoesToStandardError() {
+        #expect(Renderer.report(FailedData(), command: "sim container", format: .text, notes: ["x"]) == "/c")
+        #expect(Renderer.standardErrorLines(for: FailedData(), format: .text, notes: ["x"]) == "note: x\nnext: launch the app first\n")
+        #expect(Renderer.standardErrorLines(for: DataText(), format: .text, notes: ["x"]) == "note: x\n")
+        #expect(Renderer.standardErrorLines(for: FailedData(), format: .json, notes: ["x"]) == "")
+        #expect(Renderer.standardErrorLines(for: Built(name: "a"), format: .text, notes: ["x"]) == "")
+    }
 
     @Test func aNoteIsKeptOnceInTheOrderAdded() {
         let notes = Notes()
