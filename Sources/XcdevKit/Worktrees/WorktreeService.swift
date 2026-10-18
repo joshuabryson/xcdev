@@ -37,69 +37,6 @@ public struct WorktreeService: Sendable {
 
     var registry: Registry { Registry(paths: globalPaths) }
 
-    /// Opens the worktree containing `directory`, or the project's worktree named `worktreeName`.
-    /// First use of a checkout (main, or one made with plain git) initializes its state.
-    public func open(from directory: String, worktreeName: String? = nil) async throws -> WorktreeContext {
-        var location = try await WorktreeLocator(runner: runner).locate(from: directory)
-        if let worktreeName {
-            let root = worktreeName == "main"
-                ? location.projectRoot
-                : try entry(named: worktreeName, projectRoot: location.projectRoot).path
-            guard FileManager.default.fileExists(atPath: root) else {
-                throw XcdError(.worktreeNotFound, "worktree '\(worktreeName)' was deleted outside xcd",
-                               next: "run `xcd wt remove \(worktreeName)` to clean it up")
-            }
-            location = ProjectLocation(projectRoot: location.projectRoot, worktreeRoot: root)
-        }
-        let config = try ConfigLoader.load(worktreeRoot: location.worktreeRoot, projectRoot: location.projectRoot)
-        let paths = WorktreePaths(root: location.worktreeRoot)
-        if let state = try WorktreeStateStore.load(paths) {
-            return WorktreeContext(location: location, config: config, state: state)
-        }
-        let state = WorktreeState(
-            id: UUID().uuidString,
-            name: location.isMain ? "main" : URL(fileURLWithPath: location.worktreeRoot).lastPathComponent,
-            project: location.projectName, projectRoot: location.projectRoot, path: location.worktreeRoot,
-            branch: await currentBranch(at: location.worktreeRoot), xcode: nil, devices: [:],
-            status: .ready, createdAt: Date())
-        try WorktreeStateStore.save(state, paths)
-        try await registry.upsert(RegistryEntry(state))
-        return WorktreeContext(location: location, config: config, state: state)
-    }
-
-    /// Registered worktrees for one project, or for all projects when `projectRoot` is nil.
-    public func list(projectRoot: String?) throws -> [RegistryEntry] {
-        try registry.entries()
-            .filter { projectRoot == nil || $0.projectRoot == projectRoot }
-            .sorted { ($0.project, $0.name) < ($1.project, $1.name) }
-    }
-
-    /// `list` plus each worktree's branch, clones, their boot state, and the size of its `.xcdev/` folder.
-    /// Boot state comes from one `simctl list` call (skipped when no worktree has clones); if it fails, states
-    /// are "unknown". Sizes come from one `du` call; if it fails, sizes are left out.
-    public func listDetails(projectRoot: String?) async throws -> [WorktreeListItem] {
-        let fm = FileManager.default
-        let loaded = try list(projectRoot: projectRoot).map { entry -> (RegistryEntry, WorktreeState?, Bool) in
-            let exists = fm.fileExists(atPath: entry.path)
-            let state = exists ? (try? WorktreeStateStore.load(WorktreePaths(root: entry.path))) ?? nil : nil
-            return (entry, state, exists)
-        }
-        var catalog: SimCatalog?
-        if loaded.contains(where: { !($0.1?.devices.isEmpty ?? true) }) {
-            catalog = try? await SimctlClient(runner: runner, developerDir: nil).catalog()
-        }
-        let sizes = await DiskUsage(runner: runner).bytes(of: loaded.filter(\.2).map { WorktreePaths(root: $0.0.path).stateDirectory })
-        return loaded.map { entry, state, exists in
-            let devices = (state?.devices ?? [:]).sorted { $0.key < $1.key }.map { name, device in
-                let simState = catalog.map { $0.device(udid: device.udid)?.state ?? "gone" } ?? "unknown"
-                return WorktreeListItem.Device(name: name, udid: device.udid, state: simState)
-            }
-            let status: WorktreeListItem.Status = !exists ? .missing : entry.status == .ready ? .ready : .incomplete
-            return WorktreeListItem(entry: entry, status: status, branch: state?.branch, devices: devices,
-                                    diskBytes: sizes[WorktreePaths(root: entry.path).stateDirectory])
-        }
-    }
-
     public func worktreesDirectory(for ctx: WorktreeContext) -> String {
         let template = ctx.config.worktreesRoot.replacingOccurrences(of: "{project}", with: ctx.location.projectName)
         let absolute = template.hasPrefix("/") ? template : ctx.location.projectRoot + "/" + template
@@ -122,37 +59,49 @@ public struct WorktreeService: Sendable {
                 try await addCheckout(name: name, from: ref, in: ctx)
             }
             guard checkout.created else { return (checkout.state, false) }
-            let state = checkout.state
-            do {
-                try await runPostCreateHook(state, in: ctx)
-                return (try await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) {
-                    // Reload: the hook may have run xcd in the new worktree, pinning an Xcode or cloning a simulator.
-                    let paths = WorktreePaths(root: state.path)
-                    var ready = try WorktreeStateStore.load(paths) ?? state
-                    ready.status = .ready
-                    try WorktreeStateStore.save(ready, paths)
-                    try await registry.upsert(RegistryEntry(ready))
-                    return ready
-                }, true)
-            } catch {
-                _ = try? await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) {
-                    await rollBack(state, worktreeAdded: true, branchCreated: checkout.branchCreated)
-                }
-                guard var error = error as? XcdError else { throw error }
-                switch error.code {
-                case .hookFailed:
-                    error.next = "fix hooks.post-worktree-create (its output is in the log), then re-run `xcd wt create \(name)`"
-                case .configInvalid:
-                    error.next = "fix .xcdev.yml on branch '\(name)', then re-run `xcd wt create \(name)`"
-                default:
-                    break
-                }
-                error.details.append(checkout.branchCreated
-                    ? "the worktree was not created: its checkout and branch were rolled back"
-                    : "the worktree was not created: its checkout was rolled back, and branch '\(name)', which already existed, was kept")
-                throw error
-            }
+            return (try await finish(checkout, in: ctx), true)
         }
+    }
+
+    /// Runs a new checkout's hook and marks it ready, outside the per-project lock; rolls it back when either fails.
+    private func finish(_ checkout: Checkout, in ctx: WorktreeContext) async throws -> WorktreeState {
+        let projectRoot = ctx.location.projectRoot
+        do {
+            try await runPostCreateHook(checkout.state, in: ctx)
+            return try await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) { try await markReady(checkout.state) }
+        } catch {
+            _ = try? await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) {
+                await rollBack(checkout.state, worktreeAdded: true, branchCreated: checkout.branchCreated)
+            }
+            throw Self.notCreated(error, name: checkout.state.name, branchCreated: checkout.branchCreated)
+        }
+    }
+
+    /// Reloads the state first: the hook may have run xcd in the new worktree, pinning an Xcode or cloning a simulator.
+    private func markReady(_ state: WorktreeState) async throws -> WorktreeState {
+        let paths = WorktreePaths(root: state.path)
+        var ready = try WorktreeStateStore.load(paths) ?? state
+        ready.status = .ready
+        try WorktreeStateStore.save(ready, paths)
+        try await registry.upsert(RegistryEntry(ready))
+        return ready
+    }
+
+    /// A failed create's error, saying what to fix and what the rollback kept.
+    static func notCreated(_ error: any Error, name: String, branchCreated: Bool) -> any Error {
+        guard var error = error as? XcdError else { return error }
+        switch error.code {
+        case .hookFailed:
+            error.next = "fix hooks.post-worktree-create (its output is in the log), then re-run `xcd wt create \(name)`"
+        case .configInvalid:
+            error.next = "fix .xcdev.yml on branch '\(name)', then re-run `xcd wt create \(name)`"
+        default:
+            break
+        }
+        error.details.append(branchCreated
+            ? "the worktree was not created: its checkout and branch were rolled back"
+            : "the worktree was not created: its checkout was rolled back, and branch '\(name)', which already existed, was kept")
+        return error
     }
 
     /// The per-project lock that serializes create and remove across processes.
@@ -210,29 +159,34 @@ public struct WorktreeService: Sendable {
         if let existing { try await discardStale(existing, projectRoot: projectRoot) }
 
         let path = worktreesDirectory(for: ctx) + "/" + name
-        var state = WorktreeState(id: UUID().uuidString, name: name, project: ctx.location.projectName,
+        let state = WorktreeState(id: UUID().uuidString, name: name, project: ctx.location.projectName,
                                   projectRoot: projectRoot, path: path, branch: name, xcode: nil, devices: [:],
                                   status: .incomplete, createdAt: Date())
         try await registry.upsert(RegistryEntry(state))
+        return try await addWorktree(state, branchExists: branchExists, from: ref)
+    }
+
+    /// Adds the git worktree of a registered `incomplete` state, saves the state in it, and seeds its packages. Rolls
+    /// back what it made when a step fails.
+    private func addWorktree(_ incomplete: WorktreeState, branchExists: Bool, from ref: String?) async throws -> Checkout {
+        var state = incomplete
         var worktreeAdded = false
-        var branchCreated = false
         do {
             let args = branchExists
-                ? ["worktree", "add", path, name]
-                : ["worktree", "add", "-b", name, path, ref ?? "HEAD"]
-            var add = Invocation.git(args, in: projectRoot)
+                ? ["worktree", "add", state.path, state.name]
+                : ["worktree", "add", "-b", state.name, state.path, ref ?? "HEAD"]
+            var add = Invocation.git(args, in: state.projectRoot)
             add.timeout = .seconds(600)          // checking out a large repo can take minutes
             try await runner.runChecked(add,
                                         next: "check that the --from ref exists and the branch isn't checked out elsewhere")
             worktreeAdded = true
-            branchCreated = !branchExists
-            state.path = Paths.canonical(path)
+            state.path = Paths.canonical(state.path)
             let paths = WorktreePaths(root: state.path)
             try WorktreeStateStore.save(state, paths)
-            try await seedSourcePackages(from: projectRoot, into: paths)
-            return Checkout(state: state, created: true, branchCreated: branchCreated)
+            try await seedSourcePackages(from: state.projectRoot, into: paths)
+            return Checkout(state: state, created: true, branchCreated: !branchExists)
         } catch {
-            await rollBack(state, worktreeAdded: worktreeAdded, branchCreated: branchCreated)
+            await rollBack(state, worktreeAdded: worktreeAdded, branchCreated: worktreeAdded && !branchExists)
             throw error
         }
     }
@@ -423,43 +377,5 @@ extension WorktreeService {
         return WorktreeRemoval(name: name, project: ctx.location.projectName, path: entry.path, branch: state?.branch ?? name,
                                removedDevices: removedDevices, stateMissing: state == nil,
                                stoppedRecordings: stopped.map(\.note), stoppedRunners: runners, warnings: warnings)
-    }
-}
-
-/// One row of `xcd wt list`.
-public struct WorktreeListItem: Codable, Sendable, Equatable {
-    public enum Status: String, Codable, Sendable { case ready, incomplete, missing }
-
-    public struct Device: Codable, Sendable, Equatable {
-        public let name: String
-        public let udid: String
-        /// simctl's state ("Booted", "Shutdown", …), "gone" if the clone no longer exists, or "unknown".
-        public let state: String
-
-        public init(name: String, udid: String, state: String) {
-            self.name = name
-            self.udid = udid
-            self.state = state
-        }
-    }
-
-    public let project: String
-    public let name: String
-    public let path: String
-    public let status: Status
-    public let branch: String?
-    /// Sorted by name.
-    public let devices: [Device]
-    /// Size of the worktree's `.xcdev/` folder (DerivedData, logs, results), when known.
-    public let diskBytes: Int64?
-
-    public init(entry: RegistryEntry, status: Status, branch: String?, devices: [Device], diskBytes: Int64? = nil) {
-        project = entry.project
-        name = entry.name
-        path = entry.path
-        self.status = status
-        self.branch = branch
-        self.devices = devices
-        self.diskBytes = diskBytes
     }
 }
