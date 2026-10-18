@@ -36,6 +36,7 @@ public struct InitService: Sendable {
         var plan = try await makePlan(location, container: nil)
         plan = plan.adding(await quality.lintDecision(in: root))
             .adding(await quality.formatDecision(in: root, developerDir: plan.selectedXcode?.developerDir))
+        if let agents = AgentsInit(root: root).decision { plan = plan.adding(agents) }
         let exists = configExists(root)
         if let note = swiftLintNote(in: root, configExists: exists) { plan = plan.noting(note) }
         return InitPlanReport(plan: plan, root: root, configExists: exists)
@@ -61,20 +62,39 @@ public struct InitService: Sendable {
         if configExists(root), !force {
             guard answers.isEmpty else {
                 throw XcdError(.usage, "\(ConfigLoader.fileName) already exists, so these answers were not applied",
-                               next: "re-run with --force to replace it: `xcd init --force --set …`")
+                               next: "re-run with --force to replace it: `xcd init --force --set …`; "
+                                   + "to write only xcd's block into AGENTS.md or CLAUDE.md, run `xcd init --agents`")
             }
             return unchanged(path: path, root: root)
         }
         let plan = try await makePlan(location, container: answers["project"])
         let linter = try QualityInit.chosen(answers, from: await quality.lintDecision(in: root))
         let formatter = try QualityInit.chosen(answers, from: await quality.formatDecision(in: root, developerDir: plan.selectedXcode?.developerDir))
-        let rest = answers.filter { !QualityInit.keys.contains($0.key) }
+        try AgentsInit(root: root).check(answer: answers[AgentsInit.key])
+        let rest = answers.filter { !QualityInit.keys.contains($0.key) && $0.key != AgentsInit.key }
         let generated = try QualityInit.adding(lint: linter, format: formatter, to: plan.config(answers: rest))
         try generated.yaml.write(toFile: path, atomically: true, encoding: .utf8)
         let added = try Gitignore.ensure([".xcdev/", ConfigLoader.localFileName, ".xcdev-media/"], in: root)
         var report = InitReport(status: .written, path: path, summary: generated.summary, gitignoreAdded: added)
         excludeFromSwiftLint(in: root, &report)
+        report.agents = try AgentsInit(root: root).install(answer: answers[AgentsInit.key])
         return report
+    }
+
+    /// `xcd init --agents`: writes only xcd's block into AGENTS.md and CLAUDE.md, as `init` does, and leaves .xcdev.yml
+    /// alone. With neither file, the user decides which to make.
+    public func installAgents(answers: [String: String], from directory: String) async throws -> AgentsReport {
+        let location = try await WorktreeLocator(runner: runner).locate(from: directory)
+        let agents = AgentsInit(root: location.worktreeRoot)
+        if let other = answers.keys.sorted().first(where: { $0 != AgentsInit.key }) {
+            throw XcdError(.usage, "--agents writes only xcd's block, so it takes no answer for \(other)",
+                           next: "run `xcd init --agents --set agents=<\(AgentsInit.options.joined(separator: "|"))>`")
+        }
+        if agents.decision != nil, answers[AgentsInit.key] == nil {
+            throw XcdError(.usage, "this project has neither AGENTS.md nor CLAUDE.md",
+                           next: "ask the user which files should hold xcd's block, then run `xcd init --agents --set agents=<both|AGENTS.md|CLAUDE.md>`")
+        }
+        return AgentsReport(agents: try agents.install(answer: answers[AgentsInit.key]))
     }
 
     /// What `init` reports when it keeps the .xcdev.yml that is there. It changes nothing then, so a .swiftlint.yml
@@ -176,12 +196,21 @@ public struct InitReport: Reportable {
     /// What was added to the `excluded` list of the project's .swiftlint.yml: `.xcdev`, or nothing.
     public var swiftlintExcluded: [String] = []
     public var warnings: [String] = []
+    /// What writing xcd's block into AGENTS.md and CLAUDE.md did.
+    public var agents = AgentsInstall()
+
+    /// The files `init` changed or created, which are the user's to commit.
+    var toCommit: [String] {
+        [ConfigLoader.fileName] + (gitignoreAdded.isEmpty ? [] : [".gitignore"])
+            + (swiftlintExcluded.isEmpty ? [] : [SwiftLintConfig.fileName]) + agents.changed
+    }
 
     public var text: String {
         guard status == .written else {
             return (["\(ConfigLoader.fileName) already exists, so nothing changed  path=\(path)"] + summary
                 + warnings.map { "warning: " + $0 }
-                + ["next: inspect it with `xcd config show`; regenerate it with `xcd init --force` (plus any --set answers from `xcd init --plan`)"])
+                + ["next: inspect it with `xcd config show`; regenerate it with `xcd init --force` (plus any --set answers from `xcd init --plan`); "
+                    + "to write only xcd's block into AGENTS.md or CLAUDE.md, run `xcd init --agents`"])
                 .joined(separator: "\n")
         }
         var lines = ["wrote \(path)"] + summary
@@ -191,7 +220,9 @@ public struct InitReport: Reportable {
             lines.append("\(SwiftLintConfig.fileName): added \(swiftlintExcluded.joined(separator: ", ")) to `excluded`, "
                 + "so SwiftLint stays out of xcd's build folder")
         }
-        lines += warnings.map { "warning: " + $0 }
+        lines += agents.lines
+        lines += (warnings + agents.warnings).map { "warning: " + $0 }
+        lines.append("commit " + AgentsReport.listed(toCommit))
         lines.append("change a choice: `xcd init --force --set <key>=<value>` (`xcd init --plan` lists the keys), or edit .xcdev.yml (`xcd config explain <key>`)")
         lines.append("next: run `xcd config show` to check the result, then `xcd doctor`")
         return lines.joined(separator: "\n")

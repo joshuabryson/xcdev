@@ -12,10 +12,16 @@ struct InitCommand: AsyncParsableCommand {
             help: "Answers as KEY=VALUE, e.g. --set devices.default=\"iPhone 17 Pro\" xcode=system. Repeatable.")
     var answers: [String] = []
     @Flag(help: "Replace an existing .xcdev.yml.") var force = false
+    @Flag(help: "Write or update only xcd's block in AGENTS.md and CLAUDE.md; .xcdev.yml is left alone.") var agents = false
     @OptionGroup var options: GlobalOptions
 
     func run() async throws {
-        if plan {
+        if agents {
+            guard !plan, !defaults, !force else { throw ValidationError("--agents can't be combined with --plan, --defaults, or --force") }
+            try await Emit.run("init", options) { services in
+                try await services.setup.installAgents(answers: try InitAnswers.parse(answers), from: services.currentDirectory)
+            }
+        } else if plan {
             guard answers.isEmpty, !defaults, !force else {
                 throw ValidationError("--plan writes nothing, so it can't be combined with --set, --defaults, or --force")
             }

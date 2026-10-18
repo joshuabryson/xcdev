@@ -32,6 +32,7 @@ import Testing
         #expect(written == file + "\r\n" + Self.block.replacingOccurrences(of: "\n", with: "\r\n") + "\r\n")
         #expect(AgentBlock.isCurrent(in: written) && AgentBlock.written(into: written) == written)
         #expect(AgentBlock.written(into: "a\nb\r\n") == "a\nb\r\n\n" + Self.block + "\n")
+        #expect(AgentBlock.written(into: "a\u{2028}b\n") == "a\u{2028}b\n\n" + Self.block + "\n")
         let lone = "a\rb\r"
         let loneWritten = try #require(AgentBlock.written(into: lone))
         #expect(loneWritten == lone + "\r" + Self.block.replacingOccurrences(of: "\n", with: "\r") + "\r")

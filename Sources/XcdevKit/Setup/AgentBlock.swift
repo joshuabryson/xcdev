@@ -48,7 +48,7 @@ enum AgentBlock {
     /// `file` with this xcd's block in place of the one there, or after it, following one blank line. The block's lines
     /// end as the file's first line break does (`\r\n`, `\n`, or `\r`). Nil when a begin marker has no end marker after it.
     static func written(into file: String) -> String? {
-        let ending = file.first(where: \.isNewline).map { String($0) } ?? "\n"
+        let ending = file.first(where: { ["\r\n", "\n", "\r"].contains($0) }).map { String($0) } ?? "\n"
         let block = text.replacingOccurrences(of: "\n", with: ending)
         switch find(in: file) {
         case .block(let range):
