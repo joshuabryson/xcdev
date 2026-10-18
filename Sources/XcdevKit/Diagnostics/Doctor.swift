@@ -19,6 +19,7 @@ public struct DoctorProblem: Codable, Sendable, Equatable {
         case excludeFromSwiftLint = "exclude_from_swiftlint"
         case addLintSection = "add_lint_section"
         case addFormatSection = "add_format_section"
+        case rewriteAgentBlock = "rewrite_agent_block"
     }
 
     /// Whose problem it is, which decides where `--fix` may repair it.

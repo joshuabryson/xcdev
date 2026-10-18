@@ -41,7 +41,7 @@ import XcdevTestSupport
         try project.write("included:\n  - App\n", to: ".swiftlint.yml")
 
         let report = await doctor(project).run(fix: false, from: project.root)
-        #expect(report.checks.map(\.id).suffix(4) == ["quality-setup", "quality-tools", "project", "swiftlint"])
+        #expect(report.checks.map(\.id).suffix(5) == ["quality-setup", "quality-tools", "project", "swiftlint", "agent-docs"])
         #expect(report.problems.filter { $0.check == "quality-setup" } == [
             DoctorProblem(check: "quality-setup", message: Self.problem, action: .addLintSection, fix: Self.fix,
                           subject: project.root + "/.xcdev.yml", done: Self.done).inProject(project.root)])

@@ -34,7 +34,7 @@ import XcdevTestSupport
         try project.write("excluded:\n  - Pods\n", to: ".swiftlint.yml")
 
         let report = await doctor(project).run(fix: false, from: project.root)
-        #expect(report.checks.map(\.id).last == "swiftlint")
+        #expect(report.checks.map(\.id).suffix(2) == ["swiftlint", "agent-docs"])
         #expect(report.problems.filter { $0.check == "swiftlint" } == [
             DoctorProblem(check: "swiftlint", message: Self.lintProblem, action: .excludeFromSwiftLint,
                           fix: "add `.xcdev` to its `excluded` list", subject: project.root + "/.swiftlint.yml").inProject(project.root)])

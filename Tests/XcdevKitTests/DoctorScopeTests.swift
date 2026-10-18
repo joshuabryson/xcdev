@@ -76,7 +76,7 @@ import XcdevTestSupport
         #expect(reaches == ["project=thisProject", "coresimulator=mac", "missing-worktrees=entries", "incomplete-worktrees=entries", "orphaned-clones=entries",
                             "stuck-clones=entries", "templates=xcd", "recordings=entries", "ui-runners=entries", "init-scratch=xcd",
                             "package-caches=xcd", "quality-setup=thisProject", "quality-tools=thisProject", "project=thisProject",
-                            "swiftlint=thisProject"])
+                            "swiftlint=thisProject", "agent-docs=thisProject"])
     }
 
     @Test func worktreeAndCloneProblemsNameTheirProject() async throws {

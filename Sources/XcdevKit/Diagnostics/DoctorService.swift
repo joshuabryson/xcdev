@@ -150,7 +150,7 @@ public struct DoctorService: Sendable {
         [ProjectLocationCheck(), CoreSimulatorCheck(), MissingWorktreesCheck(), IncompleteWorktreesCheck(), OrphanedClonesCheck(),
          StuckClonesCheck(), TemplatesCheck(), RecordingsCheck(), StaleUIRunnersCheck(),
          InitScratchCheck(), PackageCacheCheck(),
-         QualitySetupCheck(), QualityToolsCheck(), ProjectCheck(), SwiftLintCheck()]
+         QualitySetupCheck(), QualityToolsCheck(), ProjectCheck(), SwiftLintCheck(), AgentDocsCheck()]
     }
 
     /// `xcd prune`: worktrees that are gone, and clones nothing owns, with the same reach as `--fix`.

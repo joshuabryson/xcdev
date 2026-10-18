@@ -444,7 +444,7 @@ import XcdevTestSupport
         #expect(try Self.snapshot(project.base) == before)
         let report = await service.run(fix: false, from: project.root)
 
-        #expect(report.checks.map(\.id).last == "project" && report.problems.isEmpty)
+        #expect(report.checks.map(\.id).suffix(2) == ["project", "agent-docs"] && report.problems.isEmpty)
         let cache = GlobalPaths(base: project.home).cacheDirectory
         let after = try Self.snapshot(project.base)
         #expect(before.filter { after[$0.key] != $0.value }.isEmpty)               // nothing changed or removed

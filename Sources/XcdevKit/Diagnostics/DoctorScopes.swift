@@ -27,6 +27,7 @@ extension QualitySetupCheck { public var reach: DoctorReach { .thisProject } }
 extension QualityToolsCheck { public var reach: DoctorReach { .thisProject } }
 extension ProjectCheck { public var reach: DoctorReach { .thisProject } }
 extension SwiftLintCheck { public var reach: DoctorReach { .thisProject } }
+extension AgentDocsCheck { public var reach: DoctorReach { .thisProject } }
 
 /// Works out whose each problem is, from its check's reach and the project it names.
 struct DoctorScopes {
