@@ -54,13 +54,12 @@ public struct InitService: Sendable {
     /// `xcd init`, `--defaults`, and `--set`: writes .xcdev.yml from the recommendations and `answers`, adds
     /// .xcdev/ and .xcdev.local.yml to .gitignore, and keeps SwiftLint out of .xcdev/ (`excludeFromSwiftLint`).
     /// An existing .xcdev.yml is kept unless `force`: nothing is changed then.
-    public func write(answers: [String: String], force: Bool, defaults: Bool = false, from directory: String) async throws -> InitReport {
+    public func write(answers: [String: String], force: Bool, from directory: String) async throws -> InitReport {
         InitScratch.removeStale(in: globalPaths.cacheDirectory, now: now())
         let location = try await WorktreeLocator(runner: runner).locate(from: directory)
         let root = location.worktreeRoot
         let path = root + "/" + ConfigLoader.fileName
-        let replacing = configExists(root)
-        if replacing, !force { return try keep(path: path, root: root, answers: answers) }
+        if configExists(root), !force { return try keep(path: path, root: root, answers: answers) }
         let plan = try await makePlan(location, container: answers["project"])
         let linter = try QualityInit.chosen(answers, from: await quality.lintDecision(in: root))
         let formatter = try QualityInit.chosen(answers, from: await quality.formatDecision(in: root, developerDir: plan.selectedXcode?.developerDir))
@@ -71,7 +70,7 @@ public struct InitService: Sendable {
         let added = try Gitignore.ensure([".xcdev/", ConfigLoader.localFileName, ".xcdev-media/"], in: root)
         var report = InitReport(status: .written, path: path, summary: generated.summary, gitignoreAdded: added)
         excludeFromSwiftLint(in: root, &report)
-        report.agents = try installBlock(in: root, answer: answers[AgentsInit.key], replacing: replacing && !defaults)
+        report.agents = try AgentsInit(root: root).install(answer: answers[AgentsInit.key])
         return report
     }
 
@@ -83,16 +82,6 @@ public struct InitService: Sendable {
                                + "to write only xcd's block into AGENTS.md or CLAUDE.md, run `xcd init --agents`")
         }
         return unchanged(path: path, root: root)
-    }
-
-    /// Writes xcd's block. A re-run that replaces a config and is given neither an answer nor `--defaults` makes no file: the earlier choice,
-    /// perhaps `none`, is not saved, so the files nobody asked for this time are left for `xcd init --agents`.
-    private func installBlock(in root: String, answer: String?, replacing: Bool) throws -> AgentsInstall {
-        let agents = AgentsInit(root: root)
-        guard replacing, answer == nil, agents.decision != nil else { return try agents.install(answer: answer) }
-        var none = try agents.install(answer: "none")
-        none.lines.append("no AGENTS.md or CLAUDE.md was made; `xcd init --agents --set agents=<both|AGENTS.md|CLAUDE.md>` makes them")
-        return none
     }
 
     /// `xcd init --agents`: writes only xcd's block into AGENTS.md and CLAUDE.md, as `init` does, and leaves .xcdev.yml

@@ -195,23 +195,21 @@ import XcdevTestSupport
         #expect(!FileManager.default.fileExists(atPath: project.root + "/.xcdev.yml"))
     }
 
-    @Test func forceWithoutAnAnswerMakesNoAgentFileAndSaysHowToMakeThem() async throws {
+    @Test func forceTakesEveryRecommendationBothFilesIncluded() async throws {
         let (project, service) = try InitServiceTests().setup()
         defer { project.remove() }
         _ = try await service.write(answers: ["agents": "none"], force: false, from: project.root)
-        let report = try await service.write(answers: [:], force: true, from: project.root)
         #expect(read(project.root, "AGENTS.md") == nil && read(project.root, "CLAUDE.md") == nil)
-        #expect(report.text.components(separatedBy: "\n").contains("no AGENTS.md or CLAUDE.md was made; "
-            + "`xcd init --agents --set agents=<both|AGENTS.md|CLAUDE.md>` makes them"))
-        _ = try await service.write(answers: ["agents": "both"], force: true, from: project.root)
+        #expect(FileManager.default.fileExists(atPath: project.root + "/.xcdev.yml"))
+        _ = try await service.write(answers: [:], force: true, from: project.root)
         #expect(read(project.root, "AGENTS.md") == Self.block && read(project.root, "CLAUDE.md") == "@AGENTS.md\n")
     }
 
-    @Test func forceWithDefaultsTakesEveryRecommendationBothFilesIncluded() async throws {
+    @Test func aForcedReinitWithAgentsNoneMakesNeitherFile() async throws {
         let (project, service) = try InitServiceTests().setup()
         defer { project.remove() }
         _ = try await service.write(answers: ["agents": "none"], force: false, from: project.root)
-        _ = try await service.write(answers: [:], force: true, defaults: true, from: project.root)
-        #expect(read(project.root, "AGENTS.md") == Self.block && read(project.root, "CLAUDE.md") == "@AGENTS.md\n")
+        _ = try await service.write(answers: ["agents": "none"], force: true, from: project.root)
+        #expect(read(project.root, "AGENTS.md") == nil && read(project.root, "CLAUDE.md") == nil)
     }
 }
