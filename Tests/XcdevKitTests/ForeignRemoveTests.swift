@@ -34,9 +34,11 @@ import XcdevTestSupport
         try TempProject.git(["rev-parse", "--verify", "--quiet", "refs/heads/wt-feature"], in: project.root)
         #expect(try svc.list(projectRoot: project.root).map(\.name) == ["main"])
         #expect(hooks.runs(project) == ["post-worktree-create feature"])            // no pre-worktree-remove
+        #expect(removal.checkoutBytes == nil)
         #expect(removal.text == """
         removed xcd's state for feature  devices=iphone
         the checkout at \(path) and its branch renamed are left to whatever made them
+        disk freed: not measured
         """)
     }
 
@@ -61,7 +63,8 @@ import XcdevTestSupport
         let name = try await svc.open(from: path).state.name
         let removal = try await svc.remove(name: name, in: main)
         #expect(removal.keptCheckout && removal.branch == nil)
-        #expect(removal.text.hasSuffix("the checkout at \(path), on a detached HEAD, is left to whatever made it"))
+        #expect(removal.text.contains("the checkout at \(path), on a detached HEAD, is left to whatever made it"))
+        #expect(removal.text.hasSuffix("disk freed: not measured"))
         #expect(FileManager.default.fileExists(atPath: path))
     }
 
@@ -90,5 +93,6 @@ import XcdevTestSupport
         let removal = try await svc.remove(name: "feature", in: main)
         #expect(removal.keptCheckout && removal.checkoutGone)
         #expect(removal.text.split(separator: "\n").map(String.init)[1] == "the checkout at \(path) was already gone")
+        #expect(removal.text.contains("disk freed: 0B"))
     }
 }

@@ -32,6 +32,32 @@ import XcdevTestSupport
         try TempProject.git(["rev-parse", "--verify", "refs/heads/feat"], in: project.root)   // branch kept
     }
 
+    @Test func removeReportsTheDiskItFreed() async throws {
+        let (project, svc, main, created) = try await setup()
+        defer { project.remove() }
+        let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        var state = created
+        state.devices["iphone"] = ProvisionedDevice(udid: "4CEABB59-81A5-4060-9573-99D2BA1BA97B", deviceType: "iPhone 18 Pro",
+                                                    deviceTypeIdentifier: "t", runtime: "iOS 27.0", runtimeIdentifier: "r")
+        try WorktreeStateStore.save(state, WorktreePaths(root: state.path))
+        fake.stub(["du"]) { inv in
+            let lines = inv.arguments.dropFirst().map { path in
+                let kb = path.hasSuffix(".xcdev") ? 200 : 250
+                return "\(kb)\t\(path)"
+            }
+            return ProcessOutput(stdout: lines.joined(separator: "\n") + "\n")
+        }
+
+        let removal = try await svc.remove(name: "feat", in: main)
+        #expect(removal.checkoutBytes == Int64(51_200))
+        #expect(removal.stateBytes == Int64(204_800))
+        #expect(removal.cloneBytes == Int64(1_048_576))
+        #expect(removal.text.contains("disk freed: 1.2MB (checkout 50KB, build state 200KB, simulators 1.0MB)"))
+        #expect(!FileManager.default.fileExists(atPath: state.path))
+        #expect(sims.devices.isEmpty)
+        try TempProject.git(["rev-parse", "--verify", "refs/heads/feat"], in: project.root)
+    }
+
     @Test func refusesDirtyWorktreeUnlessForced() async throws {
         let (project, svc, main, state) = try await setup()
         defer { project.remove() }

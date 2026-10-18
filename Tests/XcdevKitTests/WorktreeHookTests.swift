@@ -32,8 +32,8 @@ import XcdevTestSupport
     @Test func postWorktreeCreateRunsInTheNewWorktree() async throws {
         let (project, svc, main) = try await setup(hooks: #"  post-worktree-create: 'echo "$XCD_WORKTREE_NAME $(basename "$PWD")" > "$XCD_PROJECT_ROOT/../created.txt"'"#)
         defer { project.remove() }
-        let (state, created) = try await svc.create(name: "feat", in: main)
-        #expect(created && state.status == .ready)
+        let made = try await svc.createRecordingBase(name: "feat", in: main)
+        #expect(made.created && made.hookRan && made.branchCreated && made.state.status == .ready)
         #expect(try String(contentsOfFile: project.base + "/created.txt", encoding: .utf8) == "feat feat\n")
         let logs = try FileManager.default.contentsOfDirectory(atPath: main.paths.logs)
         #expect(logs.contains { $0.hasSuffix("-hook-post-worktree-create.log") })
@@ -57,8 +57,8 @@ import XcdevTestSupport
         let (project, svc, main) = try await setup(hooks: #"  post-worktree-create: 'echo ran > "$XCD_PROJECT_ROOT/../created.txt"'"#)
         defer { project.remove() }
         try makeBranch("bare", config: nil, in: project)
-        let (state, created) = try await svc.create(name: "bare", in: main)
-        #expect(created && state.status == .ready)
+        let made = try await svc.createRecordingBase(name: "bare", in: main)
+        #expect(made.created && !made.hookRan && !made.branchCreated && made.state.status == .ready)
         #expect(!FileManager.default.fileExists(atPath: project.base + "/created.txt"))   // the caller's hook never runs
     }
 

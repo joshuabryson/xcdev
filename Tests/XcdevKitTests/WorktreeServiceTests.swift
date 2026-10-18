@@ -104,8 +104,9 @@ import XcdevTestSupport
         try project.write("cached", to: ".xcdev/SourcePackages/checkouts/Yams/marker")
         let svc = service(project)
         let main = try await svc.open(from: project.root)
-        let (state, _) = try await svc.create(name: "feat", in: main)
-        let seeded = state.path + "/.xcdev/SourcePackages/checkouts/Yams/marker"
+        let made = try await svc.createRecordingBase(name: "feat", in: main)
+        let seeded = made.state.path + "/.xcdev/SourcePackages/checkouts/Yams/marker"
+        #expect(made.packagesSeeded && made.branchCreated)
         #expect(try String(contentsOfFile: seeded, encoding: .utf8) == "cached")
     }
 

@@ -58,23 +58,18 @@ public struct WorktreeService: Sendable {
     /// other create or remove of this name can see it half-made, while other worktrees are never blocked.
     public func create(name: String, from ref: String? = nil,
                        in ctx: WorktreeContext) async throws -> (state: WorktreeState, created: Bool) {
-        try Self.validate(name: name)
-        let projectRoot = ctx.location.projectRoot
-        return try await FileLock.withLock(at: lockPath(projectRoot: projectRoot, worktree: name)) {
-            let checkout = try await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) {
-                try await addCheckout(name: name, from: ref, in: ctx)
-            }
-            guard checkout.created else { return (checkout.state, false) }
-            return (try await finish(checkout, in: ctx), true)
-        }
+        let made = try await createTracked(name: name, from: ref, in: ctx)
+        return (made.state, made.created)
     }
 
     /// Runs a new checkout's hook outside the per-project lock, then marks it ready under it; rolls it back when either fails.
-    private func finish(_ checkout: Checkout, in ctx: WorktreeContext) async throws -> WorktreeState {
+    private func finish(_ checkout: Checkout, in ctx: WorktreeContext) async throws -> CreatedWorktree {
         let projectRoot = ctx.location.projectRoot
         do {
-            try await runPostCreateHook(checkout.state, in: ctx)
-            return try await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) { try await markReady(checkout.state) }
+            let hookRan = try await runPostCreateHook(checkout.state, in: ctx)
+            let state = try await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) { try await markReady(checkout.state) }
+            return CreatedWorktree(state: state, created: true, branchCreated: checkout.branchCreated,
+                                   packagesSeeded: checkout.packagesSeeded, hookRan: hookRan)
         } catch {
             _ = try? await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) {
                 await rollBack(checkout.state, worktreeAdded: true, branchCreated: checkout.branchCreated)
@@ -123,12 +118,14 @@ public struct WorktreeService: Sendable {
     }
 
     /// Runs the new checkout's `post-worktree-create`, logging to the calling worktree so the log survives a rollback.
-    private func runPostCreateHook(_ state: WorktreeState, in ctx: WorktreeContext) async throws {
+    /// True when the new checkout's `post-worktree-create` ran. False when none is configured.
+    private func runPostCreateHook(_ state: WorktreeState, in ctx: WorktreeContext) async throws -> Bool {
         guard let hooks, let config = try hookConfig(worktree: state.path, projectRoot: ctx.location.projectRoot) else {
-            return
+            return false
         }
-        try await hooks.run(.postWorktreeCreate, config: config, context: .worktree(state, config: config, output: hooks.output),
-                            logs: ctx.paths)
+        let log = try await hooks.run(.postWorktreeCreate, config: config,
+                                      context: .worktree(state, config: config, output: hooks.output), logs: ctx.paths)
+        return log != nil
     }
 
     /// The result of the locked part of `create`: an `incomplete` new checkout, or an existing ready one.
@@ -136,6 +133,7 @@ public struct WorktreeService: Sendable {
         var state: WorktreeState
         var created: Bool
         var branchCreated: Bool
+        var packagesSeeded = false
     }
 
     private func addCheckout(name: String, from ref: String?, in ctx: WorktreeContext) async throws -> Checkout {
@@ -185,8 +183,8 @@ public struct WorktreeService: Sendable {
             state.path = Paths.canonical(state.path)
             let paths = WorktreePaths(root: state.path)
             try WorktreeStateStore.save(state, paths)
-            try await seedSourcePackages(from: state.projectRoot, into: paths)
-            return Checkout(state: state, created: true, branchCreated: !branchExists)
+            let seeded = try await seedSourcePackages(from: state.projectRoot, into: paths)
+            return Checkout(state: state, created: true, branchCreated: !branchExists, packagesSeeded: seeded)
         } catch {
             await rollBack(state, worktreeAdded: worktreeAdded, branchCreated: worktreeAdded && !branchExists)
             throw error
@@ -194,15 +192,18 @@ public struct WorktreeService: Sendable {
     }
 
     /// The project's resolved packages are copied into a new checkout, so it doesn't resolve them again.
-    func seedSourcePackages(from projectRoot: String, into paths: WorktreePaths) async throws {
+    /// True when the copy ran.
+    @discardableResult
+    func seedSourcePackages(from projectRoot: String, into paths: WorktreePaths) async throws -> Bool {
         Disk.remove(paths.partialSourcePackages)
         let seed = WorktreePaths(root: projectRoot).sourcePackages
-        guard FileManager.default.fileExists(atPath: seed) else { return }
-        guard !Disk.exists(paths.sourcePackages) else { return }
+        guard FileManager.default.fileExists(atPath: seed) else { return false }
+        guard !Disk.exists(paths.sourcePackages) else { return false }
         // APFS clonefile copy: instant and space-free until files diverge. Copied beside it and moved in, so an
         // interrupted copy never looks like the packages.
         try await runner.runChecked(Invocation("/bin/cp", ["-c", "-R", seed, paths.partialSourcePackages]))
         try await runner.runChecked(Invocation("/bin/mv", [paths.partialSourcePackages, paths.sourcePackages]))
+        return true
     }
 
     /// Undoes a creation attempt: only what it created, never a checkout or branch that was already there.
@@ -289,9 +290,29 @@ public struct WorktreeRemoval: Codable, Sendable, Equatable {
     public var keptCheckout = false
     /// True for a checkout xcd did not make whose folder was already gone.
     public var checkoutGone = false
+    /// Bytes of the checkout folder, excluding `.xcdev`, when this command deleted that folder.
+    /// Nil when the folder was kept, or when `du` could not measure it.
+    public var checkoutBytes: Int64? = nil
+    /// Bytes of `.xcdev` (DerivedData, SourcePackages, logs, results) this command deleted.
+    public var stateBytes: Int64? = nil
+    /// Bytes simctl reported for the clones this command deleted.
+    public var cloneBytes: Int64? = nil
 }
 
 extension WorktreeService {
+    /// `create`, plus whether the branch, the package copy, and the hook happened, for the create report.
+    func createTracked(name: String, from ref: String? = nil, in ctx: WorktreeContext) async throws -> CreatedWorktree {
+        try Self.validate(name: name)
+        let projectRoot = ctx.location.projectRoot
+        return try await FileLock.withLock(at: lockPath(projectRoot: projectRoot, worktree: name)) {
+            let checkout = try await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) {
+                try await addCheckout(name: name, from: ref, in: ctx)
+            }
+            guard checkout.created else { return CreatedWorktree(state: checkout.state, created: false) }
+            return try await finish(checkout, in: ctx)
+        }
+    }
+
     /// Runs the worktree's `pre-worktree-remove` hook, then deletes its clones, the git worktree, and its registry
     /// entry. Keeps the branch. Serialized with `create` per project across processes. A checkout xcd did not make
     /// keeps its folder too, so neither the dirty check nor the hook applies: only xcd's part of it goes.
@@ -369,15 +390,13 @@ extension WorktreeService {
     private func removeLocked(name: String, warnings: [String], in ctx: WorktreeContext) async throws -> WorktreeRemoval {
         let projectRoot = ctx.location.projectRoot
         let entry = try entry(named: name, projectRoot: projectRoot)
-        let fm = FileManager.default
-        let exists = fm.fileExists(atPath: entry.path)
-
+        let exists = Disk.exists(entry.path)
         let state = exists ? try WorktreeStateStore.load(WorktreePaths(root: entry.path)) : nil
         let stopped = exists ? await Recordings.stopAll(in: WorktreePaths(root: entry.path), detached: detached, now: Date()) : []
         let runners = exists ? await Runners.stopAll(in: WorktreePaths(root: entry.path), detached: detached) : []
-        let removedDevices = if let state { try await deleteClones(of: state) } else { [String]() }
-
         let keepsCheckout = !isXcds(entry, in: ctx)
+        let freed = await freedDisk(of: entry, state: state, keepsCheckout: keepsCheckout)
+        let removedDevices = if let state { try await deleteClones(of: state) } else { [String]() }
         let branch = keepsCheckout ? await keptBranch(state, at: entry.path, exists: exists) : state?.branch ?? name
         if keepsCheckout {
             Disk.remove(WorktreePaths(root: entry.path).stateDirectory)
@@ -388,7 +407,8 @@ extension WorktreeService {
         return WorktreeRemoval(name: name, project: ctx.location.projectName, path: entry.path, branch: branch,
                                removedDevices: removedDevices, stateMissing: state == nil,
                                stoppedRecordings: stopped.map(\.note), stoppedRunners: runners, warnings: warnings,
-                               keptCheckout: keepsCheckout, checkoutGone: keepsCheckout && !exists)
+                               keptCheckout: keepsCheckout, checkoutGone: keepsCheckout && !exists,
+                               checkoutBytes: freed.checkoutBytes, stateBytes: freed.stateBytes, cloneBytes: freed.cloneBytes)
     }
 
     /// Removes the git worktree of one of xcd's own worktrees, and whatever is left of its folder.

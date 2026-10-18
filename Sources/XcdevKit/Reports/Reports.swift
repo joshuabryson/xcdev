@@ -4,18 +4,46 @@ import Yams
 public struct WorktreeCreateReport: Reportable {
     public let worktree: WorktreeState
     public let created: Bool
+    public let branchCreated: Bool
+    public let packagesSeeded: Bool
+    public let hookRan: Bool
 
-    public init(worktree: WorktreeState, created: Bool) {
+    public init(worktree: WorktreeState, created: Bool, branchCreated: Bool = false,
+                packagesSeeded: Bool = false, hookRan: Bool = false) {
         self.worktree = worktree
         self.created = created
+        self.branchCreated = branchCreated
+        self.packagesSeeded = packagesSeeded
+        self.hookRan = hookRan
+    }
+
+    public init(_ made: CreatedWorktree) {
+        self.init(worktree: made.state, created: made.created, branchCreated: made.branchCreated,
+                  packagesSeeded: made.packagesSeeded, hookRan: made.hookRan)
     }
 
     public var text: String {
-        """
-        worktree \(created ? "created" : "exists")  name=\(worktree.name) branch=\(worktree.branch ?? "-")
-        path: \(worktree.path)
-        next: cd \(Shell.quote(worktree.path))
-        """
+        var lines = [
+            "worktree \(created ? "created" : "exists")  name=\(worktree.name) branch=\(worktree.branch ?? "-")",
+            "path: \(worktree.path)",
+        ]
+        if created { lines.append("setup: " + setup) }
+        lines.append("next: cd \(Shell.quote(worktree.path)), then run xcd build, xcd test, or xcd run")
+        return lines.joined(separator: "\n")
+    }
+
+    /// What this command set up. Only the clauses that happened are included.
+    private var setup: String {
+        var parts = [branchClause, "DerivedData at .xcdev/DerivedData, empty until the first build",
+                     "simulators clone on first use"]
+        if packagesSeeded { parts.append("source packages copied from the main checkout") }
+        if hookRan { parts.append("post-worktree-create ran") }
+        return parts.joined(separator: "; ")
+    }
+
+    private var branchClause: String {
+        guard branchCreated else { return "existing branch \(worktree.branch ?? worktree.name)" }
+        return worktree.base.map { "new branch from \($0)" } ?? "new branch \(worktree.branch ?? worktree.name)"
     }
 
     public var envelopeWorktree: String? { worktree.name }
@@ -78,6 +106,7 @@ extension WorktreeRemoval: Reportable {
         var lines = keptCheckout
             ? ["removed xcd's state for \(name)  " + devices, keptLine]
             : ["removed worktree \(name)  " + devices, "branch kept: \(branch ?? name)"]
+        lines.append(FreedDisk.line(checkoutBytes, stateBytes, cloneBytes))
         if stateMissing {
             lines.append("note: the worktree's state was already gone, so any simulators it cloned may remain (named \"xcd · \(project) · \(name) · …\")")
         }

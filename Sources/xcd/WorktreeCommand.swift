@@ -19,8 +19,8 @@ struct WorktreeCommand: AsyncParsableCommand {
         func run() async throws {
             try await Emit.run("wt create", options) { services in
                 let ctx = try await services.open(worktree: options.worktree, runsPendingHook: false)
-                let (state, created) = try await services.worktrees.createRecordingBase(name: name, from: from, in: ctx)
-                return WorktreeCreateReport(worktree: state, created: created)
+                let made = try await services.worktrees.createRecordingBase(name: name, from: from, in: ctx)
+                return WorktreeCreateReport(made)
             }
         }
     }

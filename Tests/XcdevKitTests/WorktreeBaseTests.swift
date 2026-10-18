@@ -32,9 +32,9 @@ import XcdevTestSupport
         let project = try project()
         defer { project.remove() }
         let svc = service(project)
-        let (state, _) = try await svc.createRecordingBase(name: "login", in: try await svc.open(from: project.root))
-        #expect(state.base == "main")
-        #expect(try await svc.open(from: state.path).state.base == "main")      // it is in worktree.json
+        let made = try await svc.createRecordingBase(name: "login", in: try await svc.open(from: project.root))
+        #expect(made.state.base == "main" && made.branchCreated)
+        #expect(try await svc.open(from: made.state.path).state.base == "main")      // it is in worktree.json
     }
 
     @Test func aRefThatNamesABranchOrATagIsRecordedByThatName() async throws {
@@ -63,7 +63,7 @@ import XcdevTestSupport
         defer { project.remove() }
         try TempProject.git(["checkout", "-q", "--detach"], in: project.root)
         let svc = service(project)
-        let (state, _) = try await svc.createRecordingBase(name: "login", in: try await svc.open(from: project.root))
+        let state = try await svc.createRecordingBase(name: "login", in: try await svc.open(from: project.root)).state
         #expect(state.base == (try await commit("HEAD", in: project)))
     }
 
@@ -72,7 +72,7 @@ import XcdevTestSupport
         defer { project.remove() }
         try TempProject.git(["update-ref", "refs/remotes/origin/main", "HEAD~1"], in: project.root)
         let svc = service(project)
-        let (state, _) = try await svc.createRecordingBase(name: "login", from: "origin/main", in: try await svc.open(from: project.root))
+        let state = try await svc.createRecordingBase(name: "login", from: "origin/main", in: try await svc.open(from: project.root)).state
         #expect(state.base == "origin/main")
     }
 
@@ -80,8 +80,8 @@ import XcdevTestSupport
         let project = try project()
         defer { project.remove() }
         let svc = service(project)
-        let (state, _) = try await svc.createRecordingBase(name: "develop", in: try await svc.open(from: project.root))
-        #expect(state.branch == "develop" && state.base == nil)
+        let made = try await svc.createRecordingBase(name: "develop", in: try await svc.open(from: project.root))
+        #expect(made.state.branch == "develop" && made.state.base == nil && !made.branchCreated)
     }
 
     /// A worktree.json written before the entry existed has no `base` key.

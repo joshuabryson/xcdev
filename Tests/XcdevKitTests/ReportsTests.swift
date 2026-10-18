@@ -11,12 +11,32 @@ import Testing
         status: .ready, createdAt: Date(timeIntervalSince1970: 0))
 
     @Test func createText() {
+        var branched = state
+        branched.base = "main"
+        let next = "next: cd /p/App.worktrees/feat, then run xcd build, xcd test, or xcd run"
+        #expect(WorktreeCreateReport(worktree: branched, created: true, branchCreated: true,
+                                     packagesSeeded: true, hookRan: true).text == """
+        worktree created  name=feat branch=feat
+        path: /p/App.worktrees/feat
+        setup: new branch from main; DerivedData at .xcdev/DerivedData, empty until the first build; simulators clone on first use; source packages copied from the main checkout; post-worktree-create ran
+        \(next)
+        """)
         #expect(WorktreeCreateReport(worktree: state, created: true).text == """
         worktree created  name=feat branch=feat
         path: /p/App.worktrees/feat
-        next: cd /p/App.worktrees/feat
+        setup: existing branch feat; DerivedData at .xcdev/DerivedData, empty until the first build; simulators clone on first use
+        \(next)
         """)
-        #expect(WorktreeCreateReport(worktree: state, created: false).text.hasPrefix("worktree exists  name=feat"))
+        #expect(WorktreeCreateReport(worktree: state, created: false).text == """
+        worktree exists  name=feat branch=feat
+        path: /p/App.worktrees/feat
+        \(next)
+        """)
+        let json = Renderer.report(WorktreeCreateReport(worktree: branched, created: true, branchCreated: true),
+                                   command: "wt create", format: .json)
+        #expect(json.contains(#""branchCreated":true"#))
+        #expect(json.contains(#""packagesSeeded":false"#))
+        #expect(json.contains(#""hookRan":false"#))
     }
 
     @Test func listText() {
@@ -59,13 +79,34 @@ import Testing
 
     @Test func removeText() {
         let r = WorktreeRemoval(name: "feat", project: "App", path: "/p/x", branch: "feat", removedDevices: ["iphone", "watch"], stateMissing: false)
-        #expect(r.text == "removed worktree feat  devices=iphone,watch\nbranch kept: feat")
+        #expect(r.text == """
+        removed worktree feat  devices=iphone,watch
+        branch kept: feat
+        disk freed: not measured
+        """)
         let missing = WorktreeRemoval(name: "feat", project: "App", path: "/p/x", branch: "feat", removedDevices: [], stateMissing: true)
         #expect(missing.text == """
         removed worktree feat  devices=none
         branch kept: feat
+        disk freed: not measured
         note: the worktree's state was already gone, so any simulators it cloned may remain (named "xcd · App · feat · …")
         """)
+        var gone = missing
+        gone.checkoutBytes = 0
+        gone.stateBytes = 0
+        gone.cloneBytes = 0
+        #expect(gone.text.contains("disk freed: 0B"))
+        var sized = r
+        sized.checkoutBytes = 180 * 1024 * 1024
+        sized.stateBytes = 900 * 1024 * 1024
+        sized.cloneBytes = 120 * 1024 * 1024
+        #expect(sized.text.contains("disk freed: 1.2GB (checkout 180.0MB, build state 900.0MB, simulators 120.0MB)"))
+        let foreign = WorktreeRemoval(name: "feat", project: "App", path: "/p/x", branch: "feat", removedDevices: ["iphone"],
+                                      stateMissing: false, keptCheckout: true, stateBytes: 100 * 1024 * 1024, cloneBytes: 0)
+        #expect(foreign.checkoutBytes == nil)
+        #expect(foreign.text.contains("disk freed: 100.0MB (build state 100.0MB)"))
+        let json = Renderer.report(r, command: "wt remove", format: .json)
+        #expect(!json.contains("checkoutBytes"))
     }
 
     @Test func simText() {

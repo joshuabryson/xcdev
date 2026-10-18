@@ -20,18 +20,36 @@ struct WorktreeBase: Sendable {
     }
 }
 
+/// What `xcd wt create` made, including the facts the report tells the user.
+public struct CreatedWorktree: Sendable, Equatable {
+    public var state: WorktreeState
+    public var created: Bool
+    public var branchCreated: Bool
+    public var packagesSeeded: Bool
+    public var hookRan: Bool
+
+    public init(state: WorktreeState, created: Bool, branchCreated: Bool = false,
+                packagesSeeded: Bool = false, hookRan: Bool = false) {
+        self.state = state
+        self.created = created
+        self.branchCreated = branchCreated
+        self.packagesSeeded = packagesSeeded
+        self.hookRan = hookRan
+    }
+}
+
 extension WorktreeService {
     /// `create`, which then records the base in the new worktree's state when it made the branch. The ref is read
     /// before the worktree is added, and written afterwards, so the worktree's `post-worktree-create` hook runs
     /// before the entry is there. A branch that already existed gets no entry: xcd does not know where it came from.
     /// A git that fails while the ref is read stops the command before anything is made.
     public func createRecordingBase(name: String, from ref: String? = nil,
-                                    in ctx: WorktreeContext) async throws -> (state: WorktreeState, created: Bool) {
+                                    in ctx: WorktreeContext) async throws -> CreatedWorktree {
         let projectRoot = ctx.location.projectRoot
         let reader = WorktreeBase(runner: runner)
         let isNewBranch = try await !reader.branchExists(name, in: projectRoot)
         let base = try await reader.recorded(for: ref ?? "HEAD", in: projectRoot)
-        let made = try await create(name: name, from: ref, in: ctx)
+        let made = try await createTracked(name: name, from: ref, in: ctx)
         guard made.created, isNewBranch, let base else { return made }
         let state = try await FileLock.withLock(at: lockPath(projectRoot: projectRoot)) {
             let paths = WorktreePaths(root: made.state.path)
@@ -40,6 +58,7 @@ extension WorktreeService {
             try WorktreeStateStore.save(state, paths)
             return state
         }
-        return (state, true)
+        return CreatedWorktree(state: state, created: true, branchCreated: made.branchCreated,
+                               packagesSeeded: made.packagesSeeded, hookRan: made.hookRan)
     }
 }
