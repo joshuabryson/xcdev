@@ -45,32 +45,44 @@ public struct DoctorReport: Reportable {
     enum CodingKeys: String, CodingKey { case fixMode, checks, disk }
 
     public var problems: [DoctorProblem] { checks.flatMap(\.problems) }
-    /// Problems that are still there.
-    public var remaining: [DoctorProblem] { problems.filter { !$0.fixed } }
+    /// This project's problems, a gone project's, xcd's own, and CoreSimulator's: the ones that fail a run.
+    public var here: [DoctorProblem] { problems.filter { !isElsewhere($0) } }
+    /// Other projects' problems, listed apart. None when git cannot say which project doctor
+    /// runs in: it cannot tell another project's from this one's then.
+    public var elsewhere: [DoctorProblem] { problems.filter(isElsewhere) }
+    /// Problems here that are still there.
+    public var remaining: [DoctorProblem] { here.filter { !$0.fixed } }
+
+    func isElsewhere(_ problem: DoctorProblem) -> Bool { located && problem.elsewhere == true }
 
     public var text: String {
-        let fixed = problems.count - remaining.count
-        var lines = ["doctor: \(problems.count) problem\(problems.count == 1 ? "" : "s")" + (fixMode || restartSimulators ? ", \(fixed) fixed" : "")]
+        var lines = [header]
         for check in checks {
-            if check.problems.isEmpty && check.inProgress.isEmpty { lines.append("ok       \(check.id)") }
+            let mine = check.problems.filter { !isElsewhere($0) }
+            if mine.isEmpty && check.inProgress.isEmpty { lines.append("ok       \(check.id)") }
             for note in check.inProgress { lines.append("busy     \(check.id)  \(note)") }
-            for problem in check.problems {
-                var line: String
-                if problem.fixed {
-                    line = "fixed    \(check.id)  \(problem.message)"
-                    if let done = problem.done { line += "  (\(done))" }
-                } else if let error = problem.fixError {
-                    line = "failed   \(check.id)  \(problem.message)  (fix failed: \(error))"
-                } else {
-                    line = "problem  \(check.id)  \(problem.message)"
-                    if let hint = hint(for: problem) { line += "  (\(hint))" }
-                    if let next = problem.next { line += "  next: \(next)" }
-                }
-                lines.append(line)
-            }
+            lines += mine.map(line(for:))
         }
+        if !elsewhere.isEmpty { lines += ["elsewhere (not this project's to fix; ask the user):"] + elsewhere.map(line(for:)) }
         if let disk { lines.append(disk.text) }
         return lines.joined(separator: "\n")
+    }
+
+    /// `doctor: 2 problems, 1 fixed, 1 elsewhere`: the problems here, what a fix run fixed of them, and those elsewhere.
+    var header: String {
+        let away = elsewhere.isEmpty ? "" : ", \(elsewhere.count) elsewhere"
+        if here.isEmpty, !elsewhere.isEmpty { return "doctor: no problems here" + away }
+        let fixed = fixMode || restartSimulators ? ", \(here.filter(\.fixed).count) fixed" : ""
+        return "doctor: \(here.count) problem\(here.count == 1 ? "" : "s")" + fixed + away
+    }
+
+    func line(for problem: DoctorProblem) -> String {
+        if problem.fixed { return "fixed    \(problem.check)  \(problem.message)" + (problem.done.map { "  (\($0))" } ?? "") }
+        if let error = problem.fixError { return "failed   \(problem.check)  \(problem.message)  (fix failed: \(error))" }
+        var line = "problem  \(problem.check)  \(problem.message)"
+        if let hint = hint(for: problem) { line += "  (\(hint))" }
+        if let next = problem.next { line += "  next: \(next)" }
+        return line
     }
 
     /// What plain `--fix` would repair.

@@ -25,13 +25,15 @@ import XcdevTestSupport
         #expect(orphans.compactMap(\.subject).sorted() == [gone, other].sorted())
         #expect(orphans.first { $0.subject == gone }?.message == "xcd · Sample App · deleted · iphone (\(gone)) is orphaned: its worktree no longer exists")
         #expect(report.failure?.code == .doctorProblems)
-        #expect(report.failure?.next == "run `xcd doctor --fix` to fix 1 of them; the others say what to do")
+        #expect(report.failure?.next == "run `xcd doctor --fix` to fix 1 of them")
+        #expect(report.elsewhere.map(\.subject) == [other])
         #expect(sims.devices == before)                                           // nothing changed without --fix
 
         // `other` is from a project this registry doesn't know: maybe another XCDEV_HOME's, so it is only reported.
         let fixed = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: project.root)
         #expect(fixed.problems.filter(\.fixed).map(\.subject) == [gone])
-        #expect(fixed.remaining.map(\.subject) == [other] && fixed.remaining[0].fixError == nil)
+        #expect(fixed.remaining.isEmpty && fixed.elsewhere.map(\.subject) == [other] && fixed.elsewhere[0].fixError == nil)
+        #expect(fixed.failure == nil)
         #expect(Set(sims.devices.map(\.udid)).isSuperset(of: [owned, inFlight, other]))
         #expect(!sims.devices.contains { $0.udid == gone })
     }
@@ -51,7 +53,7 @@ import XcdevTestSupport
         #expect(problem.message == "xcd · Sample App · main · iphone (\(clone)) is orphaned: no worktree in this registry is from its project")
         #expect(problem.next == "it may belong to another xcd state folder (XCDEV_HOME); if not, delete it with `xcrun simctl delete \(clone)`")
         #expect(problem.action == nil && !problem.fixed && problem.fixError == nil)
-        #expect(report.failure?.next == problem.next)
+        #expect(problem.elsewhere == true && !report.remaining.contains { $0.subject == problem.subject })
         #expect(!fake.calls.contains { $0.argv.starts(with: ["xcrun", "simctl", "delete"]) })
     }
 

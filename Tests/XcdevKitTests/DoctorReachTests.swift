@@ -29,11 +29,12 @@ import XcdevTestSupport
         let plain = await doctor(project).run(fix: false, checks: [OrphanedClonesCheck()], from: project.root, includeDisk: false)
         let problem = try #require(plain.problems.first)
         #expect(problem.scope == .otherProject && problem.projectRoot == nearby.root && problem.action == .deleteSimulator)
-        #expect(plain.text.hasSuffix("problem  orphaned-clones  \(problem.message)  next: run `xcd doctor --fix` in \(nearby.root)"))
-        #expect(plain.failure?.next == "run `xcd doctor --fix` in \(nearby.root)")
+        #expect(plain.text.hasSuffix("elsewhere (not this project's to fix; ask the user):\n"
+                    + "problem  orphaned-clones  \(problem.message)  next: run `xcd doctor --fix` in \(nearby.root)"))
+        #expect(plain.failure == nil)
         for fixed in [await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: project.root),
                       await doctor(project).run(fix: true, checks: DoctorService.pruneChecks, from: project.root)] {
-            #expect(fixed.problems.map(\.fixed) == [false] && fixed.failure?.next == "run `xcd doctor --fix` in \(nearby.root)")
+            #expect(fixed.problems.map(\.fixed) == [false] && fixed.failure == nil)
         }
         #expect(sims.devices.contains { $0.udid == clone })
         let there = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: nearby.root)
@@ -185,9 +186,10 @@ import XcdevTestSupport
         let report = DoctorReport(fixMode: false, checks: [.init(id: "coresimulator", problems: [mac]),
                                                            .init(id: "orphaned-clones", problems: [own, nearby])], disk: nil)
         #expect(report.text == """
-            doctor: 3 problems
+            doctor: 2 problems, 1 elsewhere
             problem  coresimulator  CoreSimulator didn't answer  (--restart-simulators: restart the CoreSimulator service; every booted simulator on this Mac shuts down)
             problem  orphaned-clones  own  (--fix: shut it down and delete it)
+            elsewhere (not this project's to fix; ask the user):
             problem  orphaned-clones  nearby  next: run `xcd doctor --fix` in /p/Nearby
             """)
         #expect(report.failure?.next == "run `xcd doctor --fix` to fix 1 of them; the others say what to do; "

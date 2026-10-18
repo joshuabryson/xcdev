@@ -49,7 +49,11 @@ public struct DoctorProblem: Codable, Sendable, Equatable {
     public var fixed = false
     public var fixError: String?
     /// Set by doctor from the check's reach and `projectRoot`.
-    public var scope: Scope?
+    public var scope: Scope? {
+        didSet { elsewhere = scope == .otherProject ? true : nil }
+    }
+    /// True for another project's problem, which doctor lists apart and which never fails its run. Follows `scope`.
+    public private(set) var elsewhere: Bool?
     /// The main checkout of the project the problem is in, when it is a project's.
     public var projectRoot: String?
 
