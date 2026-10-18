@@ -30,7 +30,7 @@ import XcdevTestSupport
         let problem = try #require(plain.problems.first)
         #expect(problem.scope == .otherProject && problem.projectRoot == nearby.root && problem.action == .deleteSimulator)
         #expect(plain.text.hasSuffix("elsewhere (not this project's to fix; ask the user):\n"
-                    + "problem  orphaned-clones  \(problem.message)  next: run `xcd doctor --fix` in \(nearby.root)"))
+                    + "problem  orphaned-clones  \(problem.message)  next: ask the user before running `xcd doctor --fix` in \(nearby.root)"))
         #expect(plain.failure == nil)
         for fixed in [await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: project.root),
                       await doctor(project).run(fix: true, checks: DoctorService.pruneChecks, from: project.root)] {
@@ -94,7 +94,7 @@ import XcdevTestSupport
         let problem = try #require(report.problems.first)
         #expect(!problem.fixed && problem.scope == .otherProject)
         #expect(problem.next == "\(away) can't be reached: it may be on a volume that isn't mounted, or in a folder xcd may not look into; "
-                    + "mount it or fix the permissions, then run `xcd doctor` again")
+                    + "ask the user to mount it or fix its permissions, then run `xcd doctor` again")
     }
 
     /// In a worktree whose main checkout was moved, doctor cannot tell which problems are this project's.
@@ -182,7 +182,7 @@ import XcdevTestSupport
                                        fix: "restart the CoreSimulator service; every booted simulator on this Mac shuts down"), .mac)
         let own = scoped(DoctorProblem(check: "orphaned-clones", message: "own", action: .deleteSimulator, fix: "shut it down and delete it"), .project)
         let nearby = scoped(DoctorProblem(check: "orphaned-clones", message: "nearby", action: .deleteSimulator, fix: "shut it down and delete it",
-                                         next: "run `xcd doctor --fix` in /p/Nearby"), .otherProject)
+                                         next: "ask the user before running `xcd doctor --fix` in /p/Nearby"), .otherProject)
         let report = DoctorReport(fixMode: false, checks: [.init(id: "coresimulator", problems: [mac]),
                                                            .init(id: "orphaned-clones", problems: [own, nearby])], disk: nil)
         #expect(report.text == """
@@ -190,7 +190,7 @@ import XcdevTestSupport
             problem  coresimulator  CoreSimulator didn't answer  (--restart-simulators: restart the CoreSimulator service; every booted simulator on this Mac shuts down)
             problem  orphaned-clones  own  (--fix: shut it down and delete it)
             elsewhere (not this project's to fix; ask the user):
-            problem  orphaned-clones  nearby  next: run `xcd doctor --fix` in /p/Nearby
+            problem  orphaned-clones  nearby  next: ask the user before running `xcd doctor --fix` in /p/Nearby
             """)
         #expect(report.failure?.next == "run `xcd doctor --fix` to fix 1 of them; the others say what to do; "
                     + "ask the user before running `xcd doctor --restart-simulators`: it shuts down every booted simulator on this Mac, other agents' too")

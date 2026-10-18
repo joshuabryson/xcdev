@@ -58,10 +58,10 @@ struct DoctorScopes {
         guard problem.action != nil, problem.scope == .otherProject, let root = problem.projectRoot else { return nil }
         switch CheckoutPresence.of(root) {
         case .present:
-            return "run `xcd doctor --fix` in \(root)"
+            return "ask the user before running `xcd doctor --fix` in \(root)"
         case .unreachable:
             return "\(root) can't be reached: it may be on a volume that isn't mounted, or in a folder xcd may not look into; "
-                + "mount it or fix the permissions, then run `xcd doctor` again"
+                + "ask the user to mount it or fix its permissions, then run `xcd doctor` again"
         case .missing:
             let still = env.registry.first { $0.projectRoot == root && CheckoutPresence.of($0.path) != .missing }?.path ?? root
             return "\((root as NSString).lastPathComponent)'s main checkout is no longer at \(root), but \(still) still is: "

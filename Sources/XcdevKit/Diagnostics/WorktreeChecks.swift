@@ -39,7 +39,7 @@ public struct MissingWorktreesCheck: DoctorCheck {
         }
         let unreachable = env.registry.filter { CheckoutPresence.of($0.path) == .unreachable }.map { entry in
             DoctorProblem(check: id, message: "\(entry.project)/\(entry.name): \(entry.path) can't be reached",
-                          next: "it may be on a volume that isn't mounted, or in a folder xcd may not look into; mount it or fix the permissions, then run `xcd doctor` again",
+                          next: "it may be on a volume that isn't mounted, or in a folder xcd may not look into; ask the user to mount it or fix its permissions, then run `xcd doctor` again",
                           subject: entry.id, projectRoot: entry.projectRoot)
         }
         return unreadable(env) + gone + unreachable

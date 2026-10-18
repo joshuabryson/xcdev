@@ -6,7 +6,8 @@ public struct DoctorFixes: Sendable, Equatable {
     public let fix: Bool
     /// `--restart-simulators`: CoreSimulator, when it is not answering.
     public let restartSimulators: Bool
-    /// False when git failed to say which project doctor runs in: then nothing is repaired.
+    /// False when git failed to say which project doctor runs in: then `--fix` repairs nothing, and only
+    /// `--restart-simulators` acts, on CoreSimulator, which belongs to no project.
     public let located: Bool
 
     public init(fix: Bool, restartSimulators: Bool, located: Bool) {

@@ -17,6 +17,6 @@ import XcdevTestSupport
                                    sleep: { _ in await Task.yield() })
         let report = await doctor.run(fix: false, checks: [CoreSimulatorCheck()], from: nil)
         #expect(report.problems.first?.check == "coresimulator")
-        #expect(report.problems.first?.next == "if it still fails, quit Device Hub (Simulator.app before Xcode 27) and Xcode, or restart the Mac")
+        #expect(report.problems.first?.next == "if it still fails, ask the user to quit Device Hub (Simulator.app before Xcode 27) and Xcode, or to restart the Mac: either shuts down every booted simulator on this Mac, other agents' too")
     }
 }

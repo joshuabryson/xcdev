@@ -117,7 +117,7 @@ import XcdevTestSupport
         #expect(ambiguous.action == nil && !ambiguous.fixed && ambiguous.projectRoot == nil && ambiguous.scope == .otherProject)
         #expect(ambiguous.message == "xcd · Twin · old · iphone (\(twin)) is orphaned: projects at \(one) and \(two) share its project's name, "
                     + "so xcd cannot tell whose it is")
-        #expect(ambiguous.next == "if nothing is using it, delete it with `xcrun simctl shutdown \(twin); xcrun simctl delete \(twin)`")
+        #expect(ambiguous.next == "ask the user before deleting it: `xcrun simctl shutdown \(twin); xcrun simctl delete \(twin)`")
         #expect(sims.devices.contains { $0.udid == twin && $0.state == "Booted" })
         // A gone worktree of a project with a name of its own is still that project's.
         let gone = try #require(report.problems.first { $0.subject == own })

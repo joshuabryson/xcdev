@@ -105,7 +105,7 @@ import XcdevTestSupport
         let problem = try #require(report.problems.first)
         #expect(report.problems.count == 1 && problem.check == "missing-worktrees")
         #expect(problem.message == "Sample App/feat: \(path) can't be reached")
-        #expect(problem.next == "it may be on a volume that isn't mounted, or in a folder xcd may not look into; mount it or fix the permissions, then run `xcd doctor` again")
+        #expect(problem.next == "it may be on a volume that isn't mounted, or in a folder xcd may not look into; ask the user to mount it or fix its permissions, then run `xcd doctor` again")
         #expect(problem.action == nil && !problem.fixed)
         #expect(try worktrees.list(projectRoot: project.root).map(\.name) == ["feat", "main"])
         #expect(sims.devices.contains { $0.udid == clone })

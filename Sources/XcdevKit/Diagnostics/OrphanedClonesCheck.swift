@@ -44,7 +44,7 @@ public struct OrphanedClonesCheck: DoctorCheck {
         let projects = Set(known.filter { device.name.hasPrefix(SimNaming.clonePrefix + $0.project + " · ") }.map(\.projectRoot)).sorted()
         guard let project = projects.first else {
             return DoctorProblem(check: id, message: "\(label): no worktree in this registry is from its project",
-                                 next: "it may belong to another xcd state folder (XCDEV_HOME); if not, delete it with `xcrun simctl delete \(device.udid)`",
+                                 next: "it may belong to another xcd state folder (XCDEV_HOME); " + Self.deleteByHand(device),
                                  subject: device.udid)
         }
         let entries = known.filter { device.name.hasPrefix(SimNaming.clone(project: $0.project, worktree: $0.name, device: "")) }
@@ -91,7 +91,7 @@ public struct OrphanedClonesCheck: DoctorCheck {
     }
 
     static func deleteByHand(_ device: SimDevice) -> String {
-        "if nothing is using it, delete it with `xcrun simctl shutdown \(device.udid); xcrun simctl delete \(device.udid)`"
+        "ask the user before deleting it: `xcrun simctl shutdown \(device.udid); xcrun simctl delete \(device.udid)`"
     }
 
     /// "A and B", or "A, B and C".

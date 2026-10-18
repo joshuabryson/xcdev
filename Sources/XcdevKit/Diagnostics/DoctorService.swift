@@ -102,15 +102,16 @@ public struct DoctorReport: Reportable {
     }
 
     /// Plain `--fix` for what it reaches, before a `--fix` run; asking the user before restarting CoreSimulator; or
-    /// else the first remaining problem's own `next`. When git could not say which project doctor ran in, git's.
+    /// else the first remaining problem's own `next`. When git could not say which project doctor ran in, git's, then
+    /// the ask before `--restart-simulators` when CoreSimulator is not answering.
     var next: String {
         let first = remaining.first { $0.next != nil && (located || $0.check == ProjectLocationCheck().id) }?.next
-        guard located else { return first ?? "read the problems above; `xcd doctor` checks again" }
         var parts: [String] = []
         let fixable = remaining.filter { plainFix.repairs($0) && $0.fixError == nil }
-        if !fixMode, !fixable.isEmpty {
+        if located, !fixMode, !fixable.isEmpty {
             parts.append("run `xcd doctor --fix` to fix \(fixable.count) of them" + (fixable.count < remaining.count ? "; the others say what to do" : ""))
         }
+        if !located { parts.append(first ?? "read the problems above; `xcd doctor` checks again") }
         if remaining.contains(where: { $0.scope == .mac && $0.action != nil && $0.fixError == nil }) {
             parts.append("ask the user before running `xcd doctor --restart-simulators`: it shuts down every booted simulator on this Mac, other agents' too")
         }
