@@ -19,11 +19,14 @@ struct WorktreeOpener: Sendable {
             }
             location = ProjectLocation(projectRoot: location.projectRoot, worktreeRoot: root)
         }
-        let config = try ConfigLoader.load(worktreeRoot: location.worktreeRoot, projectRoot: location.projectRoot)
-        if let state = try WorktreeStateStore.load(WorktreePaths(root: location.worktreeRoot)) {
-            return WorktreeContext(location: location, config: config, state: state)
+        let loaded = try ConfigLoader.checkout(worktreeRoot: location.worktreeRoot, projectRoot: location.projectRoot)
+        if let note = loaded.note { service.notes.add(note) }
+        let state = if let saved = try WorktreeStateStore.load(WorktreePaths(root: location.worktreeRoot)) {
+            saved
+        } else {
+            try await firstUse(location)
         }
-        return WorktreeContext(location: location, config: config, state: try await firstUse(location))
+        return WorktreeContext(location: location, config: loaded.config, state: state, borrowedConfig: loaded.borrowedFrom)
     }
 
     /// The state of a checkout xcd has not seen before, saved in it and registered.

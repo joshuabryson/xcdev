@@ -71,6 +71,6 @@ public struct Completions: Sendable {
 
     private func config() async -> XcdevConfig? {
         guard let location = await location() else { return nil }
-        return try? ConfigLoader.load(worktreeRoot: location.worktreeRoot, projectRoot: location.projectRoot)
+        return try? ConfigLoader.checkout(worktreeRoot: location.worktreeRoot, projectRoot: location.projectRoot).config
     }
 }

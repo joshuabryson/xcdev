@@ -34,12 +34,13 @@ public struct ExternalCommands: Sendable {
                            : "did you mean \(close.map { "`xcd \($0)`" }.joined(separator: ", "))? `xcd help` lists every command")
     }
 
-    /// The current worktree's .xcdev.yml, or nil outside a project. Reads only: unlike `Services.open`, it never
-    /// initializes or registers the worktree. An invalid .xcdev.yml is still an error: it may define the command.
+    /// The current worktree's .xcdev.yml (or the main checkout's, borrowed), or nil outside a project. Reads only:
+    /// unlike `Services.open`, it never initializes or registers the worktree. An invalid .xcdev.yml is still an error:
+    /// it may define the command.
     func projectConfig() async throws -> XcdevConfig? {
         do {
             let location = try await WorktreeLocator(runner: services.runner).locate(from: services.currentDirectory)
-            return try ConfigLoader.load(worktreeRoot: location.worktreeRoot, projectRoot: location.projectRoot)
+            return try ConfigLoader.checkout(worktreeRoot: location.worktreeRoot, projectRoot: location.projectRoot).config
         } catch let error as XcdError where error.code == .notInProject || error.code == .configMissing {
             return nil
         }

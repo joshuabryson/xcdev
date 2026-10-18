@@ -31,11 +31,15 @@ public enum ConfigLoader {
         return config
     }
 
+    /// What a project with no `.xcdev.yml` is told to do.
+    static let setUp = "this project isn't set up for xcd yet: follow `xcd guide setup`, which asks the user"
+
     /// Reads `.xcdev.yml` from the worktree checkout (it is versioned with the branch) and
-    /// `.xcdev.local.yml` from the worktree, falling back to the main checkout.
+    /// `.xcdev.local.yml` from the worktree, falling back to the main checkout. `checkout(worktreeRoot:projectRoot:)`
+    /// also borrows the main checkout's `.xcdev.yml` when the checkout's branch has none.
     public static func load(worktreeRoot: String, projectRoot: String) throws -> XcdevConfig {
         guard let main = try? String(contentsOfFile: worktreeRoot + "/" + fileName, encoding: .utf8) else {
-            throw XcdError(.configMissing, "no \(fileName) in \(worktreeRoot)", next: "run `xcd init` in the project root")
+            throw XcdError(.configMissing, "no \(fileName) in \(worktreeRoot)", next: setUp)
         }
         let local = [worktreeRoot, projectRoot].lazy
             .compactMap { try? String(contentsOfFile: $0 + "/" + localFileName, encoding: .utf8) }

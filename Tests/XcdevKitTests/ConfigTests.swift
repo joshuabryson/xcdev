@@ -132,7 +132,7 @@ import Testing
 
         let missing = #expect(throws: XcdError.self) { try ConfigLoader.load(worktreeRoot: dir, projectRoot: dir) }
         #expect(missing?.code == .configMissing)
-        #expect(missing?.next == "run `xcd init` in the project root")
+        #expect(missing?.next == "this project isn't set up for xcd yet: follow `xcd guide setup`, which asks the user")
 
         try "version: 1\nproject: A.xcodeproj\n".write(toFile: dir + "/.xcdev.yml", atomically: true, encoding: .utf8)
         try "xcode: beta\n".write(toFile: dir + "/.xcdev.local.yml", atomically: true, encoding: .utf8)

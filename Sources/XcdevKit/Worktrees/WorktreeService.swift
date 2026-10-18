@@ -6,12 +6,16 @@ public struct WorktreeContext: Sendable {
     public var state: WorktreeState
     /// `--xcode` for this command only. Never written to worktree.json.
     public var xcodeOverride: XcodeInstall?
+    /// The main checkout's `.xcdev.yml` when `config` is borrowed from it, since this checkout's branch has none.
+    public var borrowedConfig: String?
 
-    public init(location: ProjectLocation, config: XcdevConfig, state: WorktreeState, xcodeOverride: XcodeInstall? = nil) {
+    public init(location: ProjectLocation, config: XcdevConfig, state: WorktreeState, xcodeOverride: XcodeInstall? = nil,
+                borrowedConfig: String? = nil) {
         self.location = location
         self.config = config
         self.state = state
         self.xcodeOverride = xcodeOverride
+        self.borrowedConfig = borrowedConfig
     }
 
     public var paths: WorktreePaths { WorktreePaths(root: location.worktreeRoot) }
