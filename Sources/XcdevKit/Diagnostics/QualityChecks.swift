@@ -27,7 +27,16 @@ public struct QualitySetupCheck: DoctorCheck {
                                           subject: root + "/" + ConfigLoader.fileName, done: Self.done))
         }
         if config.formatSetup == .absent { problems += formatProblem(QualityDetection.formatters(configuredIn: root), in: root) }
-        return problems
+        guard let borrowed = project.borrowedConfig else { return problems }
+        return problems.map { leftToTheUser($0, borrowed: borrowed) }
+    }
+
+    /// Under a config borrowed from the main checkout, doctor edits nothing there.
+    func leftToTheUser(_ problem: DoctorProblem, borrowed path: String) -> DoctorProblem {
+        let section = problem.action == .addLintSection ? "lint:" : "format:"
+        return DoctorProblem(check: id, message: "the main checkout's " + problem.message,
+                             next: "ask the user whether to add a `\(section)` section to the main checkout's \(ConfigLoader.fileName) (\(path))",
+                             subject: path)
     }
 
     /// With one formatter's config file the fix adds the section that names it. With both, nothing says which

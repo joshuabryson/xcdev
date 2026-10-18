@@ -36,12 +36,21 @@ public struct ProjectCommandRunner: Sendable {
             error.next = "make it finish sooner, or raise commands.\(name).timeout in .xcdev.yml, then re-run"
             throw error
         }
-        switch result.exitCode {
-        case 127: builds.progress("`xcd \(name)` exited 127: its command was not found; check commands.\(name).run in .xcdev.yml")
-        case 126: builds.progress("`xcd \(name)` exited 126: its script is not executable; run `chmod +x` on it")
+        explain(result.exitCode, of: name, borrowedConfig: ctx.borrowedConfig)
+        return result.exitCode
+    }
+
+    /// Says what the shell's 127 ("not found") and 126 ("not executable") mean, and, for a command from a borrowed
+    /// config, where it comes from: a script that is not found may not be on this branch, and the file is the user's.
+    func explain(_ exitCode: Int32, of name: String, borrowedConfig: String?) {
+        let from = borrowedConfig.map { "; the command comes from the main checkout's .xcdev.yml (\($0))" } ?? ""
+        switch exitCode {
+        case 127:
+            let missing = borrowedConfig == nil ? "" : ", and its script may not be on this branch; ask the user before changing that file"
+            builds.progress("`xcd \(name)` exited 127: its command was not found; check commands.\(name).run in .xcdev.yml" + from + missing)
+        case 126: builds.progress("`xcd \(name)` exited 126: its script is not executable; run `chmod +x` on it" + from)
         default: break
         }
-        return result.exitCode
     }
 
     /// Boots the device and makes the build the command `needs`. Returns the device the command's context names:

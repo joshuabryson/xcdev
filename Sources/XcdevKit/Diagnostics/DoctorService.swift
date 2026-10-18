@@ -262,8 +262,10 @@ public struct DoctorService: Sendable {
     func read(_ location: ProjectLocation) -> DoctorProject? {
         let paths = WorktreePaths(root: location.worktreeRoot)
         do {
-            let config = try ConfigLoader.load(worktreeRoot: location.worktreeRoot, projectRoot: location.projectRoot)
-            return DoctorProject(location: location, config: config, configError: nil, state: try? WorktreeStateStore.load(paths))
+            let loaded = try ConfigLoader.checkout(worktreeRoot: location.worktreeRoot, projectRoot: location.projectRoot)
+            if let note = loaded.note { Notes.current?.add(note) }
+            return DoctorProject(location: location, config: loaded.config, configError: nil, state: try? WorktreeStateStore.load(paths),
+                                 borrowedConfig: loaded.borrowedFrom)
         } catch let error as XcdError where error.code == .configMissing {
             return nil
         } catch let error as XcdError {

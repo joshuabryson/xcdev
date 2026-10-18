@@ -100,6 +100,8 @@ public struct DoctorProject: Sendable {
     public let config: XcdevConfig?
     public let configError: XcdError?
     public let state: WorktreeState?
+    /// The main checkout's `.xcdev.yml`, when `config` is borrowed from it.
+    public var borrowedConfig: String?
 }
 
 /// A snapshot of everything the checks look at, taken once and again after each round of fixes.

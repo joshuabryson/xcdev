@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 import XcdevTestSupport
 @testable import XcdevKit
@@ -37,6 +38,28 @@ import XcdevTestSupport
         #expect(call.environment["XCD_UDID"] == nil)
         #expect(call.environment["XCD_OUTPUT"] == "json")
         #expect(!fake.calls.contains { $0.arguments.starts(with: ["simctl", "clone"]) })
+    }
+
+    @Test func aBorrowedCommandWhoseScriptIsMissingSaysWhereTheCommandComesFrom() async throws {
+        defer { worktree.remove() }
+        stubShell(exit: 127)
+        let lines = Mutex<[String]>([])
+        let runner = ProjectCommandRunner(builds: BuildService(runner: fake, provisioner: worktree.provisioner,
+                                                               progress: { line in lines.withLock { $0.append(line) } }))
+        var ctx = try context("  seed: { run: ./scripts/seed.sh }")
+        ctx.borrowedConfig = "/p/.xcdev.yml"
+        #expect(try await runner.run("seed", arguments: [], in: &ctx) == 127)
+        #expect(lines.withLock { $0 } == ["`xcd seed` exited 127: its command was not found; check commands.seed.run in .xcdev.yml; "
+            + "the command comes from the main checkout's .xcdev.yml (/p/.xcdev.yml), and its script may not be on this branch; "
+            + "ask the user before changing that file"])
+        runner.explain(126, of: "seed", borrowedConfig: "/p/.xcdev.yml")
+        runner.explain(127, of: "seed", borrowedConfig: nil)
+        runner.explain(126, of: "seed", borrowedConfig: nil)
+        #expect(lines.withLock { $0 }.suffix(3) == [
+            "`xcd seed` exited 126: its script is not executable; run `chmod +x` on it; the command comes from the main checkout's .xcdev.yml (/p/.xcdev.yml)",
+            "`xcd seed` exited 127: its command was not found; check commands.seed.run in .xcdev.yml",
+            "`xcd seed` exited 126: its script is not executable; run `chmod +x` on it",
+        ])
     }
 
     /// The same runner, with the command's shell a real /bin/sh.

@@ -21,7 +21,7 @@ public struct RecordingsCheck: DoctorCheck {
     }
 
     func limit(_ entry: RegistryEntry) -> Duration {
-        (try? ConfigLoader.load(worktreeRoot: entry.path, projectRoot: entry.projectRoot))?.maxRecording ?? .seconds(600)
+        (try? ConfigLoader.checkout(worktreeRoot: entry.path, projectRoot: entry.projectRoot))?.config.maxRecording ?? .seconds(600)
     }
 
     func age(_ found: Found, _ env: DoctorEnvironment) -> Duration {
