@@ -71,10 +71,13 @@ public struct WorktreeStatusReport: Reportable {
 
 extension WorktreeRemoval: Reportable {
     public var text: String {
-        var lines = [
-            "removed worktree \(name)  devices=\(removedDevices.isEmpty ? "none" : removedDevices.joined(separator: ","))",
-            "branch kept: \(branch)",
-        ]
+        let devices = "devices=\(removedDevices.isEmpty ? "none" : removedDevices.joined(separator: ","))"
+        let keptLine = checkoutGone ? "the checkout at \(path) was already gone"
+            : branch.map { "the checkout at \(path) and its branch \($0) are left to whatever made them" }
+            ?? "the checkout at \(path), on a detached HEAD, is left to whatever made it"
+        var lines = keptCheckout
+            ? ["removed xcd's state for \(name)  " + devices, keptLine]
+            : ["removed worktree \(name)  " + devices, "branch kept: \(branch ?? name)"]
         if stateMissing {
             lines.append("note: the worktree's state was already gone, so any simulators it cloned may remain (named \"xcd · \(project) · \(name) · …\")")
         }

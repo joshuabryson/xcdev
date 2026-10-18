@@ -281,7 +281,8 @@ public struct WorktreeRemoval: Codable, Sendable, Equatable {
     public let name: String
     public let project: String
     public let path: String
-    public let branch: String
+    /// The branch kept, or for a checkout xcd keeps, its branch; nil on a detached HEAD. Left out of the JSON when nil.
+    public let branch: String?
     public let removedDevices: [String]
     /// True when the checkout or its state was already gone, so clones (if any) could not be found.
     public let stateMissing: Bool
@@ -291,11 +292,16 @@ public struct WorktreeRemoval: Codable, Sendable, Equatable {
     public var stoppedRunners: [String] = []
     /// Problems that `--force` removed the worktree despite, such as a failing `pre-worktree-remove` hook.
     public var warnings: [String] = []
+    /// True for a checkout xcd did not make: its folder and branch were left to whatever made them.
+    public var keptCheckout = false
+    /// True for a checkout xcd did not make whose folder was already gone.
+    public var checkoutGone = false
 }
 
 extension WorktreeService {
     /// Runs the worktree's `pre-worktree-remove` hook, then deletes its clones, the git worktree, and its registry
-    /// entry. Keeps the branch. Serialized with `create` per project across processes.
+    /// entry. Keeps the branch. Serialized with `create` per project across processes. A checkout xcd did not make
+    /// keeps its folder too, so neither the dirty check nor the hook applies: only xcd's part of it goes.
     ///
     /// A dirty worktree is refused before the hook runs, so teardown never runs for a removal that is then refused,
     /// and again after it if tracked files changed while it ran.
@@ -308,7 +314,7 @@ extension WorktreeService {
         return try await FileLock.withLock(at: lockPath(projectRoot: projectRoot, worktree: name)) {
             let entry = try entry(named: name, projectRoot: projectRoot)
             var warnings: [String] = []
-            if FileManager.default.fileExists(atPath: entry.path) {
+            if Disk.exists(entry.path), isXcds(entry, in: ctx) {
                 if !force { try await checkClean(entry) }
                 warnings = try await runPreRemoveHook(entry, force: force, in: ctx)
                 // The hook may have run for minutes: tracked edits made meanwhile would be lost to
@@ -378,17 +384,43 @@ extension WorktreeService {
         let runners = exists ? await Runners.stopAll(in: WorktreePaths(root: entry.path), detached: detached) : []
         let removedDevices = if let state { try await deleteClones(of: state) } else { [String]() }
 
+        let keepsCheckout = !isXcds(entry, in: ctx)
+        let branch = keepsCheckout ? await keptBranch(state, at: entry.path, exists: exists) : state?.branch ?? name
+        if keepsCheckout {
+            Disk.remove(WorktreePaths(root: entry.path).stateDirectory)
+        } else {
+            try await removeCheckout(entry, exists: exists, projectRoot: projectRoot)
+        }
+        try await registry.remove(id: entry.id)
+        return WorktreeRemoval(name: name, project: ctx.location.projectName, path: entry.path, branch: branch,
+                               removedDevices: removedDevices, stateMissing: state == nil,
+                               stoppedRecordings: stopped.map(\.note), stoppedRunners: runners, warnings: warnings,
+                               keptCheckout: keepsCheckout, checkoutGone: keepsCheckout && !exists)
+    }
+
+    /// Removes the git worktree of one of xcd's own worktrees, and whatever is left of its folder.
+    private func removeCheckout(_ entry: RegistryEntry, exists: Bool, projectRoot: String) async throws {
         if exists {
             // Cleanliness was checked around the hook (or the caller forced), so --force only lets git
             // delete ignored build state such as .xcdev/.
             try await runner.runChecked(.git(["worktree", "remove", "--force", entry.path], in: projectRoot),
-                                        next: "close anything using the worktree, then re-run `xcd wt remove \(name)`")
+                                        next: "close anything using the worktree, then re-run `xcd wt remove \(entry.name)`")
         }
         _ = try? await runner.run(.git(["worktree", "prune"], in: projectRoot))
-        if fm.fileExists(atPath: entry.path) { try? fm.removeItem(atPath: entry.path) }
-        try await registry.remove(id: entry.id)
-        return WorktreeRemoval(name: name, project: ctx.location.projectName, path: entry.path, branch: state?.branch ?? name,
-                               removedDevices: removedDevices, stateMissing: state == nil,
-                               stoppedRecordings: stopped.map(\.note), stoppedRunners: runners, warnings: warnings)
+        if Disk.exists(entry.path) { Disk.remove(entry.path) }
+    }
+
+    /// Whether `entry`'s checkout is one `create` made: a folder directly inside this project's worktrees folder. Any
+    /// other belongs to whatever made it, the user or an agent's tool, even one nested inside
+    /// an xcd worktree.
+    func isXcds(_ entry: RegistryEntry, in ctx: WorktreeContext) -> Bool {
+        Paths.canonical((entry.path as NSString).deletingLastPathComponent) == Paths.canonical(worktreesDirectory(for: ctx))
+    }
+
+    /// The branch of a checkout xcd leaves in place: the one git reports now while its folder is there (the state's
+    /// is only what it had at first use), else the state's; nil on a detached HEAD.
+    private func keptBranch(_ state: WorktreeState?, at path: String, exists: Bool) async -> String? {
+        if exists { return await currentBranch(at: path) }
+        return state?.branch
     }
 }

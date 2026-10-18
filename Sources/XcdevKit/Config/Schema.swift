@@ -103,7 +103,7 @@ public enum ConfigSchema {
                         example: "hooks:\n  pre-build: swiftgen"),
             SchemaField("post-launch", .string("Runs right after `xcd run` or `xcd launch` starts the app, before the crash window. XCD_UDID and XCD_BUNDLE_ID are set."),
                         example: "hooks:\n  post-launch: ./scripts/grant-permissions.sh"),
-            SchemaField("pre-worktree-remove", .string("Runs in the worktree at the start of `xcd wt remove`, before anything is deleted."),
+            SchemaField("pre-worktree-remove", .string("Runs in the worktree at the start of `xcd wt remove`, before anything is deleted; not for a checkout xcd did not make, which `wt remove` leaves in place."),
                         example: "hooks:\n  pre-worktree-remove: ./scripts/teardown.sh"),
         ]), example: "hooks:\n  pre-build: swiftgen\n  post-launch: ./scripts/grant-permissions.sh"),
         SchemaField("ui", .object("Screenshots, screen recordings, and the media folder they go to.", [
