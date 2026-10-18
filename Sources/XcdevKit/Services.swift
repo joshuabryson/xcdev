@@ -18,6 +18,8 @@ public struct Services: Sendable {
     public let detached: any DetachedProcessLaunching
     /// Carries requests to a clone's UI runner over loopback HTTP.
     public let runnerTransport: any RunnerTransport
+    /// Notes added while the command runs, printed after its result.
+    public let notes = Notes()
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, currentDirectory: String,
                 environment: [String: String], progress: @escaping @Sendable (String) -> Void = { _ in },
@@ -57,7 +59,11 @@ public struct Services: Sendable {
         return .plain(progress)
     }
 
-    public var worktrees: WorktreeService { WorktreeService(runner: runner, globalPaths: globalPaths, hooks: hooks, detached: detached) }
+    public var worktrees: WorktreeService {
+        var service = WorktreeService(runner: runner, globalPaths: globalPaths, hooks: hooks, detached: detached)
+        service.notes = notes
+        return service
+    }
     public var provisioner: DeviceProvisioner { DeviceProvisioner(runner: runner, globalPaths: globalPaths) }
     public var media: MediaService { MediaService(provisioner: provisioner, detached: detached, currentDirectory: currentDirectory) }
     public var runnerBuilder: RunnerBuilder { RunnerBuilder(runner: runner, globalPaths: globalPaths, progress: progress) }

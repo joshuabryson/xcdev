@@ -7,11 +7,15 @@ public protocol Reportable: Encodable, Sendable {
     /// Set when the command ran but its task failed (build errors, failing tests, a crash). The result
     /// is still rendered in full; the envelope says `ok: false` and the exit code comes from this error.
     var failure: XcdError? { get }
+    /// True when the text is data that scripts read, such as `$(xcd sim container)` or `eval "$(xcd context)"`. In
+    /// text, its notes then go to stderr, so the data stays as it was.
+    var textIsData: Bool { get }
 }
 
 public extension Reportable {
     var envelopeWorktree: String? { nil }
     var failure: XcdError? { nil }
+    var textIsData: Bool { false }
 }
 
 public enum OutputFormat: String, Sendable {

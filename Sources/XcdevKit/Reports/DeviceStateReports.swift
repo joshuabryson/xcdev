@@ -16,6 +16,7 @@ public struct PasteboardReport: Reportable {
     public let worktree: String
 
     public var envelopeWorktree: String? { worktree }
+    public var textIsData: Bool { true }
 }
 
 /// `xcd sim text-size`: the size the device has now, whether this command set it or only read it.
@@ -52,4 +53,5 @@ public struct ContainerReport: Reportable {
     }
 
     public var envelopeWorktree: String? { worktree }
+    public var textIsData: Bool { true }
 }

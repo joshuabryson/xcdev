@@ -26,6 +26,8 @@ public struct WorktreeService: Sendable {
     public let hooks: HookRunner?
     /// Stops a removed worktree's screen recordings.
     public let detached: any DetachedProcessLaunching
+    /// Where opening a checkout leaves notes for the command's result.
+    public var notes = Notes()
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, hooks: HookRunner? = nil,
                 detached: any DetachedProcessLaunching = SystemDetachedProcesses()) {

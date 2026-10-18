@@ -99,4 +99,5 @@ public struct ContextInfo: Reportable {
     }
 
     public var envelopeWorktree: String? { worktreeName }
+    public var textIsData: Bool { true }
 }

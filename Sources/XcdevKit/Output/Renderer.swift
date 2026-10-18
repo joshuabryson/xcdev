@@ -2,29 +2,43 @@ import Foundation
 
 public enum Renderer {
     /// A command's result. A payload with a `failure` renders as `ok: false` with both `data` and `error`;
-    /// in text, the failure's `next` is appended so every failed task ends with `next:`.
-    public static func report<P: Reportable>(_ payload: P, command: String, format: OutputFormat) -> String {
+    /// in text, the failure's `next` is appended so every failed task ends with `next:`. `notes`, by default the
+    /// command's (`Notes.current`), follow the result, before `next:`.
+    public static func report<P: Reportable>(_ payload: P, command: String, format: OutputFormat,
+                                             notes: [String] = Notes.current?.all ?? []) -> String {
         switch format {
         case .text:
-            guard let next = payload.failure?.next else { return payload.text }
-            return payload.text + "\nnext: \(next)"
+            guard !payload.textIsData else { return payload.text }
+            var lines = payload.text.components(separatedBy: "\n")
+            // A result that ends with a `next:` of its own keeps it last: notes come before `next:`.
+            let next = lines.last?.hasPrefix("next: ") == true ? lines.removeLast() : nil
+            lines += notes.map { "note: " + $0 } + [next].compactMap { $0 } + (payload.failure?.next.map { ["next: \($0)"] } ?? [])
+            return lines.joined(separator: "\n")
         case .json:
             return encode(Envelope(ok: payload.failure == nil, command: command, worktree: payload.envelopeWorktree,
-                                   data: payload, error: payload.failure.map(ErrorBody.init)))
+                                   data: payload, error: payload.failure.map(ErrorBody.init), notes: notes.isEmpty ? nil : notes))
         }
     }
 
+    /// The command's notes as lines for stderr: where a result whose text is data prints them in text, and where a
+    /// project command or plugin, whose output is its own, prints them. Empty when there are none.
+    public static func noteLines(_ notes: [String] = Notes.current?.all ?? []) -> String {
+        notes.map { "note: \($0)\n" }.joined()
+    }
+
+    /// A failure: the code and message, the details, the command's notes (as in `report`), then `next:`.
     public static func failure(_ error: XcdError, command: String, worktree: String? = nil,
-                               format: OutputFormat) -> String {
+                               format: OutputFormat, notes: [String] = Notes.current?.all ?? []) -> String {
         switch format {
         case .text:
             var lines = ["error[\(error.code.rawValue)]: \(error.message)"]
             lines += error.details.map { "  " + $0 }
+            lines += notes.map { "note: " + $0 }
             if let next = error.next { lines.append("next: \(next)") }
             return lines.joined(separator: "\n")
         case .json:
             return encode(Envelope<Empty>(ok: false, command: command, worktree: worktree,
-                                          data: nil, error: ErrorBody(error)))
+                                          data: nil, error: ErrorBody(error), notes: notes.isEmpty ? nil : notes))
         }
     }
 
@@ -52,6 +66,7 @@ private struct Envelope<Payload: Encodable>: Encodable {
     let worktree: String?
     let data: Payload?
     let error: ErrorBody?
+    let notes: [String]?
 }
 
 private struct ErrorBody: Encodable {

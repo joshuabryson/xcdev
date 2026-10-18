@@ -52,9 +52,15 @@ enum HelpCommand {
 enum External {
     static func run(_ name: String, arguments: [String]) async {
         let services = Services.live()
+        await Notes.$current.withValue(services.notes) { await run(name, arguments: arguments, services: services) }
+    }
+
+    /// Runs it with the command's notes as `Notes.current`, so that a failure is printed with them.
+    private static func run(_ name: String, arguments: [String], services: Services) async {
         do {
             let code = try await services.externalCommands.run(name, arguments: arguments,
                                                                builtins: Xcd.builtins.map(\.name))
+            StandardError.write(Renderer.noteLines())
             Foundation.exit(code)
         } catch let error as XcdError {
             await services.interrupts.output { print(Renderer.failure(error, command: name, format: services.output)) }
