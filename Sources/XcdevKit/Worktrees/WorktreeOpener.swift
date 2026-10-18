@@ -24,22 +24,9 @@ struct WorktreeOpener: Sendable {
         let state = if let saved = try WorktreeStateStore.load(WorktreePaths(root: location.worktreeRoot)) {
             saved
         } else {
-            try await firstUse(location)
+            try await FirstUseSetup(service: service).register(location)
         }
         return WorktreeContext(location: location, config: loaded.config, state: state, borrowedConfig: loaded.borrowedFrom)
-    }
-
-    /// The state of a checkout xcd has not seen before, saved in it and registered.
-    func firstUse(_ location: ProjectLocation) async throws -> WorktreeState {
-        let state = WorktreeState(
-            id: UUID().uuidString,
-            name: location.isMain ? "main" : URL(fileURLWithPath: location.worktreeRoot).lastPathComponent,
-            project: location.projectName, projectRoot: location.projectRoot, path: location.worktreeRoot,
-            branch: await service.currentBranch(at: location.worktreeRoot), xcode: nil, devices: [:],
-            status: .ready, createdAt: Date())
-        try WorktreeStateStore.save(state, WorktreePaths(root: location.worktreeRoot))
-        try await service.registry.upsert(RegistryEntry(state))
-        return state
     }
 }
 

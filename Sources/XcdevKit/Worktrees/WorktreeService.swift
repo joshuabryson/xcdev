@@ -152,9 +152,7 @@ public struct WorktreeService: Sendable {
         let projectRoot = ctx.location.projectRoot
         let existing = try registry.entries().first(where: { $0.projectRoot == projectRoot && $0.name == name })
         if let existing, existing.status == .ready, FileManager.default.fileExists(atPath: existing.path) {
-            let stored = try WorktreeStateStore.load(WorktreePaths(root: existing.path))
-            let state = if let stored { stored } else { try await open(from: existing.path).state }
-            return Checkout(state: state, created: false, branchCreated: false)
+            return Checkout(state: try await reopen(existing), created: false, branchCreated: false)
         }
         let branchExists = try await runner.run(
             .git(["rev-parse", "--verify", "--quiet", "refs/heads/\(name)"], in: projectRoot)).succeeded
@@ -170,6 +168,14 @@ public struct WorktreeService: Sendable {
                                   status: .incomplete, createdAt: Date())
         try await registry.upsert(RegistryEntry(state))
         return try await addWorktree(state, branchExists: branchExists, from: ref)
+    }
+
+    /// The state of a ready worktree of xcd's. One whose state was deleted is set up again, under the project's lock,
+    /// which `create` holds.
+    private func reopen(_ existing: RegistryEntry) async throws -> WorktreeState {
+        if let stored = try WorktreeStateStore.load(WorktreePaths(root: existing.path)) { return stored }
+        let location = ProjectLocation(projectRoot: existing.projectRoot, worktreeRoot: existing.path)
+        return try await FirstUseSetup(service: self).registerHoldingLock(location)
     }
 
     /// Adds the git worktree of a registered `incomplete` state, saves the state in it, and seeds its packages. Rolls
@@ -198,9 +204,10 @@ public struct WorktreeService: Sendable {
     }
 
     /// The project's resolved packages are copied into a new checkout, so it doesn't resolve them again.
-    private func seedSourcePackages(from projectRoot: String, into paths: WorktreePaths) async throws {
+    func seedSourcePackages(from projectRoot: String, into paths: WorktreePaths) async throws {
         let seed = WorktreePaths(root: projectRoot).sourcePackages
         guard FileManager.default.fileExists(atPath: seed) else { return }
+        guard !Disk.exists(paths.sourcePackages) else { return }
         // APFS clonefile copy: instant and space-free until files diverge.
         try await runner.runChecked(Invocation("/bin/cp", ["-c", "-R", seed, paths.sourcePackages]))
     }
