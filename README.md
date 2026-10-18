@@ -28,7 +28,7 @@ xcd --generate-completion-script zsh > ~/.zsh/completions/_xcd
 cd MyApp                  # a git repository with an Xcode project or Package.swift
 xcd init --plan           # see what xcd detected and the choices to make; writes nothing
 xcd init --defaults       # write .xcdev.yml with the recommendations (or --set key=value ...)
-xcd wt create login-flow  # a worktree with its own branch, simulators, and DerivedData
+xcd wt create login-flow  # another worktree, when you want one: its own branch, simulators, and DerivedData
 cd ../MyApp.worktrees/login-flow
 xcd build && xcd test && xcd run
 xcd ui screenshot         # a PNG of the simulator in .xcdev-media/<worktree>/<branch>/
@@ -41,6 +41,7 @@ xcd help                  # every command, project command, and plugin
 
 ## For agents
 
+- `xcd guide start` is where an agent begins: its checkout, the everyday commands, and how to read what they print.
 - `xcd guide setup` walks an agent through configuring a project with the user.
 - `xcd guide ui` teaches the see, act, verify loop for driving the app in the simulator.
 - `xcd guide deeplinks` shows how to describe the app's links, launch arguments, and navigation scripts as routes,
@@ -48,15 +49,22 @@ xcd help                  # every command, project command, and plugin
 - `xcd guide quality` covers `xcd format` and `xcd lint`, which run the project's formatter and linter on the Swift
   code a change touched: only the changed lines are reformatted, and only the findings the change introduced are
   shown.
-- `skills/xcdev/SKILL.md` is an agent skill, and `docs/agents/AGENTS-snippet.md` is a snippet for a project's
-  `AGENTS.md`, that teach agents to use `xcd`.
+- `xcd init` writes xcd's block, a few rules that point to `xcd guide start` (`docs/agents/AGENTS-snippet.md`), into
+  the project's AGENTS.md and CLAUDE.md, and `xcd init --agents` does it in a project already set up. `xcd doctor`
+  reports a block that differs from the installed xcd's, and `xcd doctor --fix` rewrites it.
+  `skills/xcdev/SKILL.md` is an agent skill with the same rules.
+- An agent works in the checkout it was given, whatever made it. In a worktree another tool made, xcd sets the checkout
+  up on its first command, uses the main checkout's `.xcdev.yml` when the branch has none, and runs the project's
+  `post-worktree-create` hook once the branch has its own `.xcdev.yml` and the worktree has no uncommitted changes.
+  `xcd wt remove` of such a checkout removes only xcd's part of it.
 - Every failure ends with a `next:` line, and `--json` prints one JSON object per command.
 - Ctrl-C (or SIGTERM, or SIGHUP when the terminal closes) stops what xcd started, xcodebuild and its compilers
   included, and exits 130 (143 for SIGTERM, 129 for SIGHUP) with one `xcd: interrupted` line on stderr.
 - `xcd doctor` checks simulators, worktrees, xcd's scratch folders and leftover package caches, and the project's
   setup; `xcd doctor --fix` repairs this project's problems, those of projects whose folders are gone, and xcd's own
-  leftovers, and says where to fix another project's. `xcd doctor --restart-simulators` restarts CoreSimulator when it
-  isn't answering, which shuts down every agent's simulators, so ask the user first.
+  leftovers. Another project's problems are listed apart, under a heading that says to ask the user, and never fail
+  the run. `xcd doctor --restart-simulators` restarts CoreSimulator when it isn't answering, which shuts down every
+  agent's simulators, so ask the user first.
 - SwiftLint searches hidden folders, so it would lint `.xcdev/` (DerivedData and package checkouts) on every build.
   `xcd init` adds `.xcdev` to the `excluded` list of the project's `.swiftlint.yml`, and `xcd doctor` reports a
   config that lacks it (`--fix` adds it). Until then `xcd build`, `xcd run`, and `xcd test` say so in a `note:`.

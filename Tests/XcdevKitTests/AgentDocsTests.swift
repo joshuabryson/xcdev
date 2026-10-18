@@ -8,7 +8,8 @@ import Testing
 
     /// Every `xcd <command>` the agent-facing docs mention is a real command, so they can't drift from the CLI.
     @Test(arguments: ["docs/agents/AGENTS-snippet.md", "skills/xcdev/SKILL.md", "README.md", "docs/agents/guides/setup.md",
-                      "docs/agents/guides/ui.md", "docs/agents/guides/deeplinks.md", "docs/agents/guides/quality.md"])
+                      "docs/agents/guides/ui.md", "docs/agents/guides/deeplinks.md", "docs/agents/guides/quality.md",
+                      "docs/agents/guides/start.md"])
     func docsOnlyNameRealCommands(_ file: String) throws {
         let text = try String(contentsOfFile: Self.repo + "/" + file, encoding: .utf8)
         let regex = try NSRegularExpression(pattern: "`xcd ([a-z-]+)")
@@ -21,26 +22,38 @@ import Testing
     }
 
     /// An agent that has never seen the project finds `xcd open` from each of these.
-    @Test(arguments: ["skills/xcdev/SKILL.md", "README.md", "docs/agents/guides/ui.md"])
+    @Test(arguments: ["docs/agents/guides/start.md", "README.md", "docs/agents/guides/ui.md"])
     func theDocsPointAtRoutes(_ file: String) throws {
         let text = try String(contentsOfFile: Self.repo + "/" + file, encoding: .utf8)
         #expect(text.contains("`xcd open") && text.contains("`xcd guide deeplinks`"), "\(file) doesn't mention xcd open and its guide")
     }
 
     /// An agent that has never seen the project finds `xcd lint` from each of these.
-    @Test(arguments: ["skills/xcdev/SKILL.md", "README.md"])
+    @Test(arguments: ["docs/agents/guides/start.md", "README.md"])
     func theDocsPointAtLint(_ file: String) throws {
         let text = try String(contentsOfFile: Self.repo + "/" + file, encoding: .utf8)
         #expect(text.contains("`xcd lint") && text.contains("`xcd guide quality`"), "\(file) doesn't mention xcd lint and its guide")
     }
 
     /// An agent that has never seen the project finds `xcd format` from each of these, before `xcd lint`.
-    @Test(arguments: ["skills/xcdev/SKILL.md", "README.md", "docs/agents/guides/quality.md"])
+    @Test(arguments: ["docs/agents/guides/start.md", "README.md", "docs/agents/guides/quality.md"])
     func theDocsPointAtFormatBeforeLint(_ file: String) throws {
         let text = try String(contentsOfFile: Self.repo + "/" + file, encoding: .utf8)
         let format = try #require(text.range(of: "xcd format"), "\(file) doesn't mention xcd format")
         let lint = try #require(text.range(of: "xcd lint"))
         #expect(format.lowerBound < lint.lowerBound, "\(file) names xcd lint before xcd format")
+    }
+
+    /// The block and the skill say the same few rules, and send the agent to `xcd guide start` for the rest.
+    @Test(arguments: ["docs/agents/AGENTS-snippet.md", "skills/xcdev/SKILL.md"])
+    func theBlockAndTheSkillPointAtTheStartGuide(_ file: String) throws {
+        let text = try String(contentsOfFile: Self.repo + "/" + file, encoding: .utf8)
+        for rule in ["Work in the checkout you are in", "`xcd guide start`", "when it says to ask the user, ask",
+                     "`xcd doctor --restart-simulators` shuts down every agent's simulators: ask the user first", "`xcd guide setup`",
+                     "If xcd says the project has no `.xcdev.yml`"] {
+            #expect(text.contains(rule), "\(file) doesn't say \(rule)")
+        }
+        #expect(!text.contains("`xcd wt create"), "\(file) still tells the agent to make a worktree")
     }
 
     @Test func theSkillHasFrontMatter() throws {

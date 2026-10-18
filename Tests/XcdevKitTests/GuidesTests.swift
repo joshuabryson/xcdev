@@ -10,7 +10,7 @@ import Testing
     /// The embedded guides are generated from docs/agents/guides; this fails until `scripts/embed-guides.sh` is re-run.
     @Test func embeddedGuidesMatchTheMarkdownInTheRepo() throws {
         let files = try FileManager.default.contentsOfDirectory(atPath: Self.guidesDirectory).filter { $0.hasSuffix(".md") }.sorted()
-        #expect(Guides.all.map(\.topic) == files.map { String($0.dropLast(3)) })
+        #expect(Guides.all.map(\.topic) == ["start"] + files.map { String($0.dropLast(3)) }.filter { $0 != "start" })
         for file in files {
             let markdown = try String(contentsOfFile: Self.guidesDirectory + "/" + file, encoding: .utf8)
             let guide = try Guides.guide(String(file.dropLast(3)))
@@ -18,10 +18,22 @@ import Testing
         }
     }
 
+    /// The guide an agent reads first: its checkout, what the notes about it mean, and when to ask the user.
+    @Test func startGuideCoversTheCheckoutTheCommandsAndWhenToAsk() throws {
+        let guide = try Guides.guide("start")
+        #expect(guide.summary == "Start here: Apple-platform work with xcd")
+        for text in ["The checkout you are in is yours", "`xcd wt create <name>`) only when the user asks", "hook=pending",
+                     "has no `.xcdev.yml`", "uncommitted changes", "\"elsewhere\"", "`xcd doctor --restart-simulators`",
+                     "`xcd guide setup`", "`xcd init --agents`", "## Everyday commands", "## Reading results"] {
+            #expect(guide.markdown.contains(text), "the start guide doesn't say \(text)")
+        }
+    }
+
     @Test func setupGuideWalksThroughInitPlanAndExplain() throws {
         let guide = try Guides.guide("setup")
         #expect(guide.summary == "Set up xcd in a project")
-        for step in ["xcd init --plan", "xcd config explain", "xcd init --set", "xcd init --defaults", "xcd config show", "xcd doctor"] {
+        for step in ["xcd init --plan", "xcd config explain", "xcd init --set", "xcd init --defaults", "xcd config show", "xcd doctor",
+                     "xcd init --agents", "`agents`"] {
             #expect(guide.markdown.contains(step), "setup guide doesn't mention \(step)")
         }
         // The reference covers every top-level section of the config.
@@ -117,6 +129,7 @@ import Testing
 
     @Test func listingAndUnknownTopic() throws {
         #expect(try GuideReport(topic: nil).text == """
+        start      Start here: Apple-platform work with xcd
         deeplinks  Open the app's links and routes
         quality    Format and lint the code you changed
         setup      Set up xcd in a project

@@ -9,9 +9,10 @@ public struct Guide: Codable, Sendable, Equatable {
 }
 
 public enum Guides {
-    /// Every guide, sorted by topic. The sources are docs/agents/guides/<topic>.md.
+    /// Every guide: `start`, where an agent begins, then the others by topic. The sources are
+    /// docs/agents/guides/<topic>.md.
     public static var all: [Guide] {
-        GuideText.topics.sorted { $0.key < $1.key }.map { topic, markdown in
+        GuideText.topics.sorted { ($0.key == "start" ? 0 : 1, $0.key) < ($1.key == "start" ? 0 : 1, $1.key) }.map { topic, markdown in
             let title = markdown.split(separator: "\n").first.map(String.init) ?? topic
             return Guide(topic: topic, summary: title.hasPrefix("# ") ? String(title.dropFirst(2)) : title, markdown: markdown)
         }

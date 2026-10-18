@@ -5,6 +5,7 @@ enum GuideText {
         "deeplinks": guideDeeplinks,
         "quality": guideQuality,
         "setup": guideSetup,
+        "start": guideStart,
         "ui": guideUi,
     ]
 }
