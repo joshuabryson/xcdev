@@ -15,7 +15,7 @@ struct ConfigCommand: AsyncParsableCommand {
 
         func run() async throws {
             try await Emit.run("config show", options) { services in
-                let ctx = try await services.open(worktree: options.worktree)
+                let ctx = try await services.open(worktree: options.worktree, runsPendingHook: false)
                 return ConfigReport(config: ctx.config, worktree: ctx.state)
             }
         }

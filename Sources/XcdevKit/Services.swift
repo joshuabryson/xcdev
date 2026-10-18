@@ -101,9 +101,11 @@ public struct Services: Sendable {
     public var help: HelpService { HelpService(services: self) }
     public var logs: LogService { LogService(runner: runner, provisioner: provisioner) }
 
-    /// Opens the worktree; `xcode` is a one-off `--xcode` override that is never pinned.
-    public func open(worktree: String?, xcode: String? = nil) async throws -> WorktreeContext {
-        var ctx = try await worktrees.open(from: currentDirectory, worktreeName: worktree)
+    /// Opens the worktree; `xcode` is a one-off `--xcode` override that is never pinned. A command that only looks passes
+    /// `runsPendingHook: false`; inside a hook (`XCD_HOOK`), no pending hook runs either.
+    public func open(worktree: String?, xcode: String? = nil, runsPendingHook: Bool = true) async throws -> WorktreeContext {
+        var ctx = try await worktrees.open(from: currentDirectory, worktreeName: worktree,
+                                           runsPendingHook: runsPendingHook && environment["XCD_HOOK"] == nil)
         if let xcode { ctx.xcodeOverride = try await XcodeDiscovery(runner: runner).resolve(spec: xcode) }
         return ctx
     }

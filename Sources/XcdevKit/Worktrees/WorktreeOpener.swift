@@ -6,8 +6,9 @@ struct WorktreeOpener: Sendable {
     let service: WorktreeService
 
     /// Opens the worktree containing `directory`, or the project's worktree named `worktreeName`.
-    /// First use of a checkout (main, or one made with plain git) initializes its state.
-    func open(from directory: String, worktreeName: String?) async throws -> WorktreeContext {
+    /// First use of a checkout (main, or one made with plain git) initializes its state. `runsPendingHook` is false for
+    /// commands that only look (`wt`, `config`, `context`) and inside a hook.
+    func open(from directory: String, worktreeName: String?, runsPendingHook: Bool) async throws -> WorktreeContext {
         var location = try await WorktreeLocator(runner: service.runner).locate(from: directory)
         if let worktreeName {
             let root = worktreeName == "main"
@@ -26,13 +27,16 @@ struct WorktreeOpener: Sendable {
         } else {
             try await FirstUseSetup(service: service).register(location)
         }
-        return WorktreeContext(location: location, config: loaded.config, state: state, borrowedConfig: loaded.borrowedFrom)
+        var ctx = WorktreeContext(location: location, config: loaded.config, state: state, borrowedConfig: loaded.borrowedFrom)
+        if runsPendingHook { ctx.state = try await FirstUseSetup(service: service).runPendingHook(ctx) }
+        return ctx
     }
 }
 
 extension WorktreeService {
-    /// Opens the worktree containing `directory`, or the project's worktree named `worktreeName`.
-    public func open(from directory: String, worktreeName: String? = nil) async throws -> WorktreeContext {
-        try await WorktreeOpener(service: self).open(from: directory, worktreeName: worktreeName)
+    /// Opens the worktree containing `directory`, or the project's worktree named `worktreeName`, running a pending
+    /// `post-worktree-create` hook unless `runsPendingHook` is false.
+    public func open(from directory: String, worktreeName: String? = nil, runsPendingHook: Bool = true) async throws -> WorktreeContext {
+        try await WorktreeOpener(service: self).open(from: directory, worktreeName: worktreeName, runsPendingHook: runsPendingHook)
     }
 }

@@ -26,9 +26,9 @@ public struct HookRunner: Sendable {
         try await run(hook, config: ctx.config, context: .build(ctx: ctx, device: device, output: output), logs: ctx.paths)
     }
 
-    /// Runs `hook` from `config` with `/bin/sh -c`, from `context.worktree`, with the context contract in its
-    /// environment and its output in a new `<yyyyMMdd-HHmmss>-hook-<name>.log` under `logs`. A non-zero exit
-    /// throws `hook_failed`. Returns the log, or nil when the hook isn't configured.
+    /// Runs `hook` from `config` with `/bin/sh -c`, from `context.worktree`, with the context contract and
+    /// `XCD_HOOK=<name>` in its environment and its output in a new `<yyyyMMdd-HHmmss>-hook-<name>.log` under `logs`. A
+    /// non-zero exit throws `hook_failed`. Returns the log, or nil when the hook isn't configured.
     @discardableResult
     public func run(_ hook: HookName, config: XcdevConfig, context: ContextInfo, logs: WorktreePaths) async throws -> String? {
         guard let command = config.hooks?.command(for: hook), !command.trimmingCharacters(in: .whitespaces).isEmpty else {
@@ -36,7 +36,7 @@ public struct HookRunner: Sendable {
         }
         let log = logs.newArtifact(in: logs.logs, kind: "hook-" + hook.rawValue, ext: "log", now: now())
         progress("running the \(hook.rawValue) hook: \(command)  log: \(log)")
-        let invocation = Invocation("/bin/sh", ["-c", command], environment: context.environment,
+        let invocation = Invocation("/bin/sh", ["-c", command], environment: context.environment.merging(["XCD_HOOK": hook.rawValue]) { $1 },
                                     workingDirectory: context.worktree, timeout: timeout, outputFile: log)
         let result: ProcessOutput
         do {

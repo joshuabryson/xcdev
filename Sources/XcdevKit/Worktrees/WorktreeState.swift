@@ -38,10 +38,13 @@ public struct WorktreeState: Codable, Sendable, Equatable {
     /// The ref this worktree's work is measured against, recorded by `xcd worktree create` when it makes the
     /// branch. Absent for the main checkout, a reused branch, and state written before this.
     public var base: String?
+    /// True while the `post-worktree-create` hook of a worktree xcd did not make has not run. Absent for the main
+    /// checkout, for worktrees `xcd worktree create` made, and in state written before this.
+    public var hookPending: Bool?
 
     public init(id: String, name: String, project: String, projectRoot: String, path: String, branch: String?,
                 xcode: XcodeInstall?, devices: [String: ProvisionedDevice], status: Status, createdAt: Date,
-                base: String? = nil) {
+                base: String? = nil, hookPending: Bool? = nil) {
         self.id = id
         self.name = name
         self.project = project
@@ -53,6 +56,7 @@ public struct WorktreeState: Codable, Sendable, Equatable {
         self.status = status
         self.createdAt = createdAt
         self.base = base
+        self.hookPending = hookPending
     }
 }
 

@@ -175,7 +175,7 @@ public struct WorktreeService: Sendable {
     private func reopen(_ existing: RegistryEntry) async throws -> WorktreeState {
         if let stored = try WorktreeStateStore.load(WorktreePaths(root: existing.path)) { return stored }
         let location = ProjectLocation(projectRoot: existing.projectRoot, worktreeRoot: existing.path)
-        return try await FirstUseSetup(service: self).registerHoldingLock(location)
+        return try await FirstUseSetup(service: self).registerHoldingLock(location, hookPending: false)
     }
 
     /// Adds the git worktree of a registered `incomplete` state, saves the state in it, and seeds its packages. Rolls

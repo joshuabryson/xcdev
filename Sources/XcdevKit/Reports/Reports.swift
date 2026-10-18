@@ -48,7 +48,8 @@ public struct WorktreeStatusReport: Reportable {
 
     public var text: String {
         var lines = [
-            "worktree \(worktree.name)  branch=\(worktree.branch ?? "-") status=\(worktree.status.rawValue)",
+            "worktree \(worktree.name)  branch=\(worktree.branch ?? "-") status=\(worktree.status.rawValue)"
+                + (worktree.hookPending == true ? " hook=pending" : ""),
             "path: \(worktree.path)",
         ]
         if let xcode = worktree.xcode {

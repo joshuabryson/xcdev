@@ -18,7 +18,7 @@ struct WorktreeCommand: AsyncParsableCommand {
 
         func run() async throws {
             try await Emit.run("wt create", options) { services in
-                let ctx = try await services.open(worktree: options.worktree)
+                let ctx = try await services.open(worktree: options.worktree, runsPendingHook: false)
                 let (state, created) = try await services.worktrees.createRecordingBase(name: name, from: from, in: ctx)
                 return WorktreeCreateReport(worktree: state, created: created)
             }
@@ -36,7 +36,7 @@ struct WorktreeCommand: AsyncParsableCommand {
                     return WorktreeListReport(worktrees: try await services.worktrees.listDetails(projectRoot: nil),
                                               includeProject: true)
                 }
-                let ctx = try await services.open(worktree: options.worktree)
+                let ctx = try await services.open(worktree: options.worktree, runsPendingHook: false)
                 return WorktreeListReport(worktrees: try await services.worktrees.listDetails(projectRoot: ctx.location.projectRoot),
                                           includeProject: false)
             }
@@ -49,7 +49,7 @@ struct WorktreeCommand: AsyncParsableCommand {
 
         func run() async throws {
             try await Emit.run("wt status", options) { services in
-                WorktreeStatusReport(worktree: try await services.open(worktree: options.worktree).state)
+                WorktreeStatusReport(worktree: try await services.open(worktree: options.worktree, runsPendingHook: false).state)
             }
         }
     }
@@ -63,7 +63,7 @@ struct WorktreeCommand: AsyncParsableCommand {
 
         func run() async throws {
             try await Emit.run("wt remove", options) { services in
-                let ctx = try await services.open(worktree: options.worktree)
+                let ctx = try await services.open(worktree: options.worktree, runsPendingHook: false)
                 return try await services.worktrees.remove(name: name, force: force, in: ctx)
             }
         }
