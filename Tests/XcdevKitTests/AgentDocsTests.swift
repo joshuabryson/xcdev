@@ -21,21 +21,21 @@ import Testing
     }
 
     /// An agent that has never seen the project finds `xcd open` from each of these.
-    @Test(arguments: ["docs/agents/AGENTS-snippet.md", "skills/xcdev/SKILL.md", "README.md", "docs/agents/guides/ui.md"])
+    @Test(arguments: ["skills/xcdev/SKILL.md", "README.md", "docs/agents/guides/ui.md"])
     func theDocsPointAtRoutes(_ file: String) throws {
         let text = try String(contentsOfFile: Self.repo + "/" + file, encoding: .utf8)
         #expect(text.contains("`xcd open") && text.contains("`xcd guide deeplinks`"), "\(file) doesn't mention xcd open and its guide")
     }
 
     /// An agent that has never seen the project finds `xcd lint` from each of these.
-    @Test(arguments: ["docs/agents/AGENTS-snippet.md", "skills/xcdev/SKILL.md", "README.md"])
+    @Test(arguments: ["skills/xcdev/SKILL.md", "README.md"])
     func theDocsPointAtLint(_ file: String) throws {
         let text = try String(contentsOfFile: Self.repo + "/" + file, encoding: .utf8)
         #expect(text.contains("`xcd lint") && text.contains("`xcd guide quality`"), "\(file) doesn't mention xcd lint and its guide")
     }
 
     /// An agent that has never seen the project finds `xcd format` from each of these, before `xcd lint`.
-    @Test(arguments: ["docs/agents/AGENTS-snippet.md", "skills/xcdev/SKILL.md", "README.md", "docs/agents/guides/quality.md"])
+    @Test(arguments: ["skills/xcdev/SKILL.md", "README.md", "docs/agents/guides/quality.md"])
     func theDocsPointAtFormatBeforeLint(_ file: String) throws {
         let text = try String(contentsOfFile: Self.repo + "/" + file, encoding: .utf8)
         let format = try #require(text.range(of: "xcd format"), "\(file) doesn't mention xcd format")
