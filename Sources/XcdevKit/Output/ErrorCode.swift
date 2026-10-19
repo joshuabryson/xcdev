@@ -23,6 +23,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
     case staleRef = "stale_ref"
     case platformUnsupported = "platform_unsupported"
     case runnerFailed = "runner_failed"
+    case postureFailed = "posture_failed"
     case hookFailed = "hook_failed"
     case routeFailed = "route_failed"
     case lintFailed = "lint_failed"
@@ -52,7 +53,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
              .notConfigured, .arrivalUnproven:
             return 2
         case .xcodeMissing, .xcodeRuntimeMismatch, .runtimeMissing, .cloneFailed, .simulatorFailed,
-             .subprocessFailed, .gitFailed, .timeout, .doctorProblems, .internalError, .runnerFailed, .toolMissing:
+             .subprocessFailed, .gitFailed, .timeout, .doctorProblems, .internalError, .runnerFailed, .toolMissing, .postureFailed:
             return 3
         }
     }
@@ -63,7 +64,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .usage: return "The command line is wrong: an unknown flag, a bad value, or a missing argument."
         case .notInProject: return "The current directory isn't inside a git repository (or has no Xcode project for init)."
         case .configMissing: return "The project has no .xcdev.yml; run `xcd guide setup`."
-        case .configInvalid: return ".xcdev.yml (or .xcdev.local.yml, or an init answer) has an unknown key or a bad value, or the project's lint config names a path by an absolute path, which `xcd lint` cannot follow."
+        case .configInvalid: return ".xcdev.yml (or .xcdev.local.yml, or an init answer) has an unknown key or a bad value, or the project's lint config names a path by an absolute path, which `xcd lint` cannot follow, or the posture recipe override cannot be parsed."
         case .deviceUnknown: return "--device names a device that isn't under devices: in .xcdev.yml."
         case .deviceTypeUnknown: return "A device's type isn't a simulator device type installed with this Xcode."
         case .worktreeNotFound: return "No worktree with that name, or its checkout was deleted outside xcd."
@@ -78,8 +79,9 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .arrivalUnproven: return "`xcd open` found the route's `expect` on screen but cannot show that the link brought it: it was there before the link was sent, or xcd could not look before."
         case .elementAmbiguous: return "More than one element matched the target; the error lists them with refs."
         case .staleRef: return "A ref from an earlier `xcd ui tree` no longer names one element; read the tree again."
-        case .platformUnsupported: return "UI driving works on iPhone and iPad simulators running iOS 17 or later, some hardware buttons exist only on some devices, and a watchOS simulator opens no custom-scheme link."
+        case .platformUnsupported: return "UI driving works on iPhone and iPad simulators running iOS 17 or later, some hardware buttons exist only on some devices, a watchOS simulator opens no custom-scheme link, and only a foldable (the iPhone Duo) has a hinge for `xcd sim fold`."
         case .runnerFailed: return "The UI runner inside the simulator could not be built or started, or stopped answering."
+        case .postureFailed: return "A foldable's hinge or rotation could not be set: no route reached the simulator's pose pipeline, or the simulator never showed the change; details name the step."
         case .hookFailed: return "A hook from .xcdev.yml exited non-zero; the error names the hook and its log."
         case .routeFailed: return "A route's script failed, or its link did not start the app."
         case .lintFailed: return "`xcd lint` showed a finding the linter marks as an error, or the project's lint command exited non-zero."
