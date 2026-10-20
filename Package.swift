@@ -16,7 +16,8 @@ let package = Package(
         .target(
             name: "XcdevKit",
             dependencies: [.product(name: "Yams", package: "Yams")],
-            exclude: ["UIRunner/Project"]
+            exclude: ["UIRunner/Project"],
+            linkerSettings: [.linkedFramework("IOKit")]
         ),
         .executableTarget(
             name: "xcd",
@@ -33,7 +34,8 @@ let package = Package(
         .testTarget(
             name: "XcdevKitTests",
             dependencies: ["XcdevKit", "XcdevTestSupport"],
-            resources: [.copy("Fixtures")]
+            resources: [.copy("Fixtures")],
+            linkerSettings: [.linkedFramework("IOKit")]
         ),
         .testTarget(
             name: "IntegrationTests",
