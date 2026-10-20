@@ -65,6 +65,7 @@ public struct Services: Sendable {
         return service
     }
     public var provisioner: DeviceProvisioner { DeviceProvisioner(runner: runner, globalPaths: globalPaths) }
+    public var xcodeOpener: XcodeOpener { XcodeOpener(runner: runner, provisioner: provisioner) }
     public var media: MediaService { MediaService(provisioner: provisioner, detached: detached, currentDirectory: currentDirectory) }
     public var runnerBuilder: RunnerBuilder { RunnerBuilder(runner: runner, globalPaths: globalPaths, progress: progress) }
     public var runners: RunnerSupervisor {

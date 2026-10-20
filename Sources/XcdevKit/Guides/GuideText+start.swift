@@ -33,6 +33,7 @@ command, the project's own commands (from `.xcdev.yml`), and installed plugins.
 | App output or unified log | `xcd logs --app`, `xcd logs [--since 2m] [--grep <text>] [--follow --for 30s]` |
 | Install, launch, stop | `xcd install`, `xcd launch`, `xcd terminate` |
 | Simulator | `xcd sim boot`, `xcd sim open`, `xcd sim erase` |
+| Open in Xcode | `xcd xcode` opens this worktree's project or package in the Xcode xcd uses, for a person to work in |
 | Screenshot or video | `xcd ui screenshot`, `xcd ui record start` … `xcd ui record stop` (each prints the file's path; read it) |
 | Read and drive the UI (iPhone/iPad) | Launch the app first (`xcd run` or `xcd launch`; not needed with `--system`). `xcd ui tree` lists what is on screen with refs; `xcd ui tap <target>`; `xcd ui type <text> --into <target> [--clear] [--submit]`; `xcd ui swipe up\|down\|left\|right [--on <target>]`; `xcd ui long-press <target>`; `xcd ui wait <target> [--gone]`; `xcd ui button home`; `xcd ui rotate landscape-left`. A target is `id:<identifier>`, `"label:<text>"`, `"label~<part>"`, `ref:e<N>` (or just `e<N>`), or `@x,y` (tap and long-press only). Read `xcd guide ui` before the first time |
 | Go straight to a screen | `xcd open` lists the project's routes; `xcd open <route> [name=value …]` opens one (a link, launch arguments, or the project's script) and checks that it arrived; `xcd open '<url>'` sends any link the app handles; `--cold` lets the link start the app. Read `xcd guide deeplinks` before adding routes |

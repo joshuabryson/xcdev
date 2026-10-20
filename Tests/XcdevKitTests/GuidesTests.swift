@@ -24,7 +24,8 @@ import Testing
         #expect(guide.summary == "Start here: Apple-platform work with xcd")
         for text in ["The checkout you are in is yours", "`xcd wt create <name>`) only when the user asks", "hook=pending",
                      "has no `.xcdev.yml`", "uncommitted changes", "\"elsewhere\"", "`xcd doctor --restart-simulators`",
-                     "`xcd guide setup`", "`xcd init --agents`", "## Everyday commands", "## Reading results"] {
+                     "`xcd guide setup`", "`xcd init --agents`", "## Everyday commands", "## Reading results",
+                     "| Open in Xcode | `xcd xcode` opens this worktree's project"] {
             #expect(guide.markdown.contains(text), "the start guide doesn't say \(text)")
         }
     }

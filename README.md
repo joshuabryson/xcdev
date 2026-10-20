@@ -36,6 +36,7 @@ xcd ui tree               # what is on screen; then xcd ui tap, type, swipe, and
 xcd open                  # the project's routes: links and scripts that take the app straight to a screen
 xcd format                # put the lines this worktree's change touched in the project's format
 xcd lint                  # the lint findings this worktree's change introduced, with the project's own linter
+xcd xcode                 # open this worktree's project in Xcode, the one xcd uses
 xcd help                  # every command, project command, and plugin
 ```
 

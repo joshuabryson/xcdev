@@ -67,7 +67,8 @@ import Testing
     @Test func commandsAndHooksAreNoLongerReserved() {
         #expect(!ConfigSchema.reservedTopLevelKeys.contains("commands"))
         #expect(!ConfigSchema.reservedTopLevelKeys.contains("hooks"))
-        #expect(BuiltinCommands.reservedNames.isSuperset(of: ["build", "wt", "help", "init", "guide", "doctor", "prune", "errors"]))
+        #expect(BuiltinCommands.reservedNames.isSuperset(of: ["build", "wt", "help", "init", "guide", "doctor", "prune", "errors",
+                                                              "xcode"]))
     }
 
     @Test func jsonSchemaDescribesCommandsAndHooks() throws {
