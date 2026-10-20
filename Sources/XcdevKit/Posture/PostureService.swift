@@ -45,7 +45,7 @@ public struct PostureService: Sendable {
         let before = try await reader(for: ctx).state(udid: target.clone.udid)
         guard let request = options.request else { return target.report(before, route: nil, verified: true, already: false) }
         if before.satisfies(request) { return target.report(before, route: nil, verified: true, already: true) }
-        let verdict = try await deliver(request, to: target, route: options.route, in: ctx)
+        let verdict = try await deliver(PostureChange(request, from: before), to: target, route: options.route, in: ctx)
         return target.report(verdict.state, route: .direct, verified: verdict.verified, already: false)
     }
 
@@ -63,7 +63,7 @@ public struct PostureService: Sendable {
         let request = PostureRequest.orientation(wanted)
         let already = before.satisfies(request)
         let verdict = already ? PostureVerdict(state: before, verified: true)
-                              : try await deliver(request, to: target, route: nil, in: ctx)
+                              : try await deliver(PostureChange(request, from: before), to: target, route: nil, in: ctx)
         var report = UIActionReport(action: "rotated to", target: orientation, element: nil, x: nil, y: nil,
                                     ms: Int(now().timeIntervalSince(started) * 1000), restarted: false,
                                     device: target.name, udid: target.clone.udid, worktree: target.worktree)
@@ -71,6 +71,7 @@ public struct PostureService: Sendable {
         return report
     }
 
+    /// The posture named is the verdict's, which a turn carries over from the read before the send.
     static func rotationNotes(_ verdict: PostureVerdict, already: Bool) -> [String] {
         var notes = ["via the pose pipeline (foldable): posture \(verdict.state.postureText), display \(verdict.state.display)"]
         if already { notes.append("already in that orientation; nothing sent") }
@@ -97,16 +98,17 @@ public struct PostureService: Sendable {
         PostureReader(runner: provisioner.runner, developerDir: ctx.xcode?.developerDir, now: now, sleep: sleep)
     }
 
-    /// Sends through the chosen route and waits for the witness while the route holds its connection.
-    func deliver(_ request: PostureRequest, to target: Target, route wanted: PostureRouteID?,
+    /// Sends through the chosen route and waits for the witness while the route holds its connection. The
+    /// witness also gets the state read before the send.
+    func deliver(_ change: PostureChange, to target: Target, route wanted: PostureRouteID?,
                  in ctx: WorktreeContext) async throws -> PostureVerdict {
         let context = try context(for: target, in: ctx)
         let route = try await pick(wanted, context)
         let reader = reader(for: ctx)
         let sentAt = now()
         do {
-            return try await route.apply(request, context) {
-                try await reader.waitForWitness(request, udid: context.udid, since: sentAt)
+            return try await route.apply(change.request, context) {
+                try await reader.waitForWitness(change, udid: context.udid, since: sentAt)
             }
         } catch let error as VendorEventError {
             throw XcdError(.postureFailed, "the \(route.id.rawValue) route failed at \(error.step)",

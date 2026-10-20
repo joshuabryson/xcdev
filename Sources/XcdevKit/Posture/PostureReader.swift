@@ -41,10 +41,26 @@ public struct PostureReader: Sendable {
         return WitnessLog(parsing: out.stdoutString)
     }
 
-    /// The state now: the displays, refined by the last hinge line and the last orientation update of this boot.
+    /// The state now: the displays, refined by the last hinge line and the last orientation update of this boot; the
+    /// orientation is devicectl's mapped word only when the boot has no update.
     public func state(udid: String) async throws -> PostureState {
         let displays = try await displays(udid: udid)
-        return Self.state(displays, try await witnessLog(udid: udid, last: "boot"), since: .distantPast)
+        let log = try await witnessLog(udid: udid, last: "boot")
+        let orientation = log.orientations.isEmpty ? displays.poseOrientation : log.orientations.last?.orientation
+        return PostureState(innerActive: displays.innerActive, degrees: log.poses.last?.degrees, posture: log.poses.last?.posture,
+                            orientation: orientation)
+    }
+}
+
+/// A request and the state read before it is sent, which the witness needs: the cover alone proves 0° only when the
+/// inner display was active before, and what the request leaves alone keeps the state it had.
+public struct PostureChange: Sendable, Equatable {
+    public var request: PostureRequest
+    public var before: PostureState
+
+    public init(_ request: PostureRequest, from before: PostureState) {
+        self.request = request
+        self.before = before
     }
 }
 
@@ -67,24 +83,24 @@ extension PostureReader {
     /// witnessed or 5 s pass. Throws `posture_failed` when the display never agreed or a turn was never
     /// witnessed; `verified: false` when only the display agreed with a hinge request, with the newest line after the
     /// send, if any, so an angle the simulator rounds is reported as it shows it.
-    public func waitForWitness(_ request: PostureRequest, udid: String, since: Date) async throws -> PostureVerdict {
+    public func waitForWitness(_ change: PostureChange, udid: String, since: Date) async throws -> PostureVerdict {
         let deadline = now().addingTimeInterval(DurationText.seconds(Self.witnessTimeout))
         var displays = try await self.displays(udid: udid)
         var log = WitnessLog()
         while true {
-            if Self.displaysAgree(request, displays) {
-                if Self.displaysSuffice(request) { return PostureVerdict(state: Self.state(displays, log, since: since), verified: true) }
+            if Self.displaysAgree(change.request, displays) {
+                if Self.displaysSuffice(change) { return PostureVerdict(state: Self.state(displays, log, since: since, for: change), verified: true) }
                 log = try await witnessLog(udid: udid, last: "15s")
-                if Self.logConfirms(request, log, since: since) {
-                    return PostureVerdict(state: Self.state(displays, log, since: since), verified: true)
+                if Self.logConfirms(change.request, log, since: since) {
+                    return PostureVerdict(state: Self.state(displays, log, since: since, for: change), verified: true)
                 }
             }
             guard now() < deadline else { break }
             try await sleep(.milliseconds(250))
             displays = try await self.displays(udid: udid)
         }
-        guard case .hinge = request, Self.displaysAgree(request, displays) else { throw Self.noWitness(request, displays) }
-        return PostureVerdict(state: Self.state(displays, log, since: since), verified: false)
+        guard case .hinge = change.request, Self.displaysAgree(change.request, displays) else { throw Self.noWitness(change.request, displays) }
+        return PostureVerdict(state: Self.state(displays, log, since: since, for: change), verified: false)
     }
 
     /// The display side of a request. For the hinge, the cover at 0°, the inner display from 90°, and either display
@@ -100,11 +116,12 @@ extension PostureReader {
         }
     }
 
-    /// Only 0° is verified by devicectl alone; every other angle needs its hinge line, and a turn its
-    /// orientation update.
-    static func displaysSuffice(_ request: PostureRequest) -> Bool {
-        guard case .hinge(let degrees) = request else { return false }
-        return degrees == 0
+    /// Only 0° is verified by devicectl alone, and only when the inner display was active before the send:
+    /// the Duo keeps the cover on up to 85°, so a cover that was already on proves nothing, and a hinge line within 1°
+    /// of 0° must follow. Every other angle needs its hinge line, and a turn its orientation update.
+    static func displaysSuffice(_ change: PostureChange) -> Bool {
+        guard case .hinge(let degrees) = change.request else { return false }
+        return degrees == 0 && change.before.innerActive
     }
 
     /// For the hinge, the newest hinge line after the send is within 1° of the angle asked for; for a turn, the newest
@@ -119,13 +136,20 @@ extension PostureReader {
         }
     }
 
-    /// The displays, the newest hinge line after `since`, and the device orientation: the newest orientation update read,
-    /// or devicectl's mapped word only when the log has none.
-    static func state(_ displays: DisplaysRead, _ log: WitnessLog, since: Date) -> PostureState {
-        let line = log.poses.last { $0.timestamp >= since }
-        let orientation = log.orientations.isEmpty ? displays.poseOrientation : log.orientations.last?.orientation
-        return PostureState(innerActive: displays.innerActive, degrees: line?.degrees, posture: line?.posture,
-                            orientation: orientation)
+    /// A verdict's state: the displays now; the hinge from the newest hinge line after the send, else unknown for a
+    /// hinge request and, for a turn, which moves no hinge, as read before the send; the orientation from the newest
+    /// update after the send, else as read before the send, since a hinge request turns nothing.
+    static func state(_ displays: DisplaysRead, _ log: WitnessLog, since: Date, for change: PostureChange) -> PostureState {
+        let update = log.orientations.last { $0.timestamp >= since }
+        var state = PostureState(innerActive: displays.innerActive, orientation: update?.orientation ?? change.before.orientation)
+        if let line = log.poses.last(where: { $0.timestamp >= since }) {
+            state.degrees = line.degrees
+            state.posture = line.posture
+        } else if case .orientation = change.request {
+            state.degrees = change.before.degrees
+            state.posture = change.before.posture
+        }
+        return state
     }
 
     /// A turn's `next:` names the tested recovery, since SpringBoard drops about one cover rotation in fifty and a

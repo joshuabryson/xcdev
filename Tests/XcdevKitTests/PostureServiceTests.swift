@@ -228,6 +228,49 @@ import XcdevTestSupport
         #expect(report.text.hasPrefix("posture: closed  display: cover  orientation: portrait  route: direct"))
     }
 
+    /// A hinge request turns nothing, so `closed` from open reports the orientation of the read before the send (the
+    /// boot's last update, landscape-left), not devicectl's word, which is the closed Home Screen's and stays portrait
+    ///. 0° from the inner display reads no log, so there is no newer update to take.
+    @Test func closedReportsTheOrientationOfTheReadBeforeTheSendNotTheScreens() async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        try stubBeforeAndAfter(route, before: line("2026-10-17 18:40:00.000", "180.0", "openFlat") + update("2026-10-17 18:41:00.000", "landscapeLeft"),
+                               after: "devicectl-displays-closed.json", afterLines: "", from: "devicectl-displays-open.json")
+        let report = try await service.fold(FoldOptions(posture: .closed), in: &ctx)
+        #expect(route.applied.withLock { $0 } == [.hinge(degrees: 0)])
+        #expect(report.verified && report.posture == "closed" && report.orientation == "landscape-left")
+    }
+
+    /// `open` from closed: an update newer than the send names the orientation; without one the read before the send
+    /// does, while devicectl's open word (`landscapeRight`, the quarter-turned screen) would map to portrait.
+    @Test(arguments: [("", "landscape-left"), ("portrait", "portrait")])
+    func openTakesTheUpdateAfterTheSendElseTheOrientationOfTheReadBefore(word: String, orientation: String) async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        let opened = line("2026-10-17 20:00:01.000", "180.0", "openFlat") + (word.isEmpty ? "" : update("2026-10-17 20:00:01.500", word))
+        try stubBeforeAndAfter(route, before: line("2026-10-17 18:33:20.000", "0.0", "fullyClosed") + update("2026-10-17 18:34:00.000", "landscapeLeft"),
+                               after: "devicectl-displays-open.json", afterLines: opened)
+        let report = try await service.fold(FoldOptions(posture: .open), in: &ctx)
+        #expect(report.verified && report.posture == "open" && report.orientation == orientation)
+    }
+
+    /// The cover stays on up to 85°, so a cover that was already on proves nothing about 0°: from
+    /// 61.7° `closed` is sent, and only a hinge line within 1° of 0° newer than the send verifies it; none is
+    /// `verified: false`, not `posture_failed`, since the display cannot disagree.
+    @Test(arguments: [("", false), ("0.0", true)])
+    func aCoverThatWasAlreadyOnVerifiesZeroDegreesOnlyByItsLine(degrees: String, verified: Bool) async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        try stubBeforeAndAfter(route, before: line("2026-10-17 18:33:20.000", "61.7", "closed"), after: "devicectl-displays-closed.json",
+                               afterLines: degrees.isEmpty ? "" : line("2026-10-17 20:00:01.000", degrees, "fullyClosed"))
+        let report = try await service.fold(FoldOptions(posture: .closed), in: &ctx)
+        #expect(route.applied.withLock { $0 } == [.hinge(degrees: 0)])
+        #expect(report.verified == verified && report.display == "cover" && report.angle == (verified ? 0 : nil))
+    }
+
     /// Below 90° either display may be on, since the Duo swaps displays at 85°: the line decides.
     @Test func aSmallAngleOnTheInnerDisplayIsVerifiedByItsLine() async throws {
         defer { worktree.remove() }
@@ -259,6 +302,17 @@ import XcdevTestSupport
         #expect(PostureReader.displaysAgree(.hinge(degrees: 0), cover) && !PostureReader.displaysAgree(.hinge(degrees: 0), inner))
         #expect(PostureReader.displaysAgree(.hinge(degrees: 89), cover) && PostureReader.displaysAgree(.hinge(degrees: 89), inner))
         #expect(!PostureReader.displaysAgree(.hinge(degrees: 90), cover) && PostureReader.displaysAgree(.hinge(degrees: 90), inner))
+    }
+
+    /// The cover alone suffices for 0° only when the inner display was active before the send; never
+    /// for another angle or a turn.
+    @Test func theCoverSufficesForZeroDegreesOnlyWhenTheInnerDisplayWasActiveBefore() {
+        let fromOpen = PostureState(innerActive: true, degrees: 180, posture: .open)
+        let fromCover = PostureState(innerActive: false, degrees: 61.7)
+        #expect(PostureReader.displaysSuffice(PostureChange(.hinge(degrees: 0), from: fromOpen)))
+        #expect(!PostureReader.displaysSuffice(PostureChange(.hinge(degrees: 0), from: fromCover)))
+        #expect(!PostureReader.displaysSuffice(PostureChange(.hinge(degrees: 30), from: fromOpen)))
+        #expect(!PostureReader.displaysSuffice(PostureChange(.orientation(.portrait), from: fromOpen)))
     }
 
     /// A line newer than the send verifies `open` only within 1° of 180°; the inner display is on in every case.
@@ -424,7 +478,9 @@ import XcdevTestSupport
     }
 
     /// While open, devicectl's word is turned a quarter (`portrait` for the pose landscape-left) and SpringBoard's update
-    /// names the device's own orientation, which verifies the turn as it is.
+    /// names the device's own orientation, which verifies the turn as it is. A turn moves no hinge,
+    /// so the note keeps the posture read before the send (`open`, not the display's `open or half`) when no hinge
+    /// line follows.
     @Test func anOpenTurnIsVerifiedByThePlainWordWhileTheScreenSaysTheQuarterTurnedOne() async throws {
         defer { worktree.remove() }
         let route = FakeRoute()
@@ -435,6 +491,7 @@ import XcdevTestSupport
                  beforeLog: openLine, afterLog: openLine + update("2026-10-17 20:00:01.000", "landscapeLeft"))
         let report = try await service.rotate("landscape-left", uiOptions, in: &ctx)
         #expect(route.applied.withLock { $0 } == [.orientation(.landscapeLeft)])
-        #expect(report.text.hasPrefix("rotated to landscape-left  ") && report.notes.first?.hasSuffix("display inner") == true)
+        #expect(report.text.hasPrefix("rotated to landscape-left  "))
+        #expect(report.notes == ["via the pose pipeline (foldable): posture open, display inner"])
     }
 }
