@@ -24,18 +24,20 @@ import XcdevTestSupport
     @Test func poseLinesComeFromTheSimulatorsOwnLogAtDebugLevel() async throws {
         fake.stub(["xcrun", "simctl", "spawn"], stdout: Fixture.string("springboard-devicepose.log"))
         let lines = try await reader().poseLines(udid: udid, last: "boot")
-        #expect(lines.map(\.degrees) == [90, 90, 0, 180])
+        #expect(lines.map(\.degrees) == [90, 90, 0, 180, 180, 90])
         let call = try #require(fake.calls.last)
         #expect(call.arguments == ["simctl", "spawn", udid, "log", "show", "--last", "boot", "--debug", "--style", "compact",
                                    "--predicate", PostureReader.predicate])
-        #expect(PostureReader.predicate == "process == \"SpringBoard\" AND category == \"DevicePose\" AND eventMessage BEGINSWITH \"DCMPose\"")
+        #expect(PostureReader.predicate == "process == \"SpringBoard\" AND ((category == \"DevicePose\" AND eventMessage BEGINSWITH \"DCMPose\") OR (category == \"DisplayContentMode\" AND eventMessage BEGINSWITH \"COMPLETED\"))")
     }
 
+    /// The fixture ends with a half merged into a running open: the open's `DCMPose` line says 180°, and only the
+    /// transition's `COMPLETED:` line says where the hinge went.
     @Test func theStateIsTheDisplaysRefinedByTheLastLineOfThisBoot() async throws {
         fake.stub(["xcrun", "devicectl", "device", "info", "displays"], stdout: Fixture.string("devicectl-displays-open.json"))
         fake.stub(["xcrun", "simctl", "spawn"], stdout: Fixture.string("springboard-devicepose.log"))
         let state = try await reader().state(udid: udid)
-        #expect(state == PostureState(innerActive: true, degrees: 180, posture: .open, orientation: .portrait))
+        #expect(state == PostureState(innerActive: true, degrees: 90, posture: .half, orientation: .portrait))
         #expect(fake.commandLines.last?.contains("--last boot") == true)
     }
 

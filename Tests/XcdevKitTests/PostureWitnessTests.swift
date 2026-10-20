@@ -59,10 +59,25 @@ import Testing
         #expect(line.degrees == 90 && line.posture == .half && line.state == "partiallyOpen+toClosed")
     }
 
+    /// A hinge change merged into a running display transition shows only in the transition's `COMPLETED:` line, whose
+    /// angle and state follow a `|`. Taken from a Duo clone's log, 2026-10-19.
+    @Test func aCompletedLineGivesTheAngleTheTransitionEndedAt() throws {
+        let line = try #require(PoseLine.parse(
+            "2026-10-19 18:22:22.535 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DisplayContentMode] COMPLETED:     .inner:pri .cover:aux | 90.0° (0.50 fold:1.00): partiallyOpen+foldAvoidance [device:Pu]"))
+        #expect(line.degrees == 90 && line.posture == .half && line.state == "partiallyOpen+foldAvoidance")
+        #expect(line.timestamp == PoseLine.timestamp("2026-10-19 18:22:22.535"))
+    }
+
+    /// The transition's other lines carry an angle after a `|` too, but say where it started, not where it ended.
+    @Test func startingAndResolvedLinesAreNotHingeLines() {
+        #expect(PoseLine.parse("2026-10-19 18:22:21.105 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DisplayContentMode] STARTING:      .inner:off→pri .cover:pri→aux | style .continuousSnapshot | 180.0° (1.00 fold:1.00): openFlat [device:Pu]") == nil)
+        #expect(PoseLine.parse("2026-10-19 18:22:21.104 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DisplayContentMode] DCMResolved: FullyClosed→FoldingDual | EE068395-1168-4EAC-893E-5DC96E43201E: target off→pri, resolved off→pri | 7F831870-EE1C-4FAE-A418-04E9F7109271: target pri→aux, resolved pri→aux") == nil)
+    }
+
     @Test func otherLinesAreSkippedAndTheOrderIsKept() {
         let lines = PoseLine.parseAll(Fixture.string("springboard-devicepose.log"))
-        #expect(lines.map(\.degrees) == [90, 90, 0, 180])
-        #expect(lines.map(\.posture) == [.half, .half, .closed, .open])
+        #expect(lines.map(\.degrees) == [90, 90, 0, 180, 180, 90])
+        #expect(lines.map(\.posture) == [.half, .half, .closed, .open, .open, .half])
         #expect(PoseLine.parse("2026-10-17 19:59:54.886 Df SpringBoard[88269:106d3677] [com.apple.SpringBoard:DevicePose] CMMagicPose surface orientation changed: cover Po -> Ll, inner Am -> Am") == nil)
         #expect(PoseLine.parse("Timestamp               Ty Process[PID:TID]") == nil)
     }

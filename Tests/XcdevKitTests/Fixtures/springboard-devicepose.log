@@ -5,3 +5,5 @@ Timestamp               Ty Process[PID:TID]
 2026-10-17 19:57:40.247 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DevicePose] DCMPose: 0.0° (0.00 fold:0.00): fullyClosed [device:Pu]
 2026-10-17 19:59:48.502 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DevicePose] DCMPose: 180.0° (1.00 fold:1.00): openFlat [device:Pu]
 2026-10-17 19:59:54.886 Df SpringBoard[88269:106d3677] [com.apple.SpringBoard:DevicePose] CMMagicPose surface orientation changed: cover Po -> Ll, inner Am -> Am
+2026-10-19 18:22:21.104 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DevicePose] DCMPose: 180.0° (1.00 fold:1.00): openFlat [device:Pu]
+2026-10-19 18:22:22.535 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DisplayContentMode] COMPLETED:     .inner:pri .cover:aux | 90.0° (0.50 fold:1.00): partiallyOpen+foldAvoidance [device:Pu]

@@ -94,8 +94,8 @@ public struct FoldOptions: Sendable, Equatable {
     }
 }
 
-/// What the simulator reports about a foldable: which display is active, the hinge when a `DCMPose` line
-/// of this boot said, and the orientation in the pose's own words.
+/// What the simulator reports about a foldable: which display is active, the hinge when a hinge line
+/// (`DCMPose:` or `COMPLETED:`) of this boot said, and the orientation in the pose's own words.
 public struct PostureState: Sendable, Equatable {
     public var innerActive: Bool
     public var degrees: Double?
@@ -109,9 +109,11 @@ public struct PostureState: Sendable, Equatable {
         self.orientation = orientation
     }
 
-    /// `closed`, `half`, `open`, or `open or half` when only the display is known.
+    /// `closed`, `half`, `open`: the line's posture, else the posture nearest its angle (61.7° `closed` is `half`); the
+    /// display's `closed` or `open or half` only when nothing else is known.
     public var postureText: String {
         if let posture { return posture.rawValue }
+        if let degrees { return Posture.nearest(degrees).rawValue }
         return innerActive ? "open or half" : "closed"
     }
 
@@ -119,14 +121,14 @@ public struct PostureState: Sendable, Equatable {
     public var display: String { innerActive ? "inner" : "cover" }
 
     /// Whether this state already is what `request` asks for, so nothing needs sending. The cover
-    /// being active is proof of 0° even without a hinge line; any other angle needs the line.
+    /// being active is proof of 0° only when no hinge line of this boot is known, since the Duo keeps the cover at
+    /// 61.7°; a known angle is decided by the 1° rule.
     public func satisfies(_ request: PostureRequest) -> Bool {
         switch request {
         case .orientation(let wanted):
             return orientation == wanted
         case .hinge(let wanted):
-            if !innerActive, wanted == 0 { return true }
-            guard let degrees else { return false }
+            guard let degrees else { return !innerActive && wanted == 0 }
             return abs(degrees - wanted) <= 1
         }
     }

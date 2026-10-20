@@ -40,8 +40,10 @@ public struct DisplaysRead: Sendable, Equatable {
     }
 }
 
-/// One `DCMPose` line of SpringBoard's DevicePose log, such as
-/// `2026-10-17 19:59:48.502 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DevicePose] DCMPose: 180.0° (1.00 fold:1.00): openFlat [device:Pu]`.
+/// One hinge line of SpringBoard's log: a `DCMPose` line of its DevicePose log, such as
+/// `2026-10-17 19:59:48.502 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DevicePose] DCMPose: 180.0° (1.00 fold:1.00): openFlat [device:Pu]`,
+/// or a display transition's `COMPLETED:` line, whose angle and state follow a `|`, such as
+/// `… [com.apple.SpringBoard:DisplayContentMode] COMPLETED:     .inner:pri .cover:aux | 90.0° (0.50 fold:1.00): partiallyOpen+foldAvoidance [device:Pu]`.
 public struct PoseLine: Sendable, Equatable {
     public var timestamp: Date
     public var degrees: Double
@@ -49,16 +51,16 @@ public struct PoseLine: Sendable, Equatable {
     /// The state word as logged, suffix included: `partiallyOpen+toClosed`.
     public var state: String
 
-    /// Nil for any other line.
+    /// Nil for any other line, a transition's `STARTING:` and `DCMResolved:` lines among them.
     public static func parse(_ line: String) -> PoseLine? {
-        let pattern = /^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+) .*DCMPose: ([0-9.]+)° \([^)]*\): ([A-Za-z+]+)/
+        let pattern = /^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+) .*(?:DCMPose: |COMPLETED: [^|]*\| )([0-9.]+)° \([^)]*\): ([A-Za-z+]+)/
         guard let match = line.firstMatch(of: pattern), let degrees = Double(match.2),
               let timestamp = timestamp(String(match.1)) else { return nil }
         let state = String(match.3)
         return PoseLine(timestamp: timestamp, degrees: degrees, posture: Posture(springBoardState: state), state: state)
     }
 
-    /// Every `DCMPose` line of a `log show --style compact` output, oldest first.
+    /// Every hinge line of a `log show --style compact` output, oldest first.
     public static func parseAll(_ output: String) -> [PoseLine] {
         output.split(separator: "\n").compactMap { parse(String($0)) }
     }

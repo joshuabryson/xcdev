@@ -16,8 +16,10 @@ public struct PostureReader: Sendable {
         self.sleep = sleep
     }
 
-    /// SpringBoard's `DCMPose` lines, which are debug level.
-    public static let predicate = "process == \"SpringBoard\" AND category == \"DevicePose\" AND eventMessage BEGINSWITH \"DCMPose\""
+    /// SpringBoard's `DCMPose` lines, and the `COMPLETED:` lines of its display transitions, which alone
+    /// carry the angle of a hinge change merged into a running transition.
+    public static let predicate = "process == \"SpringBoard\" AND ((category == \"DevicePose\" AND eventMessage BEGINSWITH \"DCMPose\") "
+        + "OR (category == \"DisplayContentMode\" AND eventMessage BEGINSWITH \"COMPLETED\"))"
 
     /// `xcrun devicectl device info displays`, with its JSON on stdout; about 0.2 s.
     public func displays(udid: String) async throws -> DisplaysRead {
@@ -27,7 +29,8 @@ public struct PostureReader: Sendable {
         return try DisplaysRead.parse(out.stdout)
     }
 
-    /// The `DCMPose` lines of the simulator's log for `window`: `boot` for this boot, or `15s`.
+    /// The hinge lines (`DCMPose:` and `COMPLETED:`) of the simulator's log for `window`: `boot` for this boot, or
+    /// `15s`.
     public func poseLines(udid: String, last window: String) async throws -> [PoseLine] {
         let args = ["simctl", "spawn", udid, "log", "show", "--last", window, "--debug", "--style", "compact",
                     "--predicate", Self.predicate]
@@ -36,7 +39,7 @@ public struct PostureReader: Sendable {
         return PoseLine.parseAll(out.stdoutString)
     }
 
-    /// The state now: the displays, refined by the last `DCMPose` line of this boot.
+    /// The state now: the displays, refined by the last hinge line of this boot.
     public func state(udid: String) async throws -> PostureState {
         let displays = try await displays(udid: udid)
         let last = try await poseLines(udid: udid, last: "boot").last
@@ -61,7 +64,8 @@ extension PostureReader {
     public static let witnessTimeout = Duration.seconds(5)
 
     /// Polls devicectl every 250 ms, and the log once the display agrees, until the request is witnessed or 5 s pass
-    ///. Throws `posture_failed` when the display never agreed; `verified: false` when only it did.
+    ///. Throws `posture_failed` when the display never agreed; `verified: false` when only it did, with the
+    /// newest line after the send, if any, so an angle the simulator rounds is reported as it shows it.
     public func waitForWitness(_ request: PostureRequest, udid: String, since: Date) async throws -> PostureVerdict {
         let deadline = now().addingTimeInterval(DurationText.seconds(Self.witnessTimeout))
         var displays = try await self.displays(udid: udid)
@@ -77,23 +81,23 @@ extension PostureReader {
             displays = try await self.displays(udid: udid)
         }
         guard Self.displaysAgree(request, displays) else { throw Self.noWitness(request, displays) }
-        return PostureVerdict(state: Self.state(displays, nil), verified: false)
+        return PostureVerdict(state: Self.state(displays, line), verified: false)
     }
 
     /// The display side of a request: the mapped word for a turn; for the hinge, the cover at 0°, the inner display from
-    /// 45°, and either display below 45°, since the angle at which the Duo swaps displays is unknown.
+    /// 90°, and either display between, since the Duo swaps displays at 85° and keeps the cover at 61.7°.
     static func displaysAgree(_ request: PostureRequest, _ displays: DisplaysRead) -> Bool {
         switch request {
         case .orientation(let wanted):
             return displays.poseOrientation == wanted
         case .hinge(let degrees):
             if degrees == 0 { return !displays.innerActive }
-            return degrees < 45 || displays.innerActive
+            return degrees < 90 || displays.innerActive
         }
     }
 
     /// 0° and every orientation are verified by devicectl alone; every other angle, half and open among
-    /// them, needs its `DCMPose` line.
+    /// them, needs its hinge line.
     static func displaysSuffice(_ request: PostureRequest) -> Bool {
         switch request {
         case .orientation: return true
@@ -101,7 +105,7 @@ extension PostureReader {
         }
     }
 
-    /// A `DCMPose` line within 1° of the angle asked for.
+    /// A hinge line within 1° of the angle asked for.
     static func lineConfirms(_ request: PostureRequest, _ line: PoseLine) -> Bool {
         guard case .hinge(let degrees) = request else { return false }
         return abs(line.degrees - degrees) <= 1
@@ -112,10 +116,17 @@ extension PostureReader {
                      orientation: displays.poseOrientation)
     }
 
+    /// A turn's `next:` names the tested recovery, since SpringBoard drops about one cover rotation in fifty and a
+    /// re-sent turn is a no-op.
     static func noWitness(_ request: PostureRequest, _ displays: DisplaysRead) -> XcdError {
-        XcdError(.postureFailed, "the simulator did not show \(describe(request)) within \(DurationText.format(witnessTimeout))",
-                 next: "run `xcd sim fold` to see the posture it is in, then `xcd doctor`",
-                 details: ["seen: display \(displays.innerActive ? "inner" : "cover"), orientation \(displays.deviceOrientation)"])
+        let next = switch request {
+        case .hinge: "run `xcd sim fold` to see the posture it is in, then `xcd doctor`"
+        case .orientation:
+            "run `xcd sim fold` to see the posture it is in, then rotate to another orientation and back: the simulator sometimes drops a turn"
+        }
+        return XcdError(.postureFailed, "the simulator did not show \(describe(request)) within \(DurationText.format(witnessTimeout))",
+                        next: next,
+                        details: ["seen: display \(displays.innerActive ? "inner" : "cover"), orientation \(displays.deviceOrientation)"])
     }
 
     static func describe(_ request: PostureRequest) -> String {

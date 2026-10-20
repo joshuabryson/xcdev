@@ -200,6 +200,19 @@ import XcdevTestSupport
         #expect(report.verified && report.angle == 120 && report.posture == "half")
     }
 
+    /// SpringBoard logs its own angle, not the one sent: 120° from closed is 118.3°. That is not
+    /// within 1°, so it is unverified, and the report gives the angle the simulator shows.
+    @Test func anAngleTheSimulatorRoundsIsUnverifiedWithTheAngleItShows() async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        try stubBeforeAndAfter(route, before: line("2026-10-17 18:33:20.000", "0.0", "fullyClosed"),
+                               after: "devicectl-displays-open.json", afterLines: line("2026-10-17 20:00:01.000", "118.3", "partiallyOpen"))
+        let report = try await service.fold(FoldOptions(degrees: 120), in: &ctx)
+        #expect(!report.verified && report.posture == "half" && report.angle == 118.3)
+        #expect(report.text.hasPrefix("posture: half (118°)  display: inner"))
+    }
+
     /// From open, the cover comes on after the send and no line follows: that proves 0°, and no other angle.
     @Test(arguments: [(FoldOptions(posture: .closed), true), (FoldOptions(degrees: 30), false)])
     func theCoverWithoutALineVerifiesOnlyZeroDegrees(options: FoldOptions, verified: Bool) async throws {
@@ -215,7 +228,7 @@ import XcdevTestSupport
         #expect(report.text.hasPrefix("posture: closed  display: cover  orientation: portrait  route: direct"))
     }
 
-    /// Below 45° either display may be on, since the angle at which the Duo swaps displays is unknown: the line decides.
+    /// Below 90° either display may be on, since the Duo swaps displays at 85°: the line decides.
     @Test func aSmallAngleOnTheInnerDisplayIsVerifiedByItsLine() async throws {
         defer { worktree.remove() }
         let route = FakeRoute()
@@ -224,6 +237,28 @@ import XcdevTestSupport
                                after: "devicectl-displays-open.json", afterLines: line("2026-10-17 20:00:01.000", "30.0", "partiallyOpen"))
         let report = try await service.fold(FoldOptions(degrees: 30), in: &ctx)
         #expect(report.verified && report.angle == 30 && report.display == "inner")
+    }
+
+    /// At 60° the Duo keeps the cover on, and SpringBoard's line says 61.7° `closed`: the display
+    /// agrees, the line is not within 1°, so it is unverified rather than `posture_failed`.
+    @Test func sixtyDegreesOnTheCoverIsUnverifiedNotPostureFailed() async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        try stubBeforeAndAfter(route, before: line("2026-10-17 18:33:20.000", "0.0", "fullyClosed"),
+                               after: "devicectl-displays-closed.json", afterLines: line("2026-10-17 20:00:01.000", "61.7", "closed"))
+        let report = try await service.fold(FoldOptions(degrees: 60), in: &ctx)
+        #expect(route.applied.withLock { $0 } == [.hinge(degrees: 60)])
+        #expect(!report.verified && report.display == "cover" && report.angle == 61.7)
+    }
+
+    /// The hinge's display rule: the cover at 0°, the inner display from 90°, either one between.
+    @Test func theDisplayRuleFollowsTheDuosSwapAt85Degrees() {
+        let cover = DisplaysRead(innerActive: false, deviceOrientation: "portrait")
+        let inner = DisplaysRead(innerActive: true, deviceOrientation: "landscapeRight")
+        #expect(PostureReader.displaysAgree(.hinge(degrees: 0), cover) && !PostureReader.displaysAgree(.hinge(degrees: 0), inner))
+        #expect(PostureReader.displaysAgree(.hinge(degrees: 89), cover) && PostureReader.displaysAgree(.hinge(degrees: 89), inner))
+        #expect(!PostureReader.displaysAgree(.hinge(degrees: 90), cover) && PostureReader.displaysAgree(.hinge(degrees: 90), inner))
     }
 
     /// A line newer than the send verifies `open` only within 1° of 180°; the inner display is on in every case.
@@ -345,7 +380,7 @@ import XcdevTestSupport
         let error = await #expect(throws: XcdError.self) { try await service.rotate("landscape-left", uiOptions, in: &ctx) }
         #expect(error?.code == .postureFailed)
         #expect(error?.message == "the simulator did not show the landscape-left orientation within 5.0s")
-        #expect(error?.next == "run `xcd sim fold` to see the posture it is in, then `xcd doctor`")
+        #expect(error?.next == "run `xcd sim fold` to see the posture it is in, then rotate to another orientation and back: the simulator sometimes drops a turn")
         #expect(error?.details == ["seen: display cover, orientation portrait"])
     }
 }

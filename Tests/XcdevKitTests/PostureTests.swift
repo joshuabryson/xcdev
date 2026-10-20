@@ -57,6 +57,10 @@ import Testing
         #expect(unknownAngle.postureText == "closed" && unknownAngle.display == "cover")
         #expect(PostureState(innerActive: true).postureText == "open or half")
         #expect(PostureState(innerActive: true, posture: .half).display == "inner")
+        // With a known angle the 1° rule decides, even on the cover, which the Duo keeps on at 61.7°; and the angle names
+        // its nearest posture when the line's state word is none of the three.
+        #expect(PostureState(innerActive: false, degrees: 61.7).satisfies(.hinge(degrees: 0)) == false)
+        #expect(PostureState(innerActive: false, degrees: 61.7).postureText == "half")
     }
 
     @Test func postureFailedIsAnEnvironmentFailure() {
