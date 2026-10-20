@@ -275,6 +275,32 @@ final class SentRequests: Sendable {
         #expect(sent.count == 3)
     }
 
+    @Test func treeAfterADeviceActionUsesTheHomeScreenAndNotesAFailedRead() async throws {
+        defer { base.worktree.remove() }
+        let sent = SentRequests()
+        let failing = Mutex(false)
+        var (service, ctx, _, _) = try base.setup { path, body in
+            sent.add(path, body ?? Data())
+            if failing.withLock({ $0 }) {
+                return FakeRunnerTransport.reply(Result<TreeResult, RunnerFailure>.failure(
+                    RunnerFailure(code: RunnerFailure.Code.internal, message: "the read failed")))
+            }
+            return FakeRunnerTransport.reply(Result<TreeResult, RunnerFailure>.success(UIServiceTests.tree))
+        }
+        try AppStateStore.save(AppState(), ctx.paths)
+        var report = UIActionReport(action: "rotated to", target: "portrait", element: nil, x: nil, y: nil, ms: 1, restarted: false,
+                                    device: "duo", udid: "U", worktree: "main")
+        await service.attachTreeAfterDeviceAction(to: &report, options, in: &ctx)
+        #expect(try sent.last(as: TreeRequest.self) == (RunnerProtocol.treePath, TreeRequest(bundleId: nil, system: true, all: false)))
+        #expect(report.tree == UIServiceTests.tree && report.notes.isEmpty)
+        failing.withLock { $0 = true }
+        var failed = report
+        failed.tree = nil
+        await service.attachTreeAfterDeviceAction(to: &failed, options, in: &ctx)
+        #expect(failed.tree == nil)
+        #expect(failed.notes == ["note: the tree could not be read after the action; run `xcd ui tree`"])
+    }
+
     @Test func aButtonTheDeviceLacksIsUnsupported() async throws {
         defer { base.worktree.remove() }
         var (service, ctx, _, _) = try base.setup { _, _ in

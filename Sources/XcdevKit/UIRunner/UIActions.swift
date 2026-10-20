@@ -115,6 +115,19 @@ extension UIService {
         return ActionScope(bundleId: bundle, system: bundle == nil, timeout: DurationText.seconds(options.effectiveTimeout), tree: options.tree)
     }
 
+    /// `--tree` after a device action that did not go through the runner (a foldable's rotation): the tree is read as
+    /// after any device action, from the Home Screen when no app resolves, and a failed read becomes a note.
+    public func attachTreeAfterDeviceAction(to report: inout UIActionReport, _ options: UIOptions, in ctx: inout WorktreeContext) async {
+        let scope = deviceScope(options, in: ctx)
+        let request = TreeRequest(bundleId: scope.bundleId, system: scope.system, all: false)
+        let exchange = RunnerExchange(path: RunnerProtocol.treePath, request: request, what: "read", resend: true)
+        if let (_, result) = try? await send(exchange, as: TreeResult.self, options, in: &ctx), case .success(let tree) = result {
+            report.tree = tree
+        } else {
+            report.notes.append("note: the tree could not be read after the action; run `xcd ui tree`")
+        }
+    }
+
     public func longPress(_ target: String, duration: Duration, _ options: UIOptions,
                           in ctx: inout WorktreeContext) async throws -> UIActionReport {
         guard duration >= .milliseconds(100), duration <= .seconds(20) else {

@@ -74,7 +74,6 @@ public struct PostureService: Sendable {
     static func rotationNotes(_ verdict: PostureVerdict, already: Bool) -> [String] {
         var notes = ["via the pose pipeline (foldable): posture \(verdict.state.postureText), display \(verdict.state.display)"]
         if already { notes.append("already in that orientation; nothing sent") }
-        if !verdict.verified { notes.append("unverified: devicectl did not report the orientation within 5 s") }
         return notes
     }
 
