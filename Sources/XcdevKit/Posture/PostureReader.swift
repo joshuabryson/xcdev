@@ -80,19 +80,24 @@ extension PostureReader {
         return PostureVerdict(state: Self.state(displays, nil), verified: false)
     }
 
-    /// The display side of a request: the cover for closed, the inner display otherwise, the mapped word for a turn.
+    /// The display side of a request: the mapped word for a turn; for the hinge, the cover at 0°, the inner display from
+    /// 45°, and either display below 45°, since the angle at which the Duo swaps displays is unknown.
     static func displaysAgree(_ request: PostureRequest, _ displays: DisplaysRead) -> Bool {
         switch request {
-        case .orientation(let wanted): return displays.poseOrientation == wanted
-        case .hinge(let degrees): return displays.innerActive == (Posture.nearest(degrees) != .closed)
+        case .orientation(let wanted):
+            return displays.poseOrientation == wanted
+        case .hinge(let degrees):
+            if degrees == 0 { return !displays.innerActive }
+            return degrees < 45 || displays.innerActive
         }
     }
 
-    /// Closed and every orientation are verified by devicectl alone; half, open, and angles need the log.
+    /// 0° and every orientation are verified by devicectl alone; every other angle, half and open among
+    /// them, needs its `DCMPose` line.
     static func displaysSuffice(_ request: PostureRequest) -> Bool {
         switch request {
         case .orientation: return true
-        case .hinge(let degrees): return Posture.nearest(degrees) == .closed
+        case .hinge(let degrees): return degrees == 0
         }
     }
 

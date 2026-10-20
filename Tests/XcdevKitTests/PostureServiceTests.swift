@@ -122,12 +122,14 @@ import XcdevTestSupport
         }
     }
 
-    /// Before the send the clone is closed with the given line; after it, devicectl says `after` and the log `afterLines`.
-    func stubBeforeAndAfter(_ route: FakeRoute, before: String, after: String, afterLines: String) throws {
-        let closed = Fixture.string("devicectl-displays-closed.json")
+    /// Before the send devicectl says `from` (closed unless given) and the log the given line; after it, devicectl says
+    /// `after` and the log `afterLines`.
+    func stubBeforeAndAfter(_ route: FakeRoute, before: String, after: String, afterLines: String,
+                            from: String = "devicectl-displays-closed.json") throws {
+        let earlier = Fixture.string(from)
         let later = Fixture.string(after)
         worktree.runner.stub(["xcrun", "devicectl", "device", "info", "displays"]) { _ in
-            ProcessOutput(stdout: route.sent.withLock { $0 } ? later : closed)
+            ProcessOutput(stdout: route.sent.withLock { $0 } ? later : earlier)
         }
         worktree.runner.stub(["xcrun", "simctl", "spawn"]) { invocation in
             ProcessOutput(stdout: invocation.arguments.contains("boot") ? before : afterLines)
@@ -196,6 +198,44 @@ import XcdevTestSupport
         let report = try await service.fold(FoldOptions(degrees: 120), in: &ctx)
         #expect(route.applied.withLock { $0 } == [.hinge(degrees: 120)])
         #expect(report.verified && report.angle == 120 && report.posture == "half")
+    }
+
+    /// From open, the cover comes on after the send and no line follows: that proves 0°, and no other angle.
+    @Test(arguments: [(FoldOptions(posture: .closed), true), (FoldOptions(degrees: 30), false)])
+    func theCoverWithoutALineVerifiesOnlyZeroDegrees(options: FoldOptions, verified: Bool) async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        try stubBeforeAndAfter(route, before: line("2026-10-17 18:40:00.000", "180.0", "openFlat"),
+                               after: "devicectl-displays-closed.json", afterLines: "", from: "devicectl-displays-open.json")
+        let request = try #require(options.request)
+        let report = try await service.fold(options, in: &ctx)
+        #expect(route.applied.withLock { $0 } == [request])
+        #expect(report.verified == verified)
+        #expect(report.text.hasPrefix("posture: closed  display: cover  orientation: portrait  route: direct"))
+    }
+
+    /// Below 45° either display may be on, since the angle at which the Duo swaps displays is unknown: the line decides.
+    @Test func aSmallAngleOnTheInnerDisplayIsVerifiedByItsLine() async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        try stubBeforeAndAfter(route, before: line("2026-10-17 18:33:20.000", "0.0", "fullyClosed"),
+                               after: "devicectl-displays-open.json", afterLines: line("2026-10-17 20:00:01.000", "30.0", "partiallyOpen"))
+        let report = try await service.fold(FoldOptions(degrees: 30), in: &ctx)
+        #expect(report.verified && report.angle == 30 && report.display == "inner")
+    }
+
+    /// A line newer than the send verifies `open` only within 1° of 180°; the inner display is on in every case.
+    @Test(arguments: [(179.0, true), (178.0, false), (90.0, false)])
+    func aLineVerifiesOpenOnlyWithinOneDegree(degrees: Double, verified: Bool) async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        try stubBeforeAndAfter(route, before: line("2026-10-17 18:33:20.000", "0.0", "fullyClosed"), after: "devicectl-displays-open.json",
+                               afterLines: line("2026-10-17 20:00:01.000", String(degrees), Posture.nearest(degrees).springBoardState))
+        let report = try await service.fold(FoldOptions(posture: .open), in: &ctx)
+        #expect(report.verified == verified && report.display == "inner")
     }
 
     /// What asking a clone that stays closed to open through `route` throws.
