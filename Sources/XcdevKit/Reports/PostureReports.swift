@@ -27,7 +27,7 @@ public struct PostureReport: Reportable {
         if let orientation { line += "  orientation: \(orientation)" }
         if let route { line += "  route: \(route)" }
         if already { line += "  (already there, nothing sent)" }
-        if !verified { line += "  unverified: the display agrees but no DCMPose line confirmed it" }
+        if !verified { line += "  unverified: the simulator did not report the requested angle within 5s" }
         return line
     }
 

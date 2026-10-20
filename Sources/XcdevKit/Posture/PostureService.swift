@@ -78,19 +78,21 @@ public struct PostureService: Sendable {
         return notes
     }
 
-    /// Boots `device`'s clone and checks it has a hinge; `platform_unsupported` otherwise.
+    /// Provisions `device`'s clone, checks it has a hinge (`platform_unsupported` otherwise, with nothing booted), and
+    /// only then boots it.
     func foldable(_ device: String?, in ctx: inout WorktreeContext) async throws -> Target {
         let name = try provisioner.deviceName(device, config: ctx.config)
         let recipes = try recipes.load()
-        let (clone, _) = try await provisioner.boot(name, in: &ctx)
-        guard recipes.isFoldable(deviceTypeIdentifier: clone.deviceTypeIdentifier) else {
+        let provisioned = try await provisioner.ensure(name, in: &ctx)
+        guard recipes.isFoldable(deviceTypeIdentifier: provisioned.deviceTypeIdentifier) else {
             let foldables = ctx.state.devices.filter { recipes.isFoldable(deviceTypeIdentifier: $0.value.deviceTypeIdentifier) }
             let names = foldables.keys.sorted()
-            throw XcdError(.platformUnsupported, "device '\(name)' (\(clone.deviceType)) has no hinge",
+            throw XcdError(.platformUnsupported, "device '\(name)' (\(provisioned.deviceType)) has no hinge",
                            next: names.isEmpty
                                ? "add a foldable under `devices:` in .xcdev.yml, e.g. `duo: { type: \"iPhone Duo\", runtime: \"27.1\" }`"
                                : "pass --device \(names.joined(separator: "|"))")
         }
+        let (clone, _) = try await provisioner.boot(name, in: &ctx)
         return Target(name: name, clone: clone, worktree: ctx.state.name, recipes: recipes)
     }
 

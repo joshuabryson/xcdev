@@ -159,7 +159,7 @@ extension PostureReader {
         switch request {
         case .hinge:
             return XcdError(.postureFailed, message, next: "run `xcd sim fold` to see the posture it is in, then `xcd doctor`",
-                            details: ["seen: display \(displays.innerActive ? "inner" : "cover"), orientation \(displays.deviceOrientation)"])
+                            details: ["seen: display \(displays.innerActive ? "inner" : "cover"), screen \(displays.deviceOrientation)"])
         case .orientation:
             return XcdError(.postureFailed, message,
                             next: "run `xcd sim fold` to see the posture it is in, wait a few seconds, then rotate to another orientation and back: the simulator sometimes drops a turn",

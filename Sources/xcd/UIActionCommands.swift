@@ -107,6 +107,7 @@ extension UICommand {
         func run() async throws {
             let (orientation, ui) = (orientation, try action.options())
             try await UICommand.actWithServices("ui rotate", options) { services, ctx in
+                guard DeviceOrientation(rawValue: orientation) != nil else { return try await services.ui.rotate(orientation, ui, in: &ctx) }
                 guard try await services.posture.isFoldable(device: ui.device, in: &ctx) else {
                     return try await services.ui.rotate(orientation, ui, in: &ctx)
                 }

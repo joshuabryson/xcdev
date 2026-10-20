@@ -39,11 +39,7 @@ extension UICommand {
     /// Opens the worktree, stops an overdue recording, and runs one action.
     static func act(_ command: String, _ options: GlobalOptions,
                     _ body: @escaping (UIService, inout WorktreeContext) async throws -> UIActionReport) async throws {
-        try await Emit.run(command, options) { services in
-            var ctx = try await services.open(worktree: options.worktree)
-            await Recording.stopOverdue(services, ctx)
-            return try await body(services.ui, &ctx)
-        }
+        try await actWithServices(command, options) { services, ctx in try await body(services.ui, &ctx) }
     }
 
     /// Like `act`, for an action that needs more than the UI service: `ui rotate` chooses the pose pipeline on a foldable.

@@ -12,7 +12,7 @@ struct UICommand: AsyncParsableCommand {
         running in front: start it with `xcd run` or `xcd launch` first (not needed with --system, button, or rotate). \
         Every action takes --tree, which prints the tree after it. Driving works on iPhone and iPad simulators running \
         iOS 17 or later. No `ui` command takes focus on the Mac or opens a window; on a foldable, `ui rotate` and \
-        `xcd sim fold` may open Device Hub hidden in the background when the direct route fails. `xcd sim open` shows \
+        `xcd sim fold` go through the simulator's pose pipeline and open nothing. `xcd sim open` shows \
         the simulator when a person wants to watch. `xcd guide ui` has the whole loop.
 
         Captures go to ui.media.dir (default .xcdev-media/<worktree>/<branch> in the main checkout); each prints its path.

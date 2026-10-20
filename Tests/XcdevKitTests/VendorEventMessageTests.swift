@@ -22,9 +22,12 @@ import Testing
         #expect(xpc_dictionary_get_string(message, "featureIdentifier").map { String(cString: $0) }
                     == "com.apple.coredevice.feature.remote.hid.vendordefined")
         #expect(xpc_dictionary_get_bool(message, "isBarrier") == false)
+        #expect(xpc_get_type(try #require(xpc_dictionary_get_value(message, "isBarrier"))) == XPC_TYPE_BOOL)
         let event = try #require(xpc_dictionary_get_value(message, "payload"))
         // The daemon decodes these as UInt16 with Codable, so they must be xpc uint64, not int64.
-        #expect(xpc_get_type(try #require(xpc_dictionary_get_value(event, "usagePage"))) == XPC_TYPE_UINT64)
+        for key in ["usagePage", "usage", "version"] {
+            #expect(xpc_get_type(try #require(xpc_dictionary_get_value(event, key))) == XPC_TYPE_UINT64, "\(key)")
+        }
         #expect(xpc_dictionary_get_uint64(event, "usagePage") == 0xff61)
         #expect(xpc_dictionary_get_uint64(event, "usage") == 0x5b)
         #expect(xpc_dictionary_get_uint64(event, "version") == 0)

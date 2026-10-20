@@ -94,6 +94,8 @@ import XcdevTestSupport
         #expect(error?.code == .platformUnsupported)
         #expect(error?.message == "device 'iphone' (iPhone 18 Pro) has no hinge")
         #expect(error?.next == "pass --device duo")
+        let phone = try #require(ctx.state.devices["iphone"]?.udid)          // provisioned, never booted
+        #expect(!worktree.runner.commandLines.contains { $0.contains("simctl boot") && $0.contains(phone) })
     }
 
     @Test func isFoldableAnswersByTheClonesDeviceType() async throws {
@@ -169,7 +171,7 @@ import XcdevTestSupport
                                after: "devicectl-displays-open.json", afterLines: line("2026-10-17 18:00:00.000", "180.0", "openFlat"))
         let report = try await service.fold(FoldOptions(posture: .open), in: &ctx)
         #expect(!report.verified && report.posture == "open or half" && report.display == "inner")
-        #expect(report.text.hasSuffix("unverified: the display agrees but no DCMPose line confirmed it"))
+        #expect(report.text.hasSuffix("  unverified: the simulator did not report the requested angle within 5s"))
     }
 
     @Test func openFromHalfWaitsForTheHingeLineNotTheDisplay() async throws {
@@ -341,7 +343,7 @@ import XcdevTestSupport
         #expect(error?.code == .postureFailed)
         #expect(error?.message == "the simulator did not show the hinge at 180° within 5.0s")
         #expect(error?.next == "run `xcd sim fold` to see the posture it is in, then `xcd doctor`")
-        #expect(error?.details == ["seen: display cover, orientation portrait"])
+        #expect(error?.details == ["seen: display cover, screen portrait"])
     }
 
     @Test func anUnavailableRouteIsPostureFailedWithItsReason() async throws {
