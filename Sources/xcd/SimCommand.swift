@@ -6,7 +6,7 @@ struct SimCommand: AsyncParsableCommand {
         commandName: "sim",
         abstract: "Control this worktree's simulator clones.",
         subcommands: [Boot.self, Shutdown.self, Erase.self, Open.self, OpenURL.self, Push.self, Privacy.self, StatusBar.self,
-                      Appearance.self, TextSize.self, Location.self, Pasteboard.self, AddMedia.self, Container.self,
+                      Appearance.self, TextSize.self, Location.self, Pasteboard.self, AddMedia.self, Container.self, Fold.self,
                       UICommand.Screenshot.self, UICommand.Record.self]
     )
 
