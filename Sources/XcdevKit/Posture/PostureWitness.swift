@@ -73,3 +73,51 @@ public struct PoseLine: Sendable, Equatable {
         return formatter.date(from: text)
     }
 }
+
+/// One `Updated device orientation update to:` line of SpringBoard's DeviceOrientationUpdateDeferral log, such as
+/// `… [com.apple.SpringBoard:DeviceOrientationUpdateDeferral] Updated device orientation update to: landscapeLeft (3) animated: YES …`.
+/// SpringBoard writes one for every turn it applies, and none for a turn it drops.
+public struct OrientationLine: Sendable, Equatable {
+    public var timestamp: Date
+    /// SpringBoard's word: portrait, portraitUpsideDown, landscapeLeft, landscapeRight.
+    public var word: String
+
+    /// The device orientation the word names. It is the device's own in both postures, unlike devicectl's word, which is
+    /// the screen's and is turned a quarter while open. Nil for any other word.
+    public var orientation: DeviceOrientation? {
+        switch word {
+        case "portrait": .portrait
+        case "portraitUpsideDown": .portraitUpsideDown
+        case "landscapeLeft": .landscapeLeft
+        case "landscapeRight": .landscapeRight
+        default: nil
+        }
+    }
+
+    /// Nil for any other line, a `Deferred device orientation update to:` line among them.
+    public static func parse(_ line: String) -> OrientationLine? {
+        let pattern = /^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+) .*Updated device orientation update to: ([A-Za-z]+) \(\d+\)/
+        guard let match = line.firstMatch(of: pattern), let timestamp = PoseLine.timestamp(String(match.1)) else { return nil }
+        return OrientationLine(timestamp: timestamp, word: String(match.2))
+    }
+
+    /// Every orientation update of a `log show --style compact` output, oldest first.
+    public static func parseAll(_ output: String) -> [OrientationLine] {
+        output.split(separator: "\n").compactMap { parse(String($0)) }
+    }
+}
+
+/// What one read of the simulator's log says: its hinge lines and its orientation updates, each oldest first.
+public struct WitnessLog: Sendable, Equatable {
+    public var poses: [PoseLine]
+    public var orientations: [OrientationLine]
+
+    public init(poses: [PoseLine] = [], orientations: [OrientationLine] = []) {
+        self.poses = poses
+        self.orientations = orientations
+    }
+
+    public init(parsing output: String) {
+        self.init(poses: PoseLine.parseAll(output), orientations: OrientationLine.parseAll(output))
+    }
+}

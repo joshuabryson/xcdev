@@ -74,6 +74,31 @@ import Testing
         #expect(PoseLine.parse("2026-10-19 18:22:21.104 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DisplayContentMode] DCMResolved: FullyClosed→FoldingDual | EE068395-1168-4EAC-893E-5DC96E43201E: target off→pri, resolved off→pri | 7F831870-EE1C-4FAE-A418-04E9F7109271: target pri→aux, resolved pri→aux") == nil)
     }
 
+    /// SpringBoard's orientation update while closed, from a Duo clone's log, 2026-10-19.
+    @Test func anOrientationUpdateGivesTheTimeAndTheDevicesOrientation() throws {
+        let line = try #require(OrientationLine.parse(
+            "2026-10-19 19:42:40.438 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DeviceOrientationUpdateDeferral] Updated device orientation update to: landscapeLeft (3) animated: YES for reason: Device pose changed (surfaceType: .cover currentPose: 0.0° (0.00 fold:0.00): fullyClosed [device:Ll inner:Pu])"))
+        #expect(line.word == "landscapeLeft" && line.orientation == .landscapeLeft)
+        #expect(line.timestamp == PoseLine.timestamp("2026-10-19 19:42:40.438"))
+    }
+
+    /// While open, the update names the device's own orientation, not devicectl's quarter-turned word, which said
+    /// `portraitUpsideDown` at that moment.
+    @Test func anOpenOrientationUpdateIsTheDevicesOwnWordAndTheOrderIsKept() {
+        let lines = OrientationLine.parseAll(Fixture.string("springboard-orientation.log"))
+        #expect(lines.map(\.word) == ["landscapeLeft", "landscapeRight"])
+        #expect(lines.map(\.orientation) == [.landscapeLeft, .landscapeRight])
+        #expect(OrientationLine(timestamp: Date(), word: "faceUp").orientation == nil)
+    }
+
+    /// A hinge line is not an orientation update, a deferred update is not one either, and an update is not a hinge line.
+    @Test func orientationUpdatesAndHingeLinesAreToldApart() {
+        let fixture = Fixture.string("springboard-devicepose.log")
+        #expect(OrientationLine.parseAll(fixture).isEmpty)
+        #expect(PoseLine.parseAll(Fixture.string("springboard-orientation.log")).isEmpty)
+        #expect(OrientationLine.parse("2026-10-19 19:37:09.595 Df SpringBoard[81258:112e4005] [com.apple.SpringBoard:DeviceOrientationUpdateDeferral] Deferred device orientation update to: portrait (1) animated: YES for reason: Device orientation update deferral state changed (surfaceType: .cover currentPose: 0.0° (0.00 fold:0.00): fullyClosed [device:Pu])") == nil)
+    }
+
     @Test func otherLinesAreSkippedAndTheOrderIsKept() {
         let lines = PoseLine.parseAll(Fixture.string("springboard-devicepose.log"))
         #expect(lines.map(\.degrees) == [90, 90, 0, 180, 180, 90])

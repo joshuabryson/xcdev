@@ -1,0 +1,3 @@
+Timestamp               Ty Process[PID:TID]
+2026-10-19 19:42:40.438 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DeviceOrientationUpdateDeferral] Updated device orientation update to: landscapeLeft (3) animated: YES for reason: Device pose changed (surfaceType: .cover currentPose: 0.0° (0.00 fold:0.00): fullyClosed [device:Ll inner:Pu])
+2026-10-19 19:43:54.806 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DeviceOrientationUpdateDeferral] Updated device orientation update to: landscapeRight (4) animated: YES for reason: Device pose changed (surfaceType: .inner currentPose: 180.0° (1.00 fold:1.00): openFlat [device:Lr cover:Ll])

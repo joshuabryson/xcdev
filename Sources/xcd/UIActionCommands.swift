@@ -97,7 +97,7 @@ extension UICommand {
             An app that doesn't support the orientation stays as it is; the tree's first line says which orientation the \
             screen is in. On a foldable (iPhone Duo) the rotation goes through the simulator's pose pipeline, which the \
             device follows where it ignores XCUITest's; portrait-upside-down is not available there, and the command fails \
-            with `posture_failed` when the simulator does not show the turn within 5 s.
+            with `posture_failed` when the simulator does not report the turn within 5 s.
             """
         )
         @Argument(help: "The orientation.", completion: .list(DeviceOrientation.allCases.map(\.rawValue))) var orientation: String

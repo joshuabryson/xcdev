@@ -9,7 +9,8 @@ public struct PostureReport: Reportable {
     public let angle: Double?
     /// `cover` or `inner`.
     public let display: String
-    /// The pose's own word, nil when devicectl's word was not in the table.
+    /// The device orientation in the pose's own word: from SpringBoard's last orientation update of this boot, or
+    /// devicectl's mapped word only when there is none; nil when neither names one.
     public let orientation: String?
     /// The route that delivered the request; nil when nothing was sent.
     public let route: String?

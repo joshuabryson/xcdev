@@ -335,18 +335,32 @@ import XcdevTestSupport
 
     let uiOptions = UIOptions(device: nil, bundle: nil, system: false, role: nil, index: nil, timeout: .seconds(2))
 
-    @Test func rotateOnAFoldableGoesThroughTheRouteAndIsVerifiedByDevicectl() async throws {
+    /// SpringBoard's orientation update, which names the device orientation.
+    func update(_ time: String, _ word: String) -> String {
+        let number = ["portrait": 1, "portraitUpsideDown": 2, "landscapeLeft": 3, "landscapeRight": 4][word] ?? 0
+        return "\(time) Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DeviceOrientationUpdateDeferral] Updated device orientation update to: \(word) (\(number)) animated: YES for reason: Device pose changed\n"
+    }
+
+    /// devicectl says `screen`, or `turnedScreen` once the route has sent; every log read says `beforeLog` until the route
+    /// sends and `afterLog` after it.
+    func stubTurn(_ route: FakeRoute, screen: String, turnedScreen: String? = nil, beforeLog: String, afterLog: String) {
+        worktree.runner.stub(["xcrun", "devicectl", "device", "info", "displays"]) { _ in
+            ProcessOutput(stdout: route.sent.withLock { $0 } ? (turnedScreen ?? screen) : screen)
+        }
+        worktree.runner.stub(["xcrun", "simctl", "spawn"]) { _ in
+            ProcessOutput(stdout: route.sent.withLock { $0 } ? afterLog : beforeLog)
+        }
+    }
+
+    /// The fresh clone's case: the closed Home Screen never turns, so devicectl keeps saying portrait, and SpringBoard's
+    /// update after the send verifies the turn.
+    @Test func rotateOnAFoldableIsVerifiedBySpringBoardsUpdateWhileTheScreenStaysPortrait() async throws {
         defer { worktree.remove() }
         let route = FakeRoute()
         var (service, ctx) = try setup(routes: [route])
-        try stubBeforeAndAfter(route, before: line("2026-10-17 18:33:20.000", "0.0", "fullyClosed"),
-                               after: "devicectl-displays-closed.json", afterLines: "")
-        // Later stubs win: once the route has sent, devicectl reports the cover turned to landscapeLeft.
-        let closed = Fixture.string("devicectl-displays-closed.json")
-        let turned = closed.replacingOccurrences(of: "\"portrait\"", with: "\"landscapeLeft\"")
-        worktree.runner.stub(["xcrun", "devicectl", "device", "info", "displays"]) { _ in
-            ProcessOutput(stdout: route.sent.withLock { $0 } ? turned : closed)
-        }
+        let closedLine = line("2026-10-17 18:33:20.000", "0.0", "fullyClosed")
+        stubTurn(route, screen: Fixture.string("devicectl-displays-closed.json"), beforeLog: closedLine,
+                 afterLog: closedLine + update("2026-10-17 20:00:01.000", "landscapeLeft"))
         let report = try await service.rotate("landscape-left", uiOptions, in: &ctx)
         #expect(route.applied.withLock { $0 } == [.orientation(.landscapeLeft)])
         #expect(report.action == "rotated to" && report.target == "landscape-left" && report.device == "duo")
@@ -371,16 +385,56 @@ import XcdevTestSupport
         #expect(route.applied.withLock { $0 }.isEmpty)
     }
 
-    @Test func aRotationTheDisplayNeverShowsIsPostureFailed() async throws {
+    /// A turn SpringBoard drops writes no orientation update: `posture_failed`, never unverified.
+    @Test func aRotationWithoutAnOrientationUpdateIsPostureFailed() async throws {
         defer { worktree.remove() }
         let route = FakeRoute()
         var (service, ctx) = try setup(routes: [route])
-        try stubBeforeAndAfter(route, before: line("2026-10-17 18:33:20.000", "0.0", "fullyClosed"),
-                               after: "devicectl-displays-closed.json", afterLines: "")
+        let closedLine = line("2026-10-17 18:33:20.000", "0.0", "fullyClosed")
+        stubTurn(route, screen: Fixture.string("devicectl-displays-closed.json"), beforeLog: closedLine, afterLog: closedLine)
         let error = await #expect(throws: XcdError.self) { try await service.rotate("landscape-left", uiOptions, in: &ctx) }
         #expect(error?.code == .postureFailed)
         #expect(error?.message == "the simulator did not show the landscape-left orientation within 5.0s")
         #expect(error?.next == "run `xcd sim fold` to see the posture it is in, wait a few seconds, then rotate to another orientation and back: the simulator sometimes drops a turn")
-        #expect(error?.details == ["seen: display cover, orientation portrait"])
+        #expect(error?.details == ["seen: no orientation update; screen portrait"])
+    }
+
+    /// An update from before the send that names the orientation asked for does not verify the turn.
+    @Test func anOrientationUpdateFromBeforeTheSendDoesNotVerifyATurn() async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        try stubBeforeAndAfter(route, before: line("2026-10-17 18:33:20.000", "0.0", "fullyClosed") + update("2026-10-17 18:33:21.000", "portrait"),
+                               after: "devicectl-displays-closed.json", afterLines: update("2026-10-17 18:00:00.000", "landscapeLeft"))
+        let error = await #expect(throws: XcdError.self) { try await service.rotate("landscape-left", uiOptions, in: &ctx) }
+        #expect(error?.code == .postureFailed && route.applied.withLock { $0 } == [.orientation(.landscapeLeft)])
+    }
+
+    /// The already-check reads the device orientation from the last update of the boot, not the screen: devicectl says
+    /// portrait, the device is in landscape-left, so nothing is sent.
+    @Test func alreadyIsTheLastOrientationUpdateNotTheScreen() async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        let log = line("2026-10-17 18:33:20.000", "0.0", "fullyClosed") + update("2026-10-17 18:34:00.000", "landscapeLeft")
+        stubTurn(route, screen: Fixture.string("devicectl-displays-closed.json"), beforeLog: log, afterLog: log)
+        let report = try await service.rotate("landscape-left", uiOptions, in: &ctx)
+        #expect(route.applied.withLock { $0 }.isEmpty)
+        #expect(report.notes == ["via the pose pipeline (foldable): posture closed, display cover", "already in that orientation; nothing sent"])
+    }
+
+    /// While open, devicectl's word is turned a quarter (`portrait` for the pose landscape-left) and SpringBoard's update
+    /// names the device's own orientation, which verifies the turn as it is.
+    @Test func anOpenTurnIsVerifiedByThePlainWordWhileTheScreenSaysTheQuarterTurnedOne() async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        let open = Fixture.string("devicectl-displays-open.json")
+        let openLine = line("2026-10-17 18:40:00.000", "180.0", "openFlat")
+        stubTurn(route, screen: open, turnedScreen: open.replacingOccurrences(of: "\"landscapeRight\"", with: "\"portrait\""),
+                 beforeLog: openLine, afterLog: openLine + update("2026-10-17 20:00:01.000", "landscapeLeft"))
+        let report = try await service.rotate("landscape-left", uiOptions, in: &ctx)
+        #expect(route.applied.withLock { $0 } == [.orientation(.landscapeLeft)])
+        #expect(report.text.hasPrefix("rotated to landscape-left  ") && report.notes.first?.hasSuffix("display inner") == true)
     }
 }
