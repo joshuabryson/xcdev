@@ -380,7 +380,7 @@ import XcdevTestSupport
         let error = await #expect(throws: XcdError.self) { try await service.rotate("landscape-left", uiOptions, in: &ctx) }
         #expect(error?.code == .postureFailed)
         #expect(error?.message == "the simulator did not show the landscape-left orientation within 5.0s")
-        #expect(error?.next == "run `xcd sim fold` to see the posture it is in, then rotate to another orientation and back: the simulator sometimes drops a turn")
+        #expect(error?.next == "run `xcd sim fold` to see the posture it is in, wait a few seconds, then rotate to another orientation and back: the simulator sometimes drops a turn")
         #expect(error?.details == ["seen: display cover, orientation portrait"])
     }
 }

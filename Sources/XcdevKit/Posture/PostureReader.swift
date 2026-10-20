@@ -122,7 +122,7 @@ extension PostureReader {
         let next = switch request {
         case .hinge: "run `xcd sim fold` to see the posture it is in, then `xcd doctor`"
         case .orientation:
-            "run `xcd sim fold` to see the posture it is in, then rotate to another orientation and back: the simulator sometimes drops a turn"
+            "run `xcd sim fold` to see the posture it is in, wait a few seconds, then rotate to another orientation and back: the simulator sometimes drops a turn"
         }
         return XcdError(.postureFailed, "the simulator did not show \(describe(request)) within \(DurationText.format(witnessTimeout))",
                         next: next,
