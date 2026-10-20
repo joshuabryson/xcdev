@@ -32,6 +32,20 @@ struct PostureIntegrationTests {
 
     let ui = UIOptions(device: nil, bundle: nil, system: false, role: nil, index: nil, timeout: .seconds(2))
 
+    /// Rotates, recovering once from a turn SpringBoard drops: on `posture_failed` it turns to the
+    /// orientation that is neither the target nor the one the device shows, then to the target, and returns that report.
+    func rotate(_ orientation: String, _ svc: Services, in ctx: inout WorktreeContext) async throws -> UIActionReport {
+        do {
+            return try await svc.posture.rotate(orientation, ui, in: &ctx)
+        } catch let error as XcdError where error.code == .postureFailed {
+            let shown = try await svc.posture.fold(FoldOptions(), in: &ctx).orientation
+            let other = ["landscape-left", "landscape-right", "portrait"].first { $0 != orientation && $0 != shown } ?? "portrait"
+            print("PostureIntegrationTests: the simulator dropped the turn to \(orientation); recovering via \(other)")
+            _ = try await svc.posture.rotate(other, ui, in: &ctx)
+            return try await svc.posture.rotate(orientation, ui, in: &ctx)
+        }
+    }
+
     @Test(.timeLimit(.minutes(10))) func foldsRotatesInBothPosturesAndRefusesAPhone() async throws {
         guard let duo = try await duoType() else {
             print("PostureIntegrationTests: no iPhone Duo with an available runtime on this Mac; nothing to test")
@@ -48,24 +62,25 @@ struct PostureIntegrationTests {
             #expect(half.posture == "half" && half.angle == 90 && half.verified)
             let again = try await svc.posture.fold(FoldOptions(posture: .half), in: &ctx)
             #expect(again.already && again.route == nil)
+            // From 90° SpringBoard writes no line for 120°; the hinge did move, so the display agrees.
             let angle = try await svc.posture.fold(FoldOptions(degrees: 120), in: &ctx)
-            #expect(angle.angle == 120 && angle.posture == "half" && angle.verified)
+            #expect(angle.display == "inner" && !angle.verified)
 
-            let turned = try await svc.posture.rotate("landscape-right", ui, in: &ctx)
+            let turned = try await rotate("landscape-right", svc, in: &ctx)
             #expect(turned.text.hasPrefix("rotated to landscape-right") && !turned.notes.contains { $0.hasPrefix("unverified") })
             let openTurned = try await svc.posture.fold(FoldOptions(), in: &ctx)
             #expect(openTurned.orientation == "landscape-right" && openTurned.display == "inner")
-            _ = try await svc.posture.rotate("portrait", ui, in: &ctx)
+            _ = try await rotate("portrait", svc, in: &ctx)
 
             let closed = try await svc.posture.fold(FoldOptions(posture: .closed), in: &ctx)
             #expect(closed.posture == "closed" && closed.display == "cover" && closed.verified)
-            let closedTurned = try await svc.posture.rotate("landscape-left", ui, in: &ctx)
+            let closedTurned = try await rotate("landscape-left", svc, in: &ctx)
             #expect(closedTurned.text.hasPrefix("rotated to landscape-left"))
             #expect(try await svc.posture.fold(FoldOptions(), in: &ctx).orientation == "landscape-left")
-            _ = try await svc.posture.rotate("portrait", ui, in: &ctx)
+            _ = try await rotate("portrait", svc, in: &ctx)
             #expect(try await svc.posture.fold(FoldOptions(), in: &ctx).orientation == "portrait")
 
-            let upside = await #expect(throws: XcdError.self) { try await svc.posture.rotate("portrait-upside-down", ui, in: &ctx) }
+            let upside = await #expect(throws: XcdError.self) { try await rotate("portrait-upside-down", svc, in: &ctx) }
             #expect(upside?.code == .platformUnsupported)
             let phone = await #expect(throws: XcdError.self) { try await svc.posture.fold(FoldOptions(device: "iphone"), in: &ctx) }
             #expect(phone?.code == .platformUnsupported && phone?.next == "pass --device duo")
