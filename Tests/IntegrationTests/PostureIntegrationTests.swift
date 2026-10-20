@@ -6,9 +6,9 @@ import XcdevTestSupport
 private let enabled = ProcessInfo.processInfo.environment["XCD_INTEGRATION"] == "1"
 
 /// The direct route on a real iPhone Duo. Needs Xcode 27.1 and an iOS 27.1 runtime; when
-/// the Mac has no Duo it records that and passes. Never run with the other integration suites at once. The closed
-/// rotation runs before the first fold: a rotation sent right after a fold on a cold clone was dropped in both
-/// fresh-clone runs that reached it.
+/// the Mac has no Duo it records that and passes. Never run with the other integration suites at once. The fresh
+/// clone shows the Home Screen, which does not turn on the closed Duo's cover, so a turn is verified by SpringBoard's
+/// orientation update, not by what the screen shows.
 @Suite(.enabled(if: enabled, "set XCD_INTEGRATION=1 to run (needs Xcode 27.1, the iOS 27.1 runtime, and the iPhone Duo)"), .serialized)
 struct PostureIntegrationTests {
     let runner = SystemProcessRunner()
@@ -58,13 +58,6 @@ struct PostureIntegrationTests {
             let read = try await svc.posture.fold(FoldOptions(), in: &ctx)
             #expect(read.posture == "closed" && read.display == "cover" && read.route == nil)
 
-            let closedTurned = try await rotate("landscape-left", svc, in: &ctx)
-            #expect(closedTurned.text.hasPrefix("rotated to landscape-left"))
-            let closedRead = try await svc.posture.fold(FoldOptions(), in: &ctx)
-            #expect(closedRead.orientation == "landscape-left" && closedRead.display == "cover")
-            _ = try await rotate("portrait", svc, in: &ctx)
-            #expect(try await svc.posture.fold(FoldOptions(), in: &ctx).orientation == "portrait")
-
             let open = try await svc.posture.fold(FoldOptions(posture: .open), in: &ctx)
             #expect(open.posture == "open" && open.angle == 180 && open.display == "inner" && open.verified && open.route == "direct")
             let half = try await svc.posture.fold(FoldOptions(posture: .half), in: &ctx)
@@ -83,6 +76,11 @@ struct PostureIntegrationTests {
 
             let closed = try await svc.posture.fold(FoldOptions(posture: .closed), in: &ctx)
             #expect(closed.posture == "closed" && closed.display == "cover" && closed.verified)
+            let closedTurned = try await rotate("landscape-left", svc, in: &ctx)
+            #expect(closedTurned.text.hasPrefix("rotated to landscape-left"))
+            #expect(try await svc.posture.fold(FoldOptions(), in: &ctx).orientation == "landscape-left")
+            _ = try await rotate("portrait", svc, in: &ctx)
+            #expect(try await svc.posture.fold(FoldOptions(), in: &ctx).orientation == "portrait")
 
             let upside = await #expect(throws: XcdError.self) { try await rotate("portrait-upside-down", svc, in: &ctx) }
             #expect(upside?.code == .platformUnsupported)
