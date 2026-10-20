@@ -1,0 +1,7 @@
+Filtering the log data using "process == "SpringBoard" AND category == "DevicePose""
+Timestamp               Ty Process[PID:TID]
+2026-10-17 19:57:33.931 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DevicePose] DCMPose: 90.0° (0.50 fold:0.50): partiallyOpen+toClosed (progress:0.50 toSwap:0.94 fromSwap:0.00) [device:Pu]
+2026-10-17 19:57:34.603 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DevicePose] DCMPose: 90.0° (0.50 fold:1.00): partiallyOpen+foldAvoidance [device:Pu]
+2026-10-17 19:57:40.247 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DevicePose] DCMPose: 0.0° (0.00 fold:0.00): fullyClosed [device:Pu]
+2026-10-17 19:59:48.502 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DevicePose] DCMPose: 180.0° (1.00 fold:1.00): openFlat [device:Pu]
+2026-10-17 19:59:54.886 Df SpringBoard[88269:106d3677] [com.apple.SpringBoard:DevicePose] CMMagicPose surface orientation changed: cover Po -> Ll, inner Am -> Am
