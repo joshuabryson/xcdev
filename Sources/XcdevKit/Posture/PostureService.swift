@@ -49,6 +49,35 @@ public struct PostureService: Sendable {
         return target.report(verdict.state, route: .direct, verified: verdict.verified, already: false)
     }
 
+    /// `xcd ui rotate` on a foldable: the pose pipeline instead of the runner, which the Duo ignores.
+    public func rotate(_ orientation: String, _ options: UIOptions, in ctx: inout WorktreeContext) async throws -> UIActionReport {
+        guard let wanted = DeviceOrientation(rawValue: orientation) else {
+            throw XcdError(.usage, "'\(orientation)' is not an orientation",
+                           next: "use one of: " + DeviceOrientation.allCases.map(\.rawValue).joined(separator: ", "))
+        }
+        let started = now()
+        let target = try await foldable(options.device, in: &ctx)
+        let recipe = try context(for: target, in: ctx).recipe
+        guard recipe.supports(wanted) else { throw recipe.unsupported(wanted) }
+        let before = try await reader(for: ctx).state(udid: target.clone.udid)
+        let request = PostureRequest.orientation(wanted)
+        let already = before.satisfies(request)
+        let verdict = already ? PostureVerdict(state: before, verified: true)
+                              : try await deliver(request, to: target, route: nil, in: ctx)
+        var report = UIActionReport(action: "rotated to", target: orientation, element: nil, x: nil, y: nil,
+                                    ms: Int(now().timeIntervalSince(started) * 1000), restarted: false,
+                                    device: target.name, udid: target.clone.udid, worktree: target.worktree)
+        report.notes = Self.rotationNotes(verdict, already: already)
+        return report
+    }
+
+    static func rotationNotes(_ verdict: PostureVerdict, already: Bool) -> [String] {
+        var notes = ["via the pose pipeline (foldable): posture \(verdict.state.postureText), display \(verdict.state.display)"]
+        if already { notes.append("already in that orientation; nothing sent") }
+        if !verdict.verified { notes.append("unverified: devicectl did not report the orientation within 5 s") }
+        return notes
+    }
+
     /// Boots `device`'s clone and checks it has a hinge; `platform_unsupported` otherwise.
     func foldable(_ device: String?, in ctx: inout WorktreeContext) async throws -> Target {
         let name = try provisioner.deviceName(device, config: ctx.config)

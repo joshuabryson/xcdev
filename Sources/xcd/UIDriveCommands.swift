@@ -46,6 +46,16 @@ extension UICommand {
         }
     }
 
+    /// Like `act`, for an action that needs more than the UI service: `ui rotate` chooses the pose pipeline on a foldable.
+    static func actWithServices(_ command: String, _ options: GlobalOptions,
+                                _ body: @escaping (Services, inout WorktreeContext) async throws -> UIActionReport) async throws {
+        try await Emit.run(command, options) { services in
+            var ctx = try await services.open(worktree: options.worktree)
+            await Recording.stopOverdue(services, ctx)
+            return try await body(services, &ctx)
+        }
+    }
+
     struct Tree: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "List the elements on screen, each with a ref (e1, e2, …) to act on.",

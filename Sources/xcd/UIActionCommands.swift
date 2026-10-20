@@ -93,7 +93,12 @@ extension UICommand {
     struct Rotate: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Rotate the device: portrait, portrait-upside-down, landscape-left, or landscape-right.",
-            discussion: "An app that doesn't support the orientation stays as it is; the tree's first line says which orientation the screen is in."
+            discussion: """
+            An app that doesn't support the orientation stays as it is; the tree's first line says which orientation the \
+            screen is in. On a foldable (iPhone Duo) the rotation goes through the simulator's pose pipeline, which the \
+            device follows where it ignores XCUITest's; portrait-upside-down is not available there, and the result says \
+            `unverified` when the simulator did not confirm the turn.
+            """
         )
         @Argument(help: "The orientation.", completion: .list(DeviceOrientation.allCases.map(\.rawValue))) var orientation: String
         @OptionGroup var action: ActionOptions
@@ -101,7 +106,14 @@ extension UICommand {
 
         func run() async throws {
             let (orientation, ui) = (orientation, try action.options())
-            try await UICommand.act("ui rotate", options) { service, ctx in try await service.rotate(orientation, ui, in: &ctx) }
+            try await UICommand.actWithServices("ui rotate", options) { services, ctx in
+                guard try await services.posture.isFoldable(device: ui.device, in: &ctx) else {
+                    return try await services.ui.rotate(orientation, ui, in: &ctx)
+                }
+                var report = try await services.posture.rotate(orientation, ui, in: &ctx)
+                if ui.tree { report.tree = try await services.ui.tree(all: false, ui, in: &ctx).tree }
+                return report
+            }
         }
     }
 }

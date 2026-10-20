@@ -297,4 +297,55 @@ import XcdevTestSupport
         #expect(error?.next == "add a `direct` entry for them to \(worktree.root)/home/posture-recipes.json")
         #expect(route.applied.withLock { $0 }.isEmpty)
     }
+
+    let uiOptions = UIOptions(device: nil, bundle: nil, system: false, role: nil, index: nil, timeout: .seconds(2))
+
+    @Test func rotateOnAFoldableGoesThroughTheRouteAndIsVerifiedByDevicectl() async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        try stubBeforeAndAfter(route, before: line("2026-10-17 18:33:20.000", "0.0", "fullyClosed"),
+                               after: "devicectl-displays-closed.json", afterLines: "")
+        // Later stubs win: once the route has sent, devicectl reports the cover turned to landscapeLeft.
+        let closed = Fixture.string("devicectl-displays-closed.json")
+        let turned = closed.replacingOccurrences(of: "\"portrait\"", with: "\"landscapeLeft\"")
+        worktree.runner.stub(["xcrun", "devicectl", "device", "info", "displays"]) { _ in
+            ProcessOutput(stdout: route.sent.withLock { $0 } ? turned : closed)
+        }
+        let report = try await service.rotate("landscape-left", uiOptions, in: &ctx)
+        #expect(route.applied.withLock { $0 } == [.orientation(.landscapeLeft)])
+        #expect(report.action == "rotated to" && report.target == "landscape-left" && report.device == "duo")
+        #expect(report.text.hasPrefix("rotated to landscape-left  "))
+        #expect(report.notes == ["via the pose pipeline (foldable): posture closed, display cover"])
+        let again = try await service.rotate("landscape-left", uiOptions, in: &ctx)
+        #expect(route.applied.withLock { $0 }.count == 1)
+        #expect(again.notes == ["via the pose pipeline (foldable): posture closed, display cover", "already in that orientation; nothing sent"])
+    }
+
+    @Test func rotateRefusesUpsideDownAndBadWordsOnAFoldable() async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        try stubDisplays("devicectl-displays-closed.json")
+        worktree.runner.stub(["xcrun", "simctl", "spawn"], stdout: line("2026-10-17 18:33:20.000", "0.0", "fullyClosed"))
+        let upside = await #expect(throws: XcdError.self) { try await service.rotate("portrait-upside-down", uiOptions, in: &ctx) }
+        #expect(upside?.code == .platformUnsupported)
+        #expect(upside?.next == "use one of: landscape-left, landscape-right, portrait")
+        let word = await #expect(throws: XcdError.self) { try await service.rotate("sideways", uiOptions, in: &ctx) }
+        #expect(word?.code == .usage && word?.next == "use one of: portrait, portrait-upside-down, landscape-left, landscape-right")
+        #expect(route.applied.withLock { $0 }.isEmpty)
+    }
+
+    @Test func aRotationTheDisplayNeverShowsIsPostureFailed() async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        try stubBeforeAndAfter(route, before: line("2026-10-17 18:33:20.000", "0.0", "fullyClosed"),
+                               after: "devicectl-displays-closed.json", afterLines: "")
+        let error = await #expect(throws: XcdError.self) { try await service.rotate("landscape-left", uiOptions, in: &ctx) }
+        #expect(error?.code == .postureFailed)
+        #expect(error?.message == "the simulator did not show the landscape-left orientation within 5.0s")
+        #expect(error?.next == "run `xcd sim fold` to see the posture it is in, then `xcd doctor`")
+        #expect(error?.details == ["seen: display cover, orientation portrait"])
+    }
 }
