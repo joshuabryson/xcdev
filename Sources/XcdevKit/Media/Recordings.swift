@@ -46,17 +46,22 @@ public struct RecordingStop: Codable, Sendable, Equatable {
     public let seconds: Double
     public let bytes: Int64
     public let outcome: DetachedStop
+    /// The record's `recorder`: nil for simctl.
+    public var recorder: String?
 
     public var note: String {
         if outcome == .notRunning { return "the \(device) recording had already ended: \(path)" }
         return "stopped the \(device) recording after \(DurationText.format(.milliseconds(Int64(seconds * 1000)))): \(path)"
-            + (outcome == .killed ? " (simctl was killed, so the video may be incomplete)" : "")
+            + (outcome == .killed ? " (\(Recordings.name(of: recorder)) was killed, so the video may be incomplete)" : "")
     }
 }
 
 public enum Recordings {
     /// The argument that identifies simctl's recorder, so a reused pid is never taken for it.
     public static let marker = "recordVideo"
+
+    /// The recorder as messages name it: `simctl`, or `xcd _record-window` for a Mac window.
+    public static func name(of recorder: String?) -> String { recorder.map { "xcd \($0)" } ?? "simctl" }
 
     public static func load(_ file: String) -> RecordingRecord? {
         guard let data = FileManager.default.contents(atPath: file) else { return nil }
@@ -68,7 +73,7 @@ public enum Recordings {
         try JSONCoding.encoder(pretty: true).encode(record).write(to: URL(fileURLWithPath: file), options: .atomic)
     }
 
-    /// Stops `record` with SIGINT so simctl finishes the file (SIGKILL after `MediaService.stopTimeout`), then deletes
+    /// Stops `record` with SIGINT so its recorder finishes the file (SIGKILL after `MediaService.stopTimeout`), then deletes
     /// the record file, unless another xcd has saved a different recording's record there meanwhile.
     public static func stop(_ record: RecordingRecord, file: String, detached: any DetachedProcessLaunching,
                             now: Date) async -> RecordingStop {
@@ -77,7 +82,7 @@ public enum Recordings {
         if load(file).map({ $0.process == record.process }) ?? true { try? FileManager.default.removeItem(atPath: file) }
         let bytes = ((try? FileManager.default.attributesOfItem(atPath: record.path))?[.size] as? NSNumber)?.int64Value ?? 0
         return RecordingStop(device: record.device, path: record.path, seconds: now.timeIntervalSince(record.startedAt).rounded(),
-                             bytes: bytes, outcome: outcome)
+                             bytes: bytes, outcome: outcome, recorder: record.recorder)
     }
 
     /// Stops the recordings in `paths`, only `device`'s when given: for `sim shutdown`, `sim erase`, and `wt remove`.

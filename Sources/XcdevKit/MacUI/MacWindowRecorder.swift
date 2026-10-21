@@ -1,82 +1,87 @@
-import AVFoundation
+import CoreGraphics
 import Foundation
 import ScreenCaptureKit
 import Synchronization
 
 /// Records one window to an MP4 until SIGINT. Runs inside `xcd _record-window`, a detached process.
+///
+/// The clip is made of stills, up to five a second. ScreenCaptureKit suspends an `SCStream` of a window that is not on
+/// screen and delivers it no frames, whatever the filter or configuration (measured 2026-10-20 on a hidden app), while
+/// a still of the same window comes in full; stills are the one route that works visible, covered, hidden, and minimized.
 public enum MacWindowRecorder {
     /// The subcommand's name: the argument that identifies the recorder, so a reused pid is never taken for it.
     public static let marker = "_record-window"
+    /// One still every 200 ms, or as fast as they come when a still takes longer.
+    static let interval: Duration = .milliseconds(200)
 
-    /// A one-shot signal: the delegate's "finished" may arrive before anyone waits for it, so the first of the two
-    /// sides to run leaves its mark and the second one completes the wait. Called from the stream's queue and the task.
-    final class Gate: Sendable {
-        private let state = Mutex<(fired: Bool, waiter: CheckedContinuation<Void, Never>?)>((false, nil))
+    /// A one-way switch, set from the signal queue and read by the recording loop.
+    final class Flag: Sendable {
+        private let state = Mutex(false)
 
-        func fire() {
-            let waiter = state.withLock { state -> CheckedContinuation<Void, Never>? in
-                state.fired = true
-                defer { state.waiter = nil }
-                return state.waiter
-            }
-            waiter?.resume()
-        }
-
-        func wait() async {
-            await withCheckedContinuation { continuation in
-                let resumeNow = state.withLock { state -> Bool in
-                    if state.fired { return true }
-                    state.waiter = continuation
-                    return false
-                }
-                if resumeNow { continuation.resume() }
-            }
-        }
+        func fire() { state.withLock { $0 = true } }
+        var fired: Bool { state.withLock { $0 } }
     }
 
-    /// The stream's and the recording's delegate. `stopped` fires on SIGINT or SIGTERM, or when the stream ends on its
-    /// own (the window closed, the app quit), so a dead stream does not leave the recorder waiting for a signal;
-    /// `finished` fires once the file is final, or the recording failed, which `failure` then says.
-    final class Finish: NSObject, SCRecordingOutputDelegate, SCStreamDelegate, Sendable {
-        let stopped = Gate()
-        let finished = Gate()
-        let failure = Mutex<String?>(nil)
-
-        func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) { finished.fire() }
-
-        func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: any Error) { fail(error) }
-
-        func stream(_ stream: SCStream, didStopWithError error: any Error) { fail(error) }
-
-        /// The first failure is the one reported.
-        func fail(_ error: any Error) {
-            failure.withLock { $0 = $0 ?? error.localizedDescription }
-            stopped.fire()
-            finished.fire()
-        }
+    /// Where the stills come from and how time passes: ScreenCaptureKit and the clock, or a test's script.
+    struct Stills {
+        /// One still of the window.
+        var take: () async throws -> CGImage
+        /// Seconds on a steady clock. A still's time in the clip is when it was asked for.
+        var now: () -> Double = { ProcessInfo.processInfo.systemUptime }
+        var sleep: (Duration) async -> Void = { try? await Task.sleep(for: $0) }
+        /// Called once the first still is in the file: `record start` waits for this line in the recorder's log.
+        var started: () -> Void = { StandardError.write("Recording started\n") }
     }
 
-    /// Starts the stream, writes "Recording started" to its log (stderr), waits for SIGINT, stops, and returns once the
-    /// file is final. The signals are taken before the stream starts, so a stop sent right after the line is not lost.
-    /// A recording that failed throws, so the recorder exits with an error its log names.
+    /// Records until SIGINT or SIGTERM. The signals are taken before the first still, so a stop sent right after
+    /// "Recording started" is not lost, and the file is finished before the process ends.
     public static func record(windowID: UInt32, to path: String, scale: Double) async throws {
         let window = try await window(windowID)
-        let finish = Finish()
+        let filter = SCContentFilter(desktopIndependentWindow: window)
         let configuration = ScreenCaptureKitCapture.configuration(width: window.frame.width, height: window.frame.height, scale: scale)
-        let stream = SCStream(filter: SCContentFilter(desktopIndependentWindow: window), configuration: configuration, delegate: finish)
-        try stream.addRecordingOutput(SCRecordingOutput(configuration: output(path), delegate: finish))
-        let sources = listen([SIGINT, SIGTERM], firing: finish.stopped)
+        let stop = Flag()
+        let sources = listen([SIGINT, SIGTERM], firing: stop)
         defer { sources.forEach { $0.cancel() } }
-        try await stream.startCapture()
-        StandardError.write("Recording started\n")
-        await finish.stopped.wait()
-        if finish.failure.withLock({ $0 }) == nil { try await stream.stopCapture() }
-        await finish.finished.wait()
-        if let failure = finish.failure.withLock({ $0 }) {
-            throw XcdError(.runnerFailed, "the recording of window \(windowID) failed: \(failure)",
-                           next: "a hidden window gives ScreenCaptureKit no frames to record (a screenshot still works): "
-                               + "relaunch the app with `xcd launch --show`, then record again")
+        let take: () async throws -> CGImage = {
+            do {
+                return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+            } catch {
+                throw XcdError(.runnerFailed, "could not take a still of window \(windowID): \(error.localizedDescription)",
+                               next: "check the app with `xcd ui tree`, then start the recording again")
+            }
         }
+        try await record(Stills(take: take), to: path, until: stop)
+    }
+
+    /// Takes the first still, starts the file with it, says so, then adds a still every `interval` until `stop`, and
+    /// finishes the file. A first still that fails is thrown before anything is written, so `record start` fails at
+    /// once; a later one that fails (the window closed) ends the clip there, and the file is finished before the throw.
+    static func record(_ stills: Stills, to path: String, until stop: Flag) async throws {
+        let start = stills.now()
+        let first = try await stills.take()
+        let clip = try MacClipWriter(path: path, width: first.width, height: first.height)
+        try await clip.append(first, at: 0)
+        stills.started()
+        var taken = start
+        var failure: (any Error)?
+        while !stop.fired {
+            let wait = interval - .seconds(stills.now() - taken)
+            if wait > .zero { await stills.sleep(wait) }
+            if stop.fired { break }
+            taken = stills.now()
+            do { try await clip.append(try await stills.take(), at: taken - start) } catch {
+                failure = error
+                break
+            }
+        }
+        try await clip.finish(at: stills.now() - start)
+        if let failure { throw ended(by: failure) }
+    }
+
+    /// The error of a recording that ended before it was stopped; the file holds what came before.
+    static func ended(by failure: any Error) -> XcdError {
+        XcdError(.runnerFailed, "the recording ended early: \((failure as? XcdError)?.message ?? failure.localizedDescription)",
+                 next: "the video keeps what was recorded until then; check the app with `xcd ui tree`")
     }
 
     static func window(_ id: UInt32) async throws -> SCWindow {
@@ -86,22 +91,14 @@ public enum MacWindowRecorder {
         return window
     }
 
-    static func output(_ path: String) -> SCRecordingOutputConfiguration {
-        let output = SCRecordingOutputConfiguration()
-        output.outputURL = URL(fileURLWithPath: path)
-        output.outputFileType = .mp4
-        output.videoCodecType = .h264
-        return output
-    }
-
-    /// Ignores the signals, so they no longer end the process, and fires `gate` on any of them, on a queue of its own:
-    /// the main queue is not drained while the task waits. The sources must be kept until the recording ends.
-    static func listen(_ signals: [Int32], firing gate: Gate) -> [any DispatchSourceSignal] {
+    /// Ignores the signals, so they no longer end the process, and fires `flag` on any of them, on a queue of its own.
+    /// The sources must be kept until the recording ends.
+    static func listen(_ signals: [Int32], firing flag: Flag) -> [any DispatchSourceSignal] {
         let queue = DispatchQueue(label: "dev.xcdev.record-window.signals")
         return signals.map { number in
             signal(number, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: number, queue: queue)
-            source.setEventHandler { gate.fire() }
+            source.setEventHandler { flag.fire() }
             source.resume()
             return source
         }

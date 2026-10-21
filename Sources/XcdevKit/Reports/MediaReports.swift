@@ -54,6 +54,8 @@ public struct RecordingReport: Reportable {
     public var gitignoreAdded: String?
     public var gitignoreWarning: String?
     public var mainCheckout: String?
+    /// The record's `recorder` when stopping: nil for simctl, `_record-window` for a Mac window.
+    public var recorder: String?
 
     public var text: String {
         switch action {
@@ -68,7 +70,7 @@ public struct RecordingReport: Reportable {
                 + (seconds.map { "  duration=\(DurationText.format(.milliseconds(Int64($0 * 1000))))" } ?? "")
                 + (bytes.map { "  size=\(ByteText.format($0))" } ?? "")]
             if outcome == .killed {
-                lines.append("warning: simctl didn't finish within \(DurationText.format(MediaService.stopTimeout)) and was killed, so the video may be incomplete")
+                lines.append("warning: \(Recordings.name(of: recorder)) didn't finish within \(DurationText.format(MediaService.stopTimeout)) and was killed, so the video may be incomplete")
             } else if outcome == .notRunning {
                 lines.append("note: the recording had already ended on its own")
             }

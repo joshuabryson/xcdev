@@ -104,9 +104,11 @@ import XcdevTestSupport
         #expect(WindowCandidate.pick([hideTime, candidate(10, "Twin", width: 900)], title: "Probe") == nil)
     }
 
+    /// The recorder here is one that has to be killed, so the stop's warning shows whose it is.
     @Test func aRecordingStartsTheWindowRecorderAndStopsItByItsOwnMarker() async throws {
         defer { worktree.remove() }
-        let detached = FakeDetachedProcesses(onStart: { _, log in try "Recording started\n".write(toFile: log, atomically: true, encoding: .utf8) })
+        let detached = FakeDetachedProcesses(onStart: { _, log in try "Recording started\n".write(toFile: log, atomically: true, encoding: .utf8) },
+                                             stopResult: .killed)
         var (service, ctx) = try setup(FakeWindowCapture(window: Self.window), detached: detached)
         let started = try await service.startRecording(device: "mac", out: worktree.root + "/clip.mp4", in: &ctx)
         let start = try #require(detached.starts.first)
@@ -117,6 +119,10 @@ import XcdevTestSupport
         #expect(record.recorder == MacWindowRecorder.marker && record.marker == MacWindowRecorder.marker)
         let stopped = try await service.stopRecording(device: "mac", in: ctx)
         #expect(stopped.action == .stopped && detached.stops.map(\.signal) == [SIGINT])
+        #expect(stopped.udid == nil && !stopped.text.contains("simctl")
+                && stopped.text.contains("warning: xcd _record-window didn't finish within 45.0s and was killed"))
+        let note = RecordingStop(device: "mac", path: "/m/b.mp4", seconds: 3, bytes: 5, outcome: .killed, recorder: MacWindowRecorder.marker).note
+        #expect(note == "stopped the mac recording after 3.0s: /m/b.mp4 (xcd _record-window was killed, so the video may be incomplete)")
     }
 
     /// A recording runs while its own recorder does, so a second start is refused, not a restart.

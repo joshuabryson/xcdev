@@ -127,8 +127,10 @@ public struct MediaService: Sendable {
                                    outcome: nil, limit: nil, worktree: ctx.state.name)
         }
         let stop = await Recordings.stop(record, file: file, detached: detached, now: now())
-        return RecordingReport(action: .stopped, device: name, udid: record.udid, path: record.path, seconds: stop.seconds,
-                               bytes: stop.bytes, outcome: stop.outcome, limit: nil, worktree: ctx.state.name)
+        // A Mac has no udid: the record's "mac" only fills the field.
+        return RecordingReport(action: .stopped, device: name, udid: record.recorder == nil ? record.udid : nil, path: record.path,
+                               seconds: stop.seconds, bytes: stop.bytes, outcome: stop.outcome, limit: nil, worktree: ctx.state.name,
+                               recorder: record.recorder)
     }
 
     /// Stops this worktree's recordings that have run longer than `ui.record.maxDuration`.
@@ -181,7 +183,7 @@ public struct MediaService: Sendable {
         for _ in 0..<attempts {
             if Self.text(of: record.log, from: logOffset).contains("Recording started") { return }
             guard detached.inspector.isRunning(record.process) else {
-                throw XcdError(.simulatorFailed, "\(record.recorder == nil ? "simctl" : "the window recorder") stopped before the recording started",
+                throw XcdError(.simulatorFailed, "\(Recordings.name(of: record.recorder)) stopped before the recording started",
                                next: "run `xcd doctor`", details: ["log: \(record.log)"] + Self.tail(record.log, from: logOffset))
             }
             try await sleep(.milliseconds(100))
