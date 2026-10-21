@@ -142,6 +142,9 @@ public struct DoctorEnvironment: Sendable {
     public var detached: any DetachedProcessLaunching = SystemDetachedProcesses()
     /// How a UI runner is asked whether it still answers.
     public var runnerClient: RunnerClient = RunnerClient(transport: URLSessionRunnerTransport())
+    /// What answers whether the app that runs xcd holds the Mac grants, and which app that is (`mac-permissions`).
+    public var accessibility: @Sendable () -> any AccessibilityAPI = { SystemAccessibility() }
+    public var hostApp: @Sendable () -> String = { MacHostApp.live() }
 
     /// Sets how recorded processes and UI runners are inspected, stopped, and asked for health.
     mutating func useProcesses(detached: any DetachedProcessLaunching, runnerClient: RunnerClient) {

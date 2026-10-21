@@ -127,12 +127,16 @@ public struct DoctorService: Sendable {
     public let now: @Sendable () -> Date
     public let detached: any DetachedProcessLaunching
     public let runnerClient: RunnerClient
+    let accessibility: @Sendable () -> any AccessibilityAPI
+    let hostApp: @Sendable () -> String
     let sleep: @Sendable (Duration) async throws -> Void
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, discovery: XcodeDiscovery? = nil,
                 now: @escaping @Sendable () -> Date = { Date() },
                 detached: any DetachedProcessLaunching = SystemDetachedProcesses(),
                 runnerClient: RunnerClient = RunnerClient(transport: URLSessionRunnerTransport()),
+                accessibility: @escaping @Sendable () -> any AccessibilityAPI = { SystemAccessibility() },
+                hostApp: @escaping @Sendable () -> String = { MacHostApp.live() },
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.runner = runner
         self.globalPaths = globalPaths
@@ -140,6 +144,8 @@ public struct DoctorService: Sendable {
         self.now = now
         self.detached = detached
         self.runnerClient = runnerClient
+        self.accessibility = accessibility
+        self.hostApp = hostApp
         self.sleep = sleep
     }
 
@@ -148,7 +154,7 @@ public struct DoctorService: Sendable {
     /// `lint:` section, its own setup, and its SwiftLint config.
     public static var allChecks: [any DoctorCheck] {
         [ProjectLocationCheck(), CoreSimulatorCheck(), MissingWorktreesCheck(), IncompleteWorktreesCheck(), OrphanedClonesCheck(),
-         StuckClonesCheck(), TemplatesCheck(), RecordingsCheck(), StaleUIRunnersCheck(),
+         StuckClonesCheck(), TemplatesCheck(), RecordingsCheck(), StaleUIRunnersCheck(), MacPermissionsCheck(),
          InitScratchCheck(), PackageCacheCheck(),
          QualitySetupCheck(), QualityToolsCheck(), ProjectCheck(), SwiftLintCheck(), AgentDocsCheck()]
     }
@@ -232,6 +238,8 @@ public struct DoctorService: Sendable {
                                  busy: busy, fixing: fixing)
         env.location = location
         env.useProcesses(detached: detached, runnerClient: runnerClient)
+        env.accessibility = accessibility
+        env.hostApp = hostApp
         return env
     }
 

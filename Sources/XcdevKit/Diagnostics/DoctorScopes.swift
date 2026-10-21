@@ -8,7 +8,7 @@ public enum DoctorReach: Sendable {
     case thisProject
     /// What xcd keeps for every project on this Mac: templates, scratch folders, package caches.
     case xcd
-    /// The CoreSimulator service.
+    /// The CoreSimulator service, and the Mac's privacy grants.
     case mac
 }
 
@@ -23,6 +23,7 @@ extension OrphanedClonesCheck { public var reach: DoctorReach { .entries } }
 extension StuckClonesCheck { public var reach: DoctorReach { .entries } }
 extension RecordingsCheck { public var reach: DoctorReach { .entries } }
 extension StaleUIRunnersCheck { public var reach: DoctorReach { .entries } }
+extension MacPermissionsCheck { public var reach: DoctorReach { .mac } }
 extension QualitySetupCheck { public var reach: DoctorReach { .thisProject } }
 extension QualityToolsCheck { public var reach: DoctorReach { .thisProject } }
 extension ProjectCheck { public var reach: DoctorReach { .thisProject } }

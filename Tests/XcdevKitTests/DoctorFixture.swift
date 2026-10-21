@@ -22,7 +22,8 @@ extension DoctorFixture {
     func doctor(_ project: TempProject, discovery: XcodeDiscovery? = nil,
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { _ in /* doctor's pauses are skipped */ }) -> DoctorService {
         DoctorService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home),
-                      discovery: discovery ?? XcodeDiscovery(runner: fake, applicationsDirectories: []), sleep: sleep)
+                      discovery: discovery ?? XcodeDiscovery(runner: fake, applicationsDirectories: []),
+                      accessibility: { FakeAccessibility(app: FakeApp(windows: [])) }, hostApp: { "TestHost" }, sleep: sleep)
     }
 
     /// Registers worktree `name` of the project at `root` (named after its folder) at `path`, as `xcd wt create` does.

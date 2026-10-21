@@ -104,7 +104,7 @@ Sending a link only means it was sent. `expect` names an element that shows the 
 - **Name something specific to the parameters**, like `"label~Item {id}"`. If the element is already on screen when a link goes to the running app, the check proves nothing: the result says `check: inconclusive`, and the command fails with `arrival_unproven`. It does the same when xcd could not look at the app before the link was sent, for example because the app was in the background. For a definite answer, open the route with `--cold` or with a preset, since either restarts the app, or bring the app to the front first with `xcd launch`.
 - **The first check takes longer.** On a simulator, the first check builds the UI runner once (about 30 seconds) and starts it. On a new simulator the start can take minutes. So the first `xcd open` of a route with `expect` can take much longer than later ones: give the command time.
 - **A script route's check** is one look after the script. xcd cannot know whether the script restarted the app, so it makes no look before, and a found element is `appeared` even if it was on screen before the script ran.
-- **The check is skipped**, and the result says so, for a Mac app and for a simulator that is not an iPhone or iPad on iOS 17 or later.
+- **The check is skipped**, and the result says so, for a simulator that is not an iPhone or iPad on iOS 17 or later. On a Mac app it runs.
 - **A link given directly** has no check. Follow `xcd open '<url>'` with `xcd ui wait <target>`.
 
 ## Warm and cold starts
@@ -143,7 +143,7 @@ xcd ui tap "label:About" --device "$XCD_DEVICE"
 
 ## Mac apps
 
-`xcd open --device mac` sends the link to this worktree's build of the app, in the background. The frontmost app does not change, and another worktree's copy of the app does not get the link. An https link is handed to the app as an opened URL (`onOpenURL`, `application(_:open:)`). It does not arrive as a universal-link user activity, so an app that only handles `NSUserActivity` will not see it.
+`xcd open --device mac` sends the link to this worktree's build of the app, in the background. The frontmost app does not change, and another worktree's copy of the app does not get the link. An https link is handed to the app as an opened URL (`onOpenURL`, `application(_:open:)`). It does not arrive as a universal-link user activity, so an app that only handles `NSUserActivity` will not see it. The app starts hidden when the link starts it (`--cold`), and the route's `expect` is checked as on a simulator.
 
 ## Watch and Vision simulators
 

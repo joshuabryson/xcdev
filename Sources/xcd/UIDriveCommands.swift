@@ -119,7 +119,7 @@ extension UICommand {
     }
 
     struct Stop: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Stop this clone's UI runner (it starts again on the next ui command).")
+        static let configuration = CommandConfiguration(abstract: "Stop this clone's UI runner (it starts again on the next ui command); on a Mac, forget the refs.")
         @Flag(help: "Also discard the cached runner build, so it is built again on next use.") var rebuild = false
         @OptionGroup var target: SimCommand.DeviceOption
         @OptionGroup var options: GlobalOptions

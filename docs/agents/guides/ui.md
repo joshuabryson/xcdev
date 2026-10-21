@@ -1,6 +1,6 @@
 # See and drive the app's UI
 
-Use this guide to check your work in the running app: read what is on screen, act on it, and confirm what happened. It works on iPhone and iPad simulators running iOS 17 or later. Nothing here opens Device Hub (Simulator.app before Xcode 27) or takes focus on the Mac; when a person wants to watch, `xcd sim open` shows them the simulator.
+Use this guide to check your work in the running app: read what is on screen, act on it, and confirm what happened. It works on iPhone and iPad simulators running iOS 17 or later, and on Mac apps. Nothing here opens Device Hub (Simulator.app before Xcode 27), brings a Mac app forward, or takes focus on the Mac; when a person wants to watch, `xcd sim open` shows them the simulator and `xcd launch --show` the Mac app.
 
 ## The loop
 
@@ -63,6 +63,25 @@ An action on an element waits up to `--timeout` (default 2s; 10s for `wait`) for
 - **The app's files** are in a folder on this Mac: `xcd sim container` prints the path of its data container, so `ls "$(xcd sim container)/Documents"` lists what the app saved.
 - **A foldable (iPhone Duo)** opens and closes with `xcd sim fold open|half|closed`; `xcd sim fold --angle <degrees>` sets any angle, though the simulator confirms only 0°, 90°, and 180°, so another angle is reported `unverified`. After an unverified angle the next read may still show the last confirmed posture. `xcd sim fold` alone reports the posture, the active display, and the orientation. `xcd ui rotate` on it goes through the same pose pipeline, since the Duo ignores the runner's rotation; `portrait-upside-down` is not available there. Both wait up to 5 s for the simulator to report the change: `xcd sim fold` says `unverified` when only the display agreed and no hinge line confirmed the angle, and a rotation the simulator does not report fails with `posture_failed`. Nothing comes to the foreground. A device without a hinge is refused with `platform_unsupported`; a route that fails is `posture_failed`, whose details name the step.
 - Add `--json` to any command for one JSON object: the tree's elements, or an action's `element`, `x`, `y`, and `tree`.
+
+## On a Mac
+
+The same loop drives the Mac build of the app, with the app hidden: `xcd run --device mac` starts it with no window on the desktop, and every `xcd ui` command works on it there. Nothing takes focus or moves the pointer. `xcd launch --device mac --show` starts it visible and in front, for a person.
+
+- **The tree** is the app's windows, sheets, popovers, and open menus, with frames in each window's own points; the first line says `running (hidden)` or `running (visible)`, the main window's title and size, and the scale. The menu bar is not in it: `xcd ui menu` lists it as paths, the Apple menu first, then the app's own menus.
+- **Taps** press the element; a tap on a field focuses it. `@x,y` is refused: clicks posted to a background Mac app do not land, so name the element.
+- **Typing** focuses the field, then posts the keys to the app; `--clear` empties it first and `--submit` presses Return. A tab in the text acts as the Tab key and moves focus on. `--clear` is the only chord there is: every other ⌘ shortcut is refused. One `ui type` takes at most 2000 characters. A field that will not take focus is `element_not_hittable`.
+- **Shortcuts** go through the menu bar: `xcd ui menu "File > Save…"` presses the item; posted ⌘-chords do not reach a background app. A submenu is not an item: name one inside it.
+- **A long-press** opens the element's context menu, which the next tree lists as a `menu` with `menuItem` rows to tap. It takes about 1.5 s and ignores `--duration`.
+- **A swipe** scrolls the enclosing scroll area one page (`up` towards the end), through its scroll bar; `--from`/`--to`, `ui button`, and `ui rotate` are refused.
+- **Screenshots and recordings** take the app's main window, hidden or covered, through ScreenCaptureKit. They need the Screen Recording permission; macOS reminds the person now and then that the host app can record the screen. A recording is stills at about 5 per second, so motion looks stepped.
+- **Windows the app restored** (macOS brings an app back with the windows it had) are all in the tree; the header says `windows: n` when there is more than one. When an identifier appears in more than one window, narrow it with `--index` or close the extra window. A screenshot takes the main window, and after a link can land on an empty twin of it.
+- **Permissions** belong to the app that runs xcd (the terminal, the Claude desktop app, an IDE). A missing one fails fast with `permission_missing`, naming the app and the System Settings pane; `xcd doctor` lists the same. Nothing prompts.
+- **A locked screen** refuses every Mac `ui` command, `ui screenshot`, and `ui record start`: `runner_failed`, "the Mac's screen is locked, so the app's windows cannot be read", `next:` "ask the user to unlock the Mac, then run the command again". Ask the user; nothing else helps.
+- **System prompts** the app raises (contacts, photos, automation) belong to the person at the Mac; while one is up, reads fail with `runner_failed` saying so. Ask the user to answer it once.
+- **App Nap** is off for an app xcd launches. An app started some other way while hidden answers slowly, many times slower, so start it with `xcd run` or `xcd launch`.
+- **Refs** last across commands as on a simulator, and a relaunch makes them all stale (numbers start again at e1). `xcd ui stop` forgets them; there is no runner to stop.
+- **`xcd sim …`** commands do not apply to a Mac device: it has no simulator to act on, and the pasteboard, appearance, and text size are the person's.
 
 ## When something fails
 
