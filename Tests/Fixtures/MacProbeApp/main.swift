@@ -16,6 +16,9 @@ let model = Model()
 
 final class Delegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
+        // No window state restoration: a killed copy would come back with the windows it had.
+        NSApp.windows.forEach { $0.isRestorable = false }
+        UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
         log("launched pid=\(getpid()) home=\(NSHomeDirectory()) hidden=\(NSApp.isHidden) active=\(NSApp.isActive)")
         log("appearance=\(NSApp.effectiveAppearance.name.rawValue)")
         for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification,
