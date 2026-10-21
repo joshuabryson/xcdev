@@ -30,14 +30,16 @@ final class MacClipWriter {
     }
 
     /// Adds `image` at `seconds` into the clip, which must be later than the frame before. Waits up to a second for the
-    /// encoder to take more.
+    /// encoder to take more. Appending while it is not ready, or once the file has stopped being written, is a
+    /// programming error to AVFoundation (it may raise rather than return false), so that is a thrown failure instead.
     func append(_ image: CGImage, at seconds: Double) async throws {
-        let buffer = try pixels(of: image)
         var tries = 0
-        while !input.isReadyForMoreMediaData, tries < 200 {
+        while writer.status == .writing, !input.isReadyForMoreMediaData, tries < 200 {
             try? await Task.sleep(for: .milliseconds(5))
             tries += 1
         }
+        guard writer.status == .writing, input.isReadyForMoreMediaData else { throw failure("the video encoder did not take the frame") }
+        let buffer = try pixels(of: image)
         guard adaptor.append(buffer, withPresentationTime: Self.time(seconds)) else { throw failure("could not add a frame to the video") }
     }
 

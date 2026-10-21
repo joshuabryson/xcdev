@@ -30,7 +30,7 @@ struct Xcd: AsyncParsableCommand {
 
     /// `xcd help …` and unknown command names are handled here; everything else goes to ArgumentParser.
     /// Ctrl-C and SIGTERM are handled for every command from the start (see `Interrupts`), except in the window
-    /// recorder: it stops its stream and finishes its MP4 on SIGINT, which the handler would pre-empt (it exits 130 at once).
+    /// recorder: on SIGINT it takes no more stills and finishes its MP4, which the handler would pre-empt (it exits 130 at once).
     static func main() async {
         assert(builtinNames.isSubset(of: BuiltinCommands.reservedNames), "add new built-in names to BuiltinCommands.reservedNames")
         signal(SIGPIPE, SIG_IGN)    // a reader that went away is EPIPE, not death; children get SIGPIPE back

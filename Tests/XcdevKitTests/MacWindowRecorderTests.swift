@@ -72,6 +72,17 @@ import Testing
         #expect(script.started == 1 && script.taken == 5)
     }
 
+    /// A frame offered when the encoder cannot take it (here: the file is no longer being written) is a thrown
+    /// failure, never an append AVFoundation may answer with an exception.
+    @Test func aFrameTheEncoderCannotTakeIsAFailureNotAnAppend() async throws {
+        defer { remove() }
+        let writer = try MacClipWriter(path: clip, width: 64, height: 48)
+        writer.writer.cancelWriting()
+        let error = await #expect(throws: XcdError.self) { try await writer.append(try Self.image(shade: 1), at: 0) }
+        #expect(error?.code == .runnerFailed && error?.message.hasPrefix("the video encoder did not take the frame: ") == true)
+        #expect(error?.next != nil)
+    }
+
     @Test func aFirstStillThatFailsWritesNothingAndNeverSaysStarted() async throws {
         defer { remove() }
         let script = Script()

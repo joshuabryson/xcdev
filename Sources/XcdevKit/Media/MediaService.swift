@@ -183,13 +183,13 @@ public struct MediaService: Sendable {
         for _ in 0..<attempts {
             if Self.text(of: record.log, from: logOffset).contains("Recording started") { return }
             guard detached.inspector.isRunning(record.process) else {
-                throw XcdError(.simulatorFailed, "\(Recordings.name(of: record.recorder)) stopped before the recording started",
-                               next: "run `xcd doctor`", details: ["log: \(record.log)"] + Self.tail(record.log, from: logOffset))
+                throw startFailure(record, "\(Recordings.name(of: record.recorder)) stopped before the recording started", logOffset: logOffset)
             }
             try await sleep(.milliseconds(100))
         }
-        throw XcdError(.simulatorFailed, "the recording didn't start within \(DurationText.format(startTimeout))",
-                       next: "run `xcd doctor`", details: ["log: \(record.log)"] + Self.tail(record.log, from: logOffset))
+        let limit = DurationText.format(startTimeout)
+        throw startFailure(record, record.recorder == nil ? "the recording didn't start within \(limit)"
+                               : "\(Recordings.name(of: record.recorder)) didn't start recording within \(limit)", logOffset: logOffset)
     }
 
     static func text(of log: String, from offset: Int) -> String {
@@ -251,5 +251,18 @@ extension MediaService {
             throw XcdError(.runnerFailed, failure.message, next: "ask the user whether a system prompt is up, then run the command again",
                            details: failure.issues)
         }
+    }
+
+    /// A recorder that did not start. simctl's is the simulator's failure. The window recorder's is `runner_failed`, with
+    /// the error it last wrote to its log (the line itself when it wrote no `error[…]` line) and its own `next:`.
+    func startFailure(_ record: RecordingRecord, _ message: String, logOffset: Int) -> XcdError {
+        let tail = Self.tail(record.log, from: logOffset)
+        let details = ["log: \(record.log)"] + tail
+        guard record.recorder != nil else { return XcdError(.simulatorFailed, message, next: "run `xcd doctor`", details: details) }
+        let said = (tail.last { $0.hasPrefix("error[") } ?? tail.last { !$0.hasPrefix("next: ") })?
+            .replacingOccurrences(of: #"^error\[[a-z_]+\]: "#, with: "", options: .regularExpression)
+        let next = tail.last { $0.hasPrefix("next: ") }.map { String($0.dropFirst("next: ".count)) }
+        return XcdError(.runnerFailed, message + (said.map { ": \($0)" } ?? ""),
+                        next: next ?? "check the app with `xcd ui tree`, then start the recording again", details: details)
     }
 }

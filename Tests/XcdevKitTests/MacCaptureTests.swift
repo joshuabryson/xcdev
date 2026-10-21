@@ -11,8 +11,8 @@ import XcdevTestSupport
 
     /// `api`: the app's Accessibility tree; `running`: the pids `ps` lists for the build's executable.
     func setup(_ capture: FakeWindowCapture, api: FakeAccessibility = FakeAccessibility(app: UIServiceMacTests.app), granted: Bool = true,
-               locked: Bool = false, running: [Int32] = [7],
-               detached: FakeDetachedProcesses = FakeDetachedProcesses()) throws -> (MediaService, WorktreeContext) {
+               locked: Bool = false, running: [Int32] = [7], detached: FakeDetachedProcesses = FakeDetachedProcesses(),
+               sleep: @escaping @Sendable (Duration) async throws -> Void = Instant.sleep) throws -> (MediaService, WorktreeContext) {
         let ctx = try worktree.context(UIServiceMacTests.yaml, container: "App.xcodeproj")
         var state = AppState()
         state.builds["mac"] = BuildRecord(scheme: "App", configuration: nil, product: product, finishedAt: Date())
@@ -21,7 +21,7 @@ import XcdevTestSupport
         try FileManager.default.createDirectory(atPath: ctx.paths.logs, withIntermediateDirectories: true)
         let product = product
         worktree.runner.stub(["ps"]) { _ in ProcessOutput(stdout: running.map { "  \($0) \(product.executablePath)\n" }.joined()) }
-        let service = MediaService(provisioner: worktree.provisioner, detached: detached, currentDirectory: worktree.root, sleep: Instant.sleep,
+        let service = MediaService(provisioner: worktree.provisioner, detached: detached, currentDirectory: worktree.root, sleep: sleep,
                                    capture: capture, permissions: { MacPermissions(accessibility: true, screenRecording: granted, hostApp: "iTerm") },
                                    accessibility: { api }, screenLocked: { locked }, xcdExecutable: "/usr/local/bin/xcd")
         return (service, ctx)
@@ -123,6 +123,33 @@ import XcdevTestSupport
                 && stopped.text.contains("warning: xcd _record-window didn't finish within 45.0s and was killed"))
         let note = RecordingStop(device: "mac", path: "/m/b.mp4", seconds: 3, bytes: 5, outcome: .killed, recorder: MacWindowRecorder.marker).note
         #expect(note == "stopped the mac recording after 3.0s: /m/b.mp4 (xcd _record-window was killed, so the video may be incomplete)")
+    }
+
+    /// A window recorder that exits before "Recording started" is the recorder's failure, in its own words, not a
+    /// simulator's.
+    @Test func aRecorderThatExitsBeforeStartingIsARunnerFailureInItsOwnWords() async throws {
+        defer { worktree.remove() }
+        let detached = FakeDetachedProcesses(onStart: { _, log in
+            try "error[runner_failed]: could not take a still of window 15610: the window is gone\nnext: check the app with `xcd ui tree`, then start the recording again\n"
+                .write(toFile: log, atomically: true, encoding: .utf8)
+        })
+        var (service, ctx) = try setup(FakeWindowCapture(window: Self.window), detached: detached,
+                                       sleep: { _ in if let pid = detached.starts.first?.identity.pid { detached.exit(pid: pid) } })
+        let error = await #expect(throws: XcdError.self) { try await service.startRecording(device: "mac", out: nil, in: &ctx) }
+        #expect(error?.code == .runnerFailed
+                && error?.message == "xcd _record-window stopped before the recording started: could not take a still of window 15610: the window is gone")
+        #expect(error?.next == "check the app with `xcd ui tree`, then start the recording again")
+        #expect(Recordings.load(ctx.paths.recordingFile(device: "mac")) == nil)
+    }
+
+    /// One that keeps running without starting is stopped, and is the recorder's failure too.
+    @Test func aRecorderThatNeverStartsIsARunnerFailureNamingIt() async throws {
+        defer { worktree.remove() }
+        let detached = FakeDetachedProcesses()
+        var (service, ctx) = try setup(FakeWindowCapture(window: Self.window), detached: detached)
+        let error = await #expect(throws: XcdError.self) { try await service.startRecording(device: "mac", out: nil, in: &ctx) }
+        #expect(error?.code == .runnerFailed && error?.message.hasPrefix("xcd _record-window didn't start recording within 10") == true)
+        #expect(error?.next != nil && detached.stops.map(\.signal) == [SIGINT])
     }
 
     /// A recording runs while its own recorder does, so a second start is refused, not a restart.

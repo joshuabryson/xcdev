@@ -15,7 +15,7 @@ struct RecordWindowCommand: AsyncParsableCommand {
             try await MacWindowRecorder.record(windowID: window, to: out, scale: scale)
         } catch {
             let failure = error as? XcdError
-                ?? XcdError(.runnerFailed, error.localizedDescription, next:"run `xcd doctor`, then start the recording again")
+                ?? XcdError(.runnerFailed, error.localizedDescription, next: "run `xcd doctor`, then start the recording again")
             StandardError.write(Renderer.failure(failure, command: MacWindowRecorder.marker, format: .text) + "\n")
             throw ExitCode(failure.code.exitCode)
         }
