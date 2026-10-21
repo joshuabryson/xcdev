@@ -41,7 +41,7 @@ struct AppKitButton: NSViewRepresentable {
         button.setAccessibilityIdentifier("appkit-button")
         return button
     }
-    func updateNSView(_ view: NSButton, context: Context) {}
+    func updateNSView(_ view: NSButton, context: Context) { view.title = "AppKit" }
     func makeCoordinator() -> Coordinator { Coordinator() }
     final class Coordinator { @objc func pressed() { model.appKitCount += 1; log("appkit \(model.appKitCount)") } }
 }
