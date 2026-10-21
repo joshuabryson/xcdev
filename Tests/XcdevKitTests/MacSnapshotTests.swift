@@ -1,3 +1,4 @@
+import ApplicationServices
 import Testing
 import XcdevTestSupport
 @testable import XcdevKit
@@ -66,6 +67,17 @@ import XcdevTestSupport
         #expect(scene.hidden && scene.windows.count == 2 && scene.root.children[1].label == "Inspector")
         #expect(scene.root.children[1].frame == ScreenRect(x: 0, y: 0, w: 900, h: 552))
         #expect(scene.mainWindow == scene.windows.first && scene.mainTitle == "Probe")
+    }
+
+    /// After a link, `AXMainWindow` can name an empty twin while the controls sit in the next window.
+    @Test func theMainWindowIsTheOneWithContentWhenAXMainWindowIsAnEmptyTwin() throws {
+        let popUp = FakeNode(role: "AXMenu", frame: ScreenRect(x: 2700, y: 300, w: 100, h: 40))
+        let windows = [Self.window([], title: "Twin"), Self.window([Self.button], title: "Probe", x: 100, y: 100)]
+        let api = FakeAccessibility(app: FakeApp(windows: windows, menus: [popUp]))
+        #expect(try api.element(kAXMainWindowAttribute, of: api.application(pid: 7)) == AXElement(token: 1))   // the twin, as AX says
+        let scene = try MacSnapshot(api: api).read(app: api.application(pid: 7))
+        #expect(scene.windows.count == 2 && scene.mainWindow == scene.windows[1] && scene.mainTitle == "Probe")
+        #expect(scene.root.children[2].frame == ScreenRect(x: 2600, y: 200, w: 100, h: 40))    // measured from the chosen window
     }
 
     @Test func theTreeStopsAtTheDepthCapAndSaysSo() throws {

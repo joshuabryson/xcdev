@@ -42,7 +42,7 @@ public struct MacSnapshot {
     /// window. A context menu sits under the cell it opened on, so the window walk finds it. The menu bar is not read.
     public func read(app: AXElement) throws -> MacScene {
         let windows = try api.elements(kAXWindowsAttribute, of: app)
-        let main = try api.element(kAXMainWindowAttribute, of: app) ?? windows.first
+        let main = try mainWindow(of: app, windows: windows)
         let walk = Walk()
         var children: [SnapshotNode] = []
         for window in windows {
@@ -63,6 +63,18 @@ public struct MacSnapshot {
         return MacScene(root: root, windows: windows, mainWindow: main, mainTitle: title,
                         hidden: try api.bool(kAXHiddenAttribute, of: app) ?? false, capped: walk.capped)
     }
+
+    /// The window with the app's content. A link opened on a hidden SwiftUI app adds an empty twin that becomes
+    /// `AXMainWindow` while the controls stay in the other. So: `AXMainWindow` when it holds anything, else
+    /// the first window that does, else `AXMainWindow`, else the first window.
+    func mainWindow(of app: AXElement, windows: [AXElement]) throws -> AXElement? {
+        let named = try api.element(kAXMainWindowAttribute, of: app)
+        if let named, try holdsContent(named) { return named }
+        return try windows.first(where: holdsContent) ?? named ?? windows.first
+    }
+
+    /// Whether the window's subtree holds an element besides the window itself.
+    func holdsContent(_ window: AXElement) throws -> Bool { try !api.elements(kAXChildrenAttribute, of: window).isEmpty }
 
     func origin(of window: AXElement) throws -> ScreenPoint {
         try api.rect(of: window).map { ScreenPoint(x: $0.x, y: $0.y) } ?? ScreenPoint(x: 0, y: 0)
