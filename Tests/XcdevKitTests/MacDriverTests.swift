@@ -157,8 +157,10 @@ import XcdevTestSupport
         let click = #expect(throws: RunnerFailure.self) { try driver.tap(x: 10, y: 10) }
         #expect(click?.code == RunnerFailure.Code.unsupported && click?.message == MacDriver.Refusal.pointClick)
         #expect(throws: RunnerFailure.self) { try driver.press(x: 10, y: 10, duration: 1) }
-        #expect(throws: RunnerFailure.self) { _ = try driver.pressButton(.home) }
-        #expect(throws: RunnerFailure.self) { try driver.rotate(to: .landscapeLeft) }
+        let button = #expect(throws: RunnerFailure.self) { _ = try driver.pressButton(.home) }
+        #expect(button?.message == "a Mac has no hardware buttons; use `xcd ui menu` for the app's commands or `xcd ui tap` on an element")
+        let rotate = #expect(throws: RunnerFailure.self) { try driver.rotate(to: .landscapeLeft) }
+        #expect(rotate?.message == "a Mac window does not rotate; use `xcd ui rotate` on a simulator device instead")
         #expect(driver.setPasteboard(image: Data([0x89, 0x50])) == false)
     }
 }

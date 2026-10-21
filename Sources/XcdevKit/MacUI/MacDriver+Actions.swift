@@ -6,8 +6,8 @@ extension MacDriver {
     public enum Refusal {
         public static let pointClick = "clicks posted to a background Mac app do not land; name the element instead (id:, label:, or a ref)"
         public static let noDrag = "a drag between points does not reach a background Mac app; swipe on an element with --on"
-        public static let noButtons = "a Mac has no hardware buttons"
-        public static let noRotation = "a Mac window does not rotate"
+        public static let noButtons = "a Mac has no hardware buttons; use `xcd ui menu` for the app's commands or `xcd ui tap` on an element"
+        public static let noRotation = "a Mac window does not rotate; use `xcd ui rotate` on a simulator device instead"
         public static let noChord = "keyboard shortcuts posted to a background Mac app do not land; use `xcd ui menu \"<Menu> > <Item>\"`"
     }
 
