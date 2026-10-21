@@ -26,7 +26,7 @@ struct ActionDone {
         report.method = result.method
         report.detail = detail
         report.tree = result.tree
-        if treeAsked, result.tree == nil { report.notes = ["note: the tree could not be read after the action; run `xcd ui tree`"] }
+        if treeAsked, result.tree == nil { report.notes = [UIText.treeUnreadNote] }
         return report
     }
 }
@@ -126,7 +126,7 @@ extension UIService {
         if let (_, result) = try? await send(exchange, as: TreeResult.self, options, in: &ctx), case .success(let tree) = result {
             report.tree = tree
         } else {
-            report.notes.append("note: the tree could not be read after the action; run `xcd ui tree`")
+            report.notes.append(UIText.treeUnreadNote)
         }
     }
 

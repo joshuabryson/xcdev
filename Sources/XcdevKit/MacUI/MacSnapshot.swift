@@ -110,8 +110,9 @@ public struct MacSnapshot {
         return try windows.first { try holdsContent($0, app: app) } ?? named ?? windows.first
     }
 
-    /// Whether the window's subtree holds an element the walk would list that is neither a window nor a title-bar
-    /// button: an empty twin still lists its close, minimize, and zoom buttons. A window that is gone holds nothing.
+    /// Whether the window holds anything besides window chrome: the first element of any role that is neither a window,
+    /// a title-bar button, nor the menu bar counts at once, and the search goes down only through windows and title-bar
+    /// buttons. An empty twin lists only its close, minimize, and zoom buttons. A window that is gone holds nothing.
     func holdsContent(_ window: AXElement, app: AXElement) throws -> Bool {
         try surviving { try holdsContent(window, depth: 1, walk: Walk(app: app)) } ?? false
     }

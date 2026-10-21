@@ -10,6 +10,7 @@ final class Model: ObservableObject {
     @Published var active = false
     @Published var lastRow = ""
     @Published var appKitCount = 0
+    @Published var mode = 1
 }
 
 let model = Model()
@@ -70,6 +71,7 @@ struct ContentView: View {
             Text("active: \(m.active)").accessibilityIdentifier("active")
             Text("last row: \(m.lastRow)").accessibilityIdentifier("last-row")
             HStack { AppKitButton(); Text("appkit: \(m.appKitCount)").accessibilityIdentifier("appkit-count") }
+            Picker("Mode", selection: $m.mode) { Text("One").tag(1); Text("Two").tag(2) }.pickerStyle(.menu).accessibilityIdentifier("picker")
             Text("appearance: \(NSApp.effectiveAppearance.name.rawValue)").accessibilityIdentifier("appearance")
             List(1...40, id: \.self) { i in
                 Button("Row \(i)") { m.lastRow = "\(i)"; log("row \(i)") }.buttonStyle(.plain).accessibilityIdentifier("row-\(i)")

@@ -66,7 +66,14 @@ public struct MacMenu {
         guard let first = titles.first, titles.count >= 2 else {
             throw XcdError(.usage, "'\(path)' is not a menu path", next: "write it as \"<Menu> > <Item>\", e.g. \"File > Save…\"")
         }
-        let (node, walked) = try find(first, titles.dropFirst(), in: try barItems(), walked: [])
+        let bar = try barItems()
+        // The Apple menu is the bar's first item, titled "Apple" or the Apple glyph, so it is known by its place, not its
+        // title. Its items sleep, lock, or restart the Mac, or open System Settings or another app in front.
+        if bar.first?.title == first {
+            throw XcdError(.platformUnsupported, "the Apple menu is the person's; xcd never presses it",
+                           next: "use the app's own menus (`xcd ui menu` lists them after the Apple menu)")
+        }
+        let (node, walked) = try find(first, titles.dropFirst(), in: bar, walked: [])
         guard try submenu(of: node) == nil else {
             throw XcdError(.elementNotHittable, "'\(path)' is a submenu, not an item", next: "name an item inside it, from `xcd ui menu`")
         }

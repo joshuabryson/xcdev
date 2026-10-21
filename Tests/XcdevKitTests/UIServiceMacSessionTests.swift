@@ -72,4 +72,22 @@ import XcdevTestSupport
         let refused = await #expect(throws: XcdError.self) { try await service.menu(nil, phone, in: &ctx) }
         #expect(refused?.code == .platformUnsupported)
     }
+
+    /// The press has happened when `--tree` reads the tree, so a read that fails is a note in the text and the JSON, as
+    /// after any action, and not a tree that is silently missing.
+    @Test func aMenuPressWhoseTreeCannotBeReadSaysSo() async throws {
+        defer { base.worktree.remove() }
+        var app = UIServiceMacTests.app
+        app.menuBar = MacMenuTests.menuBar
+        let api = FakeAccessibility(app: app)
+        var (service, ctx) = try base.setup(api)
+        var withTree = base.options
+        withTree.tree = true
+        api.loseWindowList(forReads: 10)
+        let pressed = try await service.menu("Probe > Bump by ten", withTree, in: &ctx)
+        let note = "note: the tree could not be read after the action; run `xcd ui tree`"
+        #expect(api.events == ["AXPress Bump by ten"] && pressed.tree == nil && pressed.notes == [note])
+        #expect(pressed.text == "pressed Probe > Bump by ten\n" + note)
+        #expect(String(decoding: try JSONEncoder().encode(pressed), as: UTF8.self).contains("\"notes\":[\"\(note)\"]"))
+    }
 }

@@ -9,13 +9,12 @@ extension UIService {
         }
         let menu = MacMenu(api: mac.api, app: mac.api.application(pid: mac.pid))
         guard let path else { return UIMenuReport(device: mac.device, items: try menu.items(), pressed: nil, tree: nil, worktree: ctx.state.name) }
-        let pressed = try menu.press(path: path)
-        var tree: TreeResult?
-        if options.tree {
-            let request = TreeRequest(bundleId: try bundleId(options, in: ctx), system: false, all: false)
-            let result: Result<TreeResult, RunnerFailure> = try mac.perform(RunnerProtocol.treePath, request)
-            tree = try? result.get()
-        }
-        return UIMenuReport(device: mac.device, items: nil, pressed: pressed.path, tree: tree, worktree: ctx.state.name)
+        var report = UIMenuReport(device: mac.device, items: nil, pressed: try menu.press(path: path).path, tree: nil, worktree: ctx.state.name)
+        guard options.tree else { return report }
+        // The press has happened: a tree that cannot be read is said, as after any action, not made the command's failure.
+        let request = TreeRequest(bundleId: try bundleId(options, in: ctx), system: false, all: false)
+        let result: Result<TreeResult, RunnerFailure> = try mac.perform(RunnerProtocol.treePath, request)
+        if case .success(let tree) = result { report.tree = tree } else { report.notes = [UIText.treeUnreadNote] }
+        return report
     }
 }

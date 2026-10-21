@@ -17,6 +17,9 @@ public enum MacRoles {
     ]
     /// Element types the driver focuses instead of pressing.
     public static let textEntry: Set<Int> = [45, 49, 50, 52]
+    /// Element types whose press opens a menu on the person's screen, hidden app or not: a pop-up button and a menu
+    /// button (measured on a menu-style `Picker`: a window at the pop-up menu level, there 3 s later).
+    public static let opensMenu: Set<Int> = [14, 16]
     /// Subroles of the buttons every titled window has in its title bar: they are the window's, not the app's content.
     public static let titleBarButtons: Set<String> = ["AXCloseButton", "AXMinimizeButton", "AXZoomButton", "AXFullScreenButton"]
 

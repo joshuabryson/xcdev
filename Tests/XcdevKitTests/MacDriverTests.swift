@@ -105,6 +105,19 @@ import XcdevTestSupport
         #expect(failure?.code == RunnerFailure.Code.notHittable && failure?.message.contains("no press action") == true)
     }
 
+    /// A press on a pop-up or menu button opens its menu on the person's screen (measured 2026-10-20 on a menu-style
+    /// `Picker`: a window at the pop-up menu level within 1 s, still there 3 s later), so the tap is refused unpressed.
+    @Test func aTapOnAPopUpOrMenuButtonIsRefusedAndNothingIsPressed() throws {
+        let picker = FakeNode(role: "AXPopUpButton", value: "One", identifier: "picker", frame: ScreenRect(x: 2574, y: 400, w: 72, h: 24), actions: ["AXPress"])
+        let menu = FakeNode(role: "AXMenuButton", title: "Actions", identifier: "actions", frame: ScreenRect(x: 2674, y: 400, w: 72, h: 24), actions: ["AXPress"])
+        let (driver, api, nodes) = try driver(FakeApp(windows: [MacSnapshotTests.window([picker, menu])]))
+        for id in ["picker", "actions"] {
+            let refused = #expect(throws: RunnerFailure.self) { try driver.tap(node: try node(nodes, id)) }
+            #expect(refused?.code == RunnerFailure.Code.unsupported && refused?.message == MacDriver.Refusal.popUpMenu)
+        }
+        #expect(api.events.isEmpty)
+    }
+
     /// The real AXShowMenu answers cannotComplete though the menu opens, so the fake answers false and the driver goes on.
     @Test func aLongPressShowsTheContextMenuWhateverTheActionAnswers() throws {
         var row = MacSnapshotTests.row

@@ -171,6 +171,8 @@ import XcdevTestSupport
         _ = try await service.tree(all: false, options, in: &ctx)
         let stopped = try await service.stop(device: nil, rebuild: true, in: &ctx)
         #expect(stopped.text.contains("forgot the refs of mac") && stopped.text.contains("no runner to stop on a Mac"))
+        // The flag as given, in the JSON; the text says it did nothing and never that the runner will be rebuilt.
+        #expect(stopped.rebuild == true && stopped.text.contains("--rebuild does nothing on a Mac") && !stopped.text.contains("will be rebuilt"))
         #expect(!FileManager.default.fileExists(atPath: MacRefStore.file(ctx.paths, device: "mac")))
     }
 

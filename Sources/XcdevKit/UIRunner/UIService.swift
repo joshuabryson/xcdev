@@ -109,7 +109,7 @@ public struct UIService: Sendable {
             let had = Disk.exists(file)
             MacRefStore.forget(file)
             return UIStopReport(device: name, stopped: [(had ? "forgot the refs of \(name)" : "no refs to forget for \(name)") + "; there is no runner to stop on a Mac"]
-                                + (rebuild ? ["--rebuild does nothing on a Mac"] : []), rebuild: false, worktree: ctx.state.name)
+                                + (rebuild ? [UIStopReport.macRebuildNote] : []), rebuild: rebuild, worktree: ctx.state.name)
         }
         let stopped = try await supervisor.stop(device: name, in: ctx)
         if rebuild { try await supervisor.builder.discard(xcode: try await supervisor.provisioner.ensureXcode(&ctx)) }

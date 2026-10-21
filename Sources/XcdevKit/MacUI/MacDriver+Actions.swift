@@ -9,6 +9,8 @@ extension MacDriver {
         public static let noButtons = "a Mac has no hardware buttons; use `xcd ui menu` for the app's commands or `xcd ui tap` on an element"
         public static let noRotation = "a Mac window does not rotate; use `xcd ui rotate` on a simulator device instead"
         public static let noChord = "keyboard shortcuts posted to a background Mac app do not land; use `xcd ui menu \"<Menu> > <Item>\"`"
+        public static let popUpMenu = "a tap on a pop-up or menu button opens its menu on the person's screen; use `xcd ui menu` for the app's "
+            + "commands, or set the value another way, such as a link with `xcd open`"
     }
 
     static func unsupported(_ message: String) -> RunnerFailure { RunnerFailure(code: RunnerFailure.Code.unsupported, message: message) }
@@ -26,6 +28,7 @@ extension MacDriver {
     public func setPasteboard(image: Data) -> Bool { false }
 
     public func tap(node: FlatNode) throws {
+        if MacRoles.opensMenu.contains(where: { ElementRole.name(for: $0) == node.role }) { throw Self.unsupported(Refusal.popUpMenu) }
         if MacRoles.textEntry.contains(where: { ElementRole.name(for: $0) == node.role }) { return try focus(node: node) }
         let element = try element(of: node)
         guard api.actions(of: element).contains(kAXPressAction) else {

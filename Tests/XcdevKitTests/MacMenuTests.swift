@@ -13,6 +13,7 @@ import XcdevTestSupport
                  children: [FakeNode(role: "AXMenu", frame: ScreenRect(x: 0, y: 0, w: 100, h: 100), children: items)])
     }
     static let menuBar = [
+        bar("Apple", [item("Sleep")]),
         bar("File", [item("New"), item("Save...", enabled: false), item("Export", children: [item("PDF"), item("PNG")])]),
         bar("Probe", [item("Bump by ten"), item("Services", children: [item("Open man Page")])]),
     ]
@@ -20,8 +21,18 @@ import XcdevTestSupport
     @Test func theBarIsListedAsPathsWithDisabledMarkedAndServicesLeftOut() throws {
         let api = FakeAccessibility(app: FakeApp(windows: [], menuBar: Self.menuBar))
         let items = try MacMenu(api: api, app: api.application(pid: 7)).items()
-        #expect(items.map(\.path) == ["File > New", "File > Save…", "File > Export > PDF", "File > Export > PNG", "Probe > Bump by ten"])
-        #expect(items.map(\.enabled) == [true, false, true, true, true])
+        #expect(items.map(\.path) == ["Apple > Sleep", "File > New", "File > Save…", "File > Export > PDF", "File > Export > PNG", "Probe > Bump by ten"])
+        #expect(items.map(\.enabled) == [true, true, false, true, true, true])
+    }
+
+    /// The Apple menu's items sleep, lock, or restart the Mac, or put a sheet or another app on the person's screen, so
+    /// a path into the bar's first item is refused before any walk or press; it is still listed.
+    @Test func theAppleMenuIsNeverPressed() throws {
+        let api = FakeAccessibility(app: FakeApp(windows: [], menuBar: Self.menuBar))
+        let refused = #expect(throws: XcdError.self) { try MacMenu(api: api, app: api.application(pid: 7)).press(path: "Apple > Sleep") }
+        #expect(refused?.code == .platformUnsupported && refused?.message == "the Apple menu is the person's; xcd never presses it")
+        #expect(refused?.next == "use the app's own menus (`xcd ui menu` lists them after the Apple menu)")
+        #expect(!api.events.contains { $0.hasPrefix("AXPress") })
     }
 
     @Test func aPressByPathFiresTheItemAndTreatsThreeDotsAsAnEllipsis() throws {

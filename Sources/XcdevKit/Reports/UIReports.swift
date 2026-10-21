@@ -2,6 +2,7 @@ import Foundation
 
 enum UIText {
     static let restartNote = "note: the UI runner was restarted, so refs from earlier trees are gone"
+    static let treeUnreadNote = "note: the tree could not be read after the action; run `xcd ui tree`"
 
     /// `button "Sign In" id=signIn`, the short form used in action and wait reports.
     static func name(_ element: TreeElement) -> String {
@@ -151,12 +152,15 @@ public struct UIWaitReport: Reportable {
 public struct UIStopReport: Reportable {
     public let device: String
     public let stopped: [String]
+    /// `--rebuild` as given; on a Mac, where it does nothing, `stopped` says so.
     public let rebuild: Bool
     public let worktree: String
 
+    static let macRebuildNote = "--rebuild does nothing on a Mac"
+
     public var text: String {
         var lines = stopped.isEmpty ? ["no UI runner was running for \(device)"] : stopped
-        if rebuild { lines.append("the UI runner will be rebuilt on next use") }
+        if rebuild, !stopped.contains(Self.macRebuildNote) { lines.append("the UI runner will be rebuilt on next use") }
         return lines.joined(separator: "\n")
     }
 
@@ -168,8 +172,11 @@ public struct UIMenuReport: Reportable {
     public let device: String
     public let items: [MacMenuItem]?
     public let pressed: String?
-    public let tree: TreeResult?
+    /// The tree after the press (`--tree`).
+    public var tree: TreeResult?
     public let worktree: String
+    /// Says when `--tree` was asked and the tree could not be read after the press.
+    public var notes: [String] = []
 
     public var text: String {
         if let items {
@@ -177,6 +184,7 @@ public struct UIMenuReport: Reportable {
         }
         var lines = ["pressed \(pressed ?? "")"]
         if let tree { lines += UIText.tree(tree) }
+        lines += notes
         return lines.joined(separator: "\n")
     }
 
