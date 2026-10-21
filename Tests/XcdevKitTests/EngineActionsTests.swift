@@ -49,6 +49,57 @@ import XcdevTestSupport
         return request
     }
 
+    // MARK: The element-aware seam
+
+    /// A root that contains its children, so the engine's own hit-testing finds them on screen.
+    static let wide = ScreenRect(x: 0, y: 0, w: 400, h: 800)
+
+    static func seamApp(_ children: [SnapshotNode]) -> SnapshotNode {
+        node(2, id: "app", wide, children)
+    }
+
+    static func seamDevice(_ children: [SnapshotNode]) -> FakeDevice {
+        FakeDevice(app: seamApp(children), system: RunnerEngineTests.home)
+    }
+
+    @Test func aTapGoesThroughTheElementAwareSeamWithTheNodeItFound() {
+        let device = Self.seamDevice([Self.node(9, id: "go", ScreenRect(x: 10, y: 20, w: 100, h: 40))])
+        let engine = RunnerEngine(device: device)
+        guard case .success = engine.tap(request(.id("go"))) else { Issue.record("the tap failed"); return }
+        #expect(device.nodeEvents == ["tap node:go"])
+        #expect(device.taps.map { "\($0.x),\($0.y)" } == ["60.0,40.0"])     // the default still taps the centre
+    }
+
+    @Test func aSwipeOnAnElementAsksTheDeviceToScrollFirstAndDragsOnlyWhenItDeclines() {
+        let device = Self.seamDevice([Self.node(26, id: "list", ScreenRect(x: 0, y: 0, w: 100, h: 400))])
+        let engine = RunnerEngine(device: device)
+        let scope = ActionScope(bundleId: Self.bundle, system: false, timeout: 1, tree: false)
+        let on = ElementQuery(target: .id("list"), role: nil, index: nil)
+        device.scrolls = true
+        _ = engine.swipe(SwipeRequest(scope: scope, direction: .up, on: on, from: nil, to: nil))
+        #expect(device.nodeEvents == ["scroll node:list up"] && !device.events.contains { $0.hasPrefix("drag") })
+        device.scrolls = false
+        _ = engine.swipe(SwipeRequest(scope: scope, direction: .up, on: on, from: nil, to: nil))
+        #expect(device.events.contains { $0.hasPrefix("drag") })
+    }
+
+    @Test func anEngineMadeWithSavedRefsKeepsTheirNumbersAndNeverReusesOne() {
+        let go = Self.node(9, id: "go", ScreenRect(x: 10, y: 20, w: 100, h: 40))
+        let more = Self.node(9, id: "more", ScreenRect(x: 10, y: 80, w: 100, h: 40))
+        let device = Self.seamDevice([go])
+        let first = RunnerEngine(device: device)
+        _ = first.tree(TreeRequest(bundleId: Self.bundle, system: false, all: false))
+        let second = RunnerEngine(device: device, refs: first.refs, lastRef: first.lastRefNumber)
+        guard case .success(let tapped) = second.tap(request(.ref("e1"))) else { Issue.record("e1 should still name the button"); return }
+        #expect(tapped.element?.identifier == "go" && second.lastRefNumber == 1)
+        // A new element appears: it gets e2, never the e1 that is taken.
+        device.app = Self.seamApp([go, more])
+        guard case .success(let tree) = second.tree(TreeRequest(bundleId: Self.bundle, system: false, all: false)) else {
+            Issue.record("the tree failed"); return
+        }
+        #expect(tree.elements.first { $0.identifier == "more" }?.ref == "e2" && second.lastRefNumber == 2)
+    }
+
     @Test func theKeyboardsBarsAreHiddenAndCoverWhatIsUnderThem() throws {
         let (engine, device) = make(Self.appWithKeyboard)
         let tree = try engine.tree(TreeRequest(bundleId: Self.bundle, system: false, all: false)).get()
@@ -278,6 +329,20 @@ import XcdevTestSupport
         let (engine, device) = base.make(EngineActionsTests.appWithKeyboard)
         let result = try engine.enterText(type("hi", into: nil)).get()
         #expect(device.events == ["type \"hi\""] && result.element == nil && result.x == nil && result.method == "keyboard")
+    }
+
+    @Test func aDeviceWithoutAKeyboardTypesAtOnceIntoTheFocusedElementAndWaitsForNothing() {
+        var field = TreeBuilderTests.node(49, id: "name", frame: ScreenRect(x: 10, y: 20, w: 100, h: 40))
+        field.focused = true
+        let device = EngineActionsTests.seamDevice([field])
+        device.keyboardAppears = false
+        let engine = RunnerEngine(device: device)
+        guard case .success(let typed) = engine.enterText(type("hi", into: .id("name"), clear: true, submit: true)) else {
+            Issue.record("typing failed"); return
+        }
+        #expect(device.nodeEvents == ["focus node:name"])
+        #expect(device.events.contains("key cmd-\"a\"") && device.events.contains("type " + "\u{8}hi\n".debugDescription))
+        #expect(typed.method == "keyboard" && device.pauses == 0)         // no keyboard wait before or after
     }
 
     /// A device that can't say what has keyboard focus (`focused` is nil on every element): XCTest fails a `typeText`

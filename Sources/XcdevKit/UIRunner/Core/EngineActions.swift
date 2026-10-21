@@ -104,23 +104,25 @@ extension RunnerEngine {
     }
 
     /// A tap or a long-press: at the point given, or at the centre of the element found.
-    func press(_ request: TargetRequest, what: String, gesture: (ScreenPoint) throws -> Void) -> Result<ActionResult, RunnerFailure> {
+    func press(_ request: TargetRequest, what: String, gesture: (FlatNode?, ScreenPoint) throws -> Void) -> Result<ActionResult, RunnerFailure> {
         let scope = request.scope
         if let refusal = refusal(scope) { return .failure(refusal) }
         if case .point(let x, let y) = request.target {
             return direct(scope, what: what) {
-                try gesture(ScreenPoint(x: x, y: y))
+                try gesture(nil, ScreenPoint(x: x, y: y))
                 return ActionResult(element: nil, x: x, y: y, ms: 0)
             }
         }
         return onElement(request.query, scope, what: what) { node, scene in
-            try gesture(ScreenPoint(x: node.frame.midX, y: node.frame.midY))
+            try gesture(node, ScreenPoint(x: node.frame.midX, y: node.frame.midY))
             return ActionResult(element: TreeBuilder.element(node, ref: nil, screen: scene.screen), x: node.frame.midX, y: node.frame.midY, ms: 0)
         }
     }
 
     public func tap(_ request: TargetRequest) -> Result<ActionResult, RunnerFailure> {
-        press(request, what: "tap") { try self.device.tap(x: $0.x, y: $0.y) }
+        press(request, what: "tap") { node, point in
+            if let node { try self.device.tap(node: node) } else { try self.device.tap(x: point.x, y: point.y) }
+        }
     }
 
     /// Seconds a long-press holds when the request doesn't say.
@@ -130,6 +132,8 @@ extension RunnerEngine {
         let seconds = request.duration ?? Self.defaultPress
         // Held for at most a minute, so a runner can't be kept busy for hours.
         let duration = seconds.isNaN ? Self.defaultPress : min(max(seconds, 0.1), 60)
-        return press(request, what: "long-press") { try self.device.press(x: $0.x, y: $0.y, duration: duration) }
+        return press(request, what: "long-press") { node, point in
+            if let node { try self.device.press(node: node, duration: duration) } else { try self.device.press(x: point.x, y: point.y, duration: duration) }
+        }
     }
 }

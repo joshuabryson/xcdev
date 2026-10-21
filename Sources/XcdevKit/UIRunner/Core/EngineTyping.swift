@@ -46,7 +46,7 @@ extension RunnerEngine {
         var scope = scope
         scope.tree = false
         return onElement(query, scope, what: "tap") { node, scene in
-            try self.device.tap(x: node.frame.midX, y: node.frame.midY)
+            try self.device.focus(node: node)
             return ActionResult(element: TreeBuilder.element(node, ref: nil, screen: scene.screen), x: node.frame.midX, y: node.frame.midY, ms: 0)
         }
     }
@@ -59,6 +59,7 @@ extension RunnerEngine {
     /// and a paste would go nowhere without XCTest reporting a problem. The device can't say: the text is
     /// pasted, since XCTest fails a `typeText` when nothing has focus.
     func textEntry(_ scope: ActionScope) -> Result<TextEntry, RunnerFailure> {
+        guard device.keyboardAppears else { return typedWithoutKeyboard(scope) }
         var scope = scope
         scope.timeout = Self.keyboardWait
         var focus: Bool?
@@ -78,6 +79,16 @@ extension RunnerEngine {
         case .failure:
             guard let focus else { return .success(.paste) }
             return .success(focus ? .keys : .nowhere)
+        }
+    }
+
+    /// No keyboard will come (a Mac): the focused element, if any, takes the keys.
+    private func typedWithoutKeyboard(_ scope: ActionScope) -> Result<TextEntry, RunnerFailure> {
+        do {
+            let scene = try readScene(bundleId: scope.bundleId, system: scope.system, forAction: true)
+            return .success(Self.keyboardFocus(in: scene) == true ? .keys : .nowhere)
+        } catch {
+            return .failure(RunnerFailure(code: RunnerFailure.Code.internal, message: "the typing failed: \(error)"))
         }
     }
 
@@ -104,7 +115,7 @@ extension RunnerEngine {
         } else {
             try paste(request)
         }
-        if request.clear || request.submit || !request.text.isEmpty { awaitKeyboard(request.scope) }
+        if device.keyboardAppears, request.clear || request.submit || !request.text.isEmpty { awaitKeyboard(request.scope) }
         var result = focused
         result.method = keys ? "keyboard" : "paste"
         return result

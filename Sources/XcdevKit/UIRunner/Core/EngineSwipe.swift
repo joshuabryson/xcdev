@@ -18,8 +18,11 @@ extension RunnerEngine {
         }
         guard let query = request.on else { return swipeScreen(direction, scope) }
         return onElement(query, scope, what: "swipe") { node, scene in
-            try self.swiped(TreeBuilder.element(node, ref: nil, screen: scene.screen),
-                            from: ScreenPoint(x: node.frame.midX, y: node.frame.midY), to: Self.end(of: direction, in: node.frame))
+            let element = TreeBuilder.element(node, ref: nil, screen: scene.screen)
+            if try self.device.scroll(node: node, direction: direction) {
+                return ActionResult(element: element, x: node.frame.midX, y: node.frame.midY, ms: 0)
+            }
+            return try self.swiped(element, from: ScreenPoint(x: node.frame.midX, y: node.frame.midY), to: Self.end(of: direction, in: node.frame))
         }
     }
 

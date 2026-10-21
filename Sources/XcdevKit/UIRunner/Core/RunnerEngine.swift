@@ -35,6 +35,22 @@ public protocol DeviceDriving: AnyObject {
     func pause(_ seconds: Double)
     /// Seconds from any fixed origin.
     func now() -> Double
+    /// Acts on the element the engine found. The defaults act at the node's centre, as a simulator does; a Mac driver
+    /// acts on the element itself. `scroll` answers false when it did not scroll, and the engine drags instead.
+    func tap(node: FlatNode) throws
+    func press(node: FlatNode, duration: Double) throws
+    func focus(node: FlatNode) throws
+    func scroll(node: FlatNode, direction: SwipeDirection) throws -> Bool
+    /// Whether typing brings a keyboard on screen that the engine should wait for. False on a Mac.
+    var keyboardAppears: Bool { get }
+}
+
+public extension DeviceDriving {
+    func tap(node: FlatNode) throws { try tap(x: node.frame.midX, y: node.frame.midY) }
+    func press(node: FlatNode, duration: Double) throws { try press(x: node.frame.midX, y: node.frame.midY, duration: duration) }
+    func focus(node: FlatNode) throws { try tap(x: node.frame.midX, y: node.frame.midY) }
+    func scroll(node: FlatNode, direction: SwipeDirection) throws -> Bool { false }
+    var keyboardAppears: Bool { true }
 }
 
 /// Handles the runner's requests. One instance lives for the runner's life and holds the ref table.
@@ -50,9 +66,14 @@ public final class RunnerEngine {
     public var runnerBundleId = ""
     public var rolesVerified = true
 
-    public init(device: DeviceDriving) {
+    public init(device: DeviceDriving, refs: [String: RefSignature] = [:], lastRef: Int = 0) {
         self.device = device
+        self.refs = refs
+        self.lastRef = lastRef
     }
+
+    /// The number of the last ref given out, for a session that saves the table between commands.
+    public var lastRefNumber: Int { lastRef }
 
     struct Scene {
         var nodes: [FlatNode]

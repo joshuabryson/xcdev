@@ -38,6 +38,8 @@ public struct FlatNode: Sendable, Equatable {
     public var window: Int
     /// Whether it has keyboard focus; nil when the device can't say.
     public var focused: Bool?
+    /// The driver's own name for the element; nil from the simulator runner.
+    public var handle: String?
 
     public var isInteractive: Bool { ElementRole.interactive.contains(role) }
     public var hasText: Bool { !label.isEmpty || !(value ?? "").isEmpty }
@@ -74,7 +76,7 @@ private struct TreeWalk {
         nodes.append(FlatNode(role: role, identifier: node.identifier, label: node.label, value: value, placeholder: node.placeholder,
                               frame: TreeBuilder.finite(node.frame), enabled: node.enabled, selected: node.selected, depth: position.depth,
                               source: source, parent: position.parent, signature: signature, inKeyboard: position.inKeyboard, window: window,
-                              focused: node.focused))
+                              focused: node.focused, handle: node.handle))
         var seen: [Int: Int] = [:]
         for child in node.children {
             let place = seen[child.elementType, default: 0]

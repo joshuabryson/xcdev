@@ -25,6 +25,26 @@ public final class FakeDevice: DeviceDriving {
     public var buttons: Set<HardwareButton> = [.home]
     /// Makes every gesture throw.
     public var failGestures = false
+    /// Element-aware calls the engine made, as "tap node:<identifier>", "focus node:<identifier>", "scroll node:<identifier> up".
+    public var nodeEvents: [String] = []
+    /// What `scroll(node:direction:)` answers: true means the device scrolled, so the engine does not drag.
+    public var scrolls = false
+    public var keyboardAppears = true
+
+    public func tap(node: FlatNode) throws {
+        nodeEvents.append("tap node:\(node.identifier)")
+        try tap(x: node.frame.midX, y: node.frame.midY)
+    }
+
+    public func focus(node: FlatNode) throws {
+        nodeEvents.append("focus node:\(node.identifier)")
+        try tap(x: node.frame.midX, y: node.frame.midY)
+    }
+
+    public func scroll(node: FlatNode, direction: SwipeDirection) throws -> Bool {
+        nodeEvents.append("scroll node:\(node.identifier) \(direction.rawValue)")
+        return scrolls
+    }
     /// Runs after each gesture (e.g. to make the app quit, or the keyboard appear).
     public var onGesture: ((FakeDevice) -> Void)?
 

@@ -46,9 +46,11 @@ public struct SnapshotNode: Codable, Sendable, Equatable {
     /// Whether it has keyboard focus; nil when the device can't say.
     public var focused: Bool?
     public var children: [SnapshotNode]
+    /// The driver's own name for the element, so it can act on it; nil from the simulator runner.
+    public var handle: String?
 
     public init(elementType: Int, identifier: String, label: String, value: String?, placeholder: String?, frame: ScreenRect,
-                enabled: Bool, selected: Bool, children: [SnapshotNode], focused: Bool? = nil) {
+                enabled: Bool, selected: Bool, children: [SnapshotNode], focused: Bool? = nil, handle: String? = nil) {
         self.focused = focused
         self.elementType = elementType
         self.identifier = identifier
@@ -59,6 +61,7 @@ public struct SnapshotNode: Codable, Sendable, Equatable {
         self.enabled = enabled
         self.selected = selected
         self.children = children
+        self.handle = handle
     }
 }
 

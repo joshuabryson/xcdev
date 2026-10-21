@@ -79,6 +79,14 @@ public struct TreeResult: Codable, Sendable, Equatable {
     public var orientation: String
     public var keyboard: Bool
     public var elements: [TreeElement]
+    /// On a Mac: whether the app is hidden.
+    public var hidden: Bool? = nil
+    /// On a Mac: the main window's title.
+    public var windowTitle: String? = nil
+    /// On a Mac: how many windows the app has.
+    public var windows: Int? = nil
+    /// On a Mac: whether the tree was cut at the node or depth cap.
+    public var capped: Bool? = nil
 }
 
 public struct ActionResult: Codable, Sendable, Equatable {
