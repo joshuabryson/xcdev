@@ -15,5 +15,7 @@ at once never collide.
   the installed xcd, so it always matches it.
 - Every failure ends with `next:`. Do it first; when it says to ask the user, ask.
 - `xcd doctor --restart-simulators` shuts down every agent's simulators: ask the user first.
+- Mac apps are driven the same way, launched hidden; `xcd ui menu` is the Mac's keyboard shortcut; `xcd guide ui` has
+  the Mac rules.
 - If xcd says the project has no `.xcdev.yml`, run `xcd guide setup` and follow it: `xcd init --plan`, ask the user
   each decision, then `xcd init --set key=value ...`.
