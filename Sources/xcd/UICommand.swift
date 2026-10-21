@@ -4,12 +4,12 @@ import XcdevKit
 struct UICommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "ui",
-        abstract: "See and drive the simulator: the element tree, taps, typing, swipes, waits, screenshots, and recordings.",
+        abstract: "See and drive the simulator or a Mac app: the element tree, taps, typing, swipes, waits, screenshots, and recordings.",
         discussion: """
         A target is one of: id:<identifier>, label:<text>, label~<part of the label>, ref:e<N> or just e<N> (from the newest tree), \
         or @x,y (points; tap and long-press only). The app is the one from the last build; --bundle picks another, \
         --system the Home Screen. Actions and wait act on the app and any system alert over it, so the app must be \
-        running in front: start it with `xcd run` or `xcd launch` first (not needed with --system, button, or rotate). \
+        running (in front on a simulator): start it with `xcd run` or `xcd launch` first (not needed with --system, button, or rotate). \
         Every action takes --tree, which prints the tree after it. Driving works on iPhone and iPad simulators running \
         iOS 17 or later, and on Mac apps, which run hidden; there, a point target, a drag, a hardware button, rotation, \
         and --system are refused, and shortcuts go through ui menu. No `ui` command takes focus on the Mac or opens a window; on a foldable, `ui rotate` and \

@@ -61,7 +61,8 @@ import Testing
         }
         #expect(error?.code == .platformUnsupported)
         #expect(error?.message == "device 'mac' is a macOS device and has no simulator")
-        #expect(error?.next?.contains("xcd launch --device mac --show") == true)
+        #expect(error?.next == "a Mac app is driven with `xcd ui …` after `xcd run --device mac`, and shown to a person with "
+                + "`xcd launch --device mac --show`; for a simulator, pass --device with a simulator device")
     }
 
     func compatibility(iOS sdk: String) -> RuntimeCompatibility {

@@ -2,7 +2,8 @@ import Foundation
 
 /// Whether the app that runs xcd holds the grants a Mac `ui` command needs.
 public struct MacPermissionsCheck: DoctorCheck {
-    public let id = "mac-permissions"
+    public static let id = "mac-permissions"
+    public var id: String { Self.id }
     public init() { /* stateless */ }
 
     public static func applies(devices: [String: DeviceSpec]) -> Bool { devices.values.contains { $0.isMac } }
@@ -17,11 +18,11 @@ public struct MacPermissionsCheck: DoctorCheck {
         var problems: [DoctorProblem] = []
         let app = permissions.hostApp
         if !permissions.accessibility {
-            problems.append(DoctorProblem(check: "mac-permissions", message: "\(app) has no Accessibility permission, so `xcd ui` cannot read a Mac app's windows",
+            problems.append(DoctorProblem(check: id, message: "\(app) has no Accessibility permission, so `xcd ui` cannot read a Mac app's windows",
                                           next: MacPermissions.accessibilityNext(app)))
         }
         if !permissions.screenRecording {
-            problems.append(DoctorProblem(check: "mac-permissions",
+            problems.append(DoctorProblem(check: id,
                                           message: "\(app) has no Screen Recording permission, so `xcd ui screenshot` and `record` cannot capture a Mac app's window",
                                           next: MacPermissions.screenRecordingNext(app)))
         }

@@ -4,7 +4,7 @@
 let guideUi = #"""
 # See and drive the app's UI
 
-Use this guide to check your work in the running app: read what is on screen, act on it, and confirm what happened. It works on iPhone and iPad simulators running iOS 17 or later, and on Mac apps. Nothing here opens Device Hub (Simulator.app before Xcode 27), brings a Mac app forward, or takes focus on the Mac; when a person wants to watch, `xcd sim open` shows them the simulator and `xcd launch --show` the Mac app.
+Use this guide to check your work in the running app: read what is on screen, act on it, and confirm what happened. It works on iPhone and iPad simulators running iOS 17 or later, and on Mac apps. Nothing here opens Device Hub (Simulator.app before Xcode 27), takes focus on the Mac, or (but for `--show`) brings a Mac app forward; when a person wants to watch, `xcd sim open` shows them the simulator and `xcd launch --show` the Mac app.
 
 ## The loop
 
@@ -70,7 +70,7 @@ An action on an element waits up to `--timeout` (default 2s; 10s for `wait`) for
 
 ## On a Mac
 
-The same loop drives the Mac build of the app, with the app hidden: `xcd run --device mac` starts it with no window on the desktop, and every `xcd ui` command works on it there. Nothing takes focus or moves the pointer. `xcd launch --device mac --show` starts it visible and in front, for a person.
+The same loop drives the Mac build of the app, with the app hidden: `xcd run --device mac` starts it with no window on the desktop, and the loop below works on it there; the commands a Mac cannot do are listed in the bullets and refuse with a reason and an alternative. Nothing takes focus or moves the pointer. `xcd launch --device mac --show` starts it visible and in front, for a person.
 
 - **The tree** is the app's windows, sheets, popovers, and open menus, with frames in each window's own points; the first line says `running (hidden)` or `running (visible)`, the main window's title and size, and the scale. The menu bar is not in it: `xcd ui menu` lists it as paths, the Apple menu first, then the app's own menus.
 - **Taps** press the element; a tap on a field focuses it. `@x,y` is refused: clicks posted to a background Mac app do not land, so name the element.
@@ -81,11 +81,11 @@ The same loop drives the Mac build of the app, with the app hidden: `xcd run --d
 - **Screenshots and recordings** take the app's main window, hidden or covered, through ScreenCaptureKit. They need the Screen Recording permission; macOS reminds the person now and then that the host app can record the screen. A recording is stills at about 5 per second, so motion looks stepped.
 - **Windows the app restored** (macOS brings an app back with the windows it had) are all in the tree; the header says `windows: n` when there is more than one. When an identifier appears in more than one window, narrow it with `--index` or close the extra window. A screenshot takes the main window, and after a link can land on an empty twin of it.
 - **Permissions** belong to the app that runs xcd (the terminal, the Claude desktop app, an IDE). A missing one fails fast with `permission_missing`, naming the app and the System Settings pane; `xcd doctor` lists the same. Nothing prompts.
-- **A locked screen** refuses every Mac `ui` command, `ui screenshot`, and `ui record start`: `runner_failed`, "the Mac's screen is locked, so the app's windows cannot be read", `next:` "ask the user to unlock the Mac, then run the command again". Ask the user; nothing else helps.
+- **A locked screen** refuses every Mac `ui` command except `ui stop`, including `ui screenshot` and `ui record start`: `runner_failed`, "the Mac's screen is locked, so the app's windows cannot be read", `next:` "ask the user to unlock the Mac, then run the command again". Ask the user; nothing else helps.
 - **System prompts** the app raises (contacts, photos, automation) belong to the person at the Mac; while one is up, reads fail with `runner_failed` saying so. Ask the user to answer it once.
-- **App Nap** is off for an app xcd launches. An app started some other way while hidden answers slowly, many times slower, so start it with `xcd run` or `xcd launch`.
+- **App Nap** is off for an app xcd launches hidden (a `--show` launch adds nothing). An app started some other way while hidden answers slowly, many times slower, so start it with `xcd run` or `xcd launch`.
 - **Refs** last across commands as on a simulator, and a relaunch makes them all stale (numbers start again at e1). `xcd ui stop` forgets them; there is no runner to stop.
-- **`xcd sim …`** commands are all refused on a Mac device with `platform_unsupported`, "device 'mac' is a macOS device and has no simulator"; its `next:` points to `xcd ui …` after `xcd run --device mac`, and `xcd launch --device mac --show` to show the app to a person. The pasteboard, appearance, and text size are the person's.
+- **The `xcd sim` state commands** (`boot`, `shutdown`, `erase`, `open`, `open-url`, `push`, `privacy`, `appearance`, `text-size`, `status-bar`, `location`, `addmedia`, `pasteboard`, `fold`) are refused on a Mac device with `platform_unsupported`, each naming its reason and the alternative; the shared one reads "device 'mac' is a macOS device and has no simulator", with `next:` pointing to `xcd ui …` after `xcd run --device mac` and to `xcd launch --device mac --show`. `xcd sim screenshot` and `xcd sim record` are `ui screenshot` and `ui record`, and work on the Mac window.
 
 ## When something fails
 
@@ -99,5 +99,6 @@ Every failure ends with `next:`. Do what it says first.
 | `stale_ref` | The newest tree does not list the ref's element, or the element has gone since. | Run `xcd ui tree` and use a ref from it. |
 | `wait_timeout` | The element didn't appear (or go) in time. | The error lists what is on screen. Check the app did what you expected. |
 | `app_crashed` | The action ended the app. | Read the crash report in the error, fix the crash, then `xcd run`. |
-| `runner_failed` | The runner didn't start or stopped answering. | `xcd ui stop`, retry, then `xcd doctor`. |
+| `runner_failed` | The runner didn't start or stopped answering. On a Mac: the screen is locked, or an Accessibility call timed out (a system prompt may be up). | `xcd ui stop`, retry, then `xcd doctor`. On a Mac, ask the user to unlock the Mac or answer the prompt. |
+| `permission_missing` | On a Mac, the app that runs xcd lacks Accessibility (or, for screenshots and recordings, Screen Recording). | Follow the `next:` (System Settings pane); `xcd doctor` lists the same. |
 """#

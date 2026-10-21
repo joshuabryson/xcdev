@@ -44,6 +44,7 @@ extension DeviceProvisioner {
     private func goingAway(_ requested: String?, in ctx: WorktreeContext,
                            _ detached: (any DetachedProcessLaunching)?) async throws -> GoingAway? {
         let name = try deviceName(requested, config: ctx.config)
+        if ctx.config.allDevices[name]?.isMac == true { throw DeviceResolver.macHasNoSimulator(name) }
         guard let device = ctx.state.devices[name] else { return nil }
         var notes: [String] = []
         if let detached {

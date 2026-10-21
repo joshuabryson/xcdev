@@ -30,6 +30,24 @@ import XcdevTestSupport
         #expect(fake.calls.isEmpty)
     }
 
+    /// `shutdown` and `erase` refuse a Mac device as every other `sim` state command does.
+    @Test func shutdownAndEraseRefuseAMacDeviceBeforeAnythingElse() async throws {
+        let ctx = try context("""
+        version: 1
+        project: App.xcodeproj
+        defaultDevice: iphone
+        devices:
+          iphone: { type: "iPhone 18 Pro" }
+          mac: { platform: macOS }
+        """)
+        let expected = DeviceResolver.macHasNoSimulator("mac")
+        for run in [{ try await provisioner.shutdownReport("mac", in: ctx) }, { try await provisioner.eraseReport("mac", in: ctx) }] {
+            let error = await #expect(throws: XcdError.self) { _ = try await run() }
+            #expect(error?.code == .platformUnsupported && error?.message == expected.message && error?.next == expected.next)
+        }
+        #expect(fake.calls.isEmpty)
+    }
+
     @Test func eraseShutsDownThenErasesOnlyThatClone() async throws {
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
