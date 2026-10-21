@@ -70,9 +70,13 @@ import XcdevTestSupport
     }
 
     /// After a link, `AXMainWindow` can name an empty twin while the controls sit in the next window.
+    /// The twin still has its title-bar buttons, which are not content.
     @Test func theMainWindowIsTheOneWithContentWhenAXMainWindowIsAnEmptyTwin() throws {
         let popUp = FakeNode(role: "AXMenu", frame: ScreenRect(x: 2700, y: 300, w: 100, h: 40))
-        let windows = [Self.window([], title: "Twin"), Self.window([Self.button], title: "Probe", x: 100, y: 100)]
+        let chrome = ["AXCloseButton", "AXMinimizeButton", "AXZoomButton"].map {
+            FakeNode(role: "AXButton", subrole: $0, frame: ScreenRect(x: 2566, y: 255, w: 14, h: 16), actions: ["AXPress"])
+        }
+        let windows = [Self.window(chrome, title: "Twin"), Self.window([Self.button], title: "Probe", x: 100, y: 100)]
         let api = FakeAccessibility(app: FakeApp(windows: windows, menus: [popUp]))
         #expect(try api.element(kAXMainWindowAttribute, of: api.application(pid: 7)) == AXElement(token: 1))   // the twin, as AX says
         let scene = try MacSnapshot(api: api).read(app: api.application(pid: 7))

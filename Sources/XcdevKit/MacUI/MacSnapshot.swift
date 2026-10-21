@@ -73,8 +73,25 @@ public struct MacSnapshot {
         return try windows.first(where: holdsContent) ?? named ?? windows.first
     }
 
-    /// Whether the window's subtree holds an element besides the window itself.
-    func holdsContent(_ window: AXElement) throws -> Bool { try !api.elements(kAXChildrenAttribute, of: window).isEmpty }
+    /// Whether the window's subtree holds an element that is neither a window nor a title-bar button: an empty twin
+    /// still lists its close, minimize, and zoom buttons.
+    func holdsContent(_ window: AXElement) throws -> Bool {
+        var budget = Self.maxNodes
+        return try holdsContent(window, depth: 1, budget: &budget)
+    }
+
+    /// The search stops at the depth and node caps, as the walk does, so a tree that loops back on itself ends.
+    func holdsContent(_ element: AXElement, depth: Int, budget: inout Int) throws -> Bool {
+        guard depth < Self.maxDepth else { return false }
+        for child in try api.elements(kAXChildrenAttribute, of: element) {
+            budget -= 1
+            guard budget > 0 else { return false }
+            let role = try api.string(kAXRoleAttribute, of: child) ?? "AXUnknown"
+            if !MacRoles.isWindowChrome(role: role, subrole: try api.string(kAXSubroleAttribute, of: child)) { return true }
+            if try holdsContent(child, depth: depth + 1, budget: &budget) { return true }
+        }
+        return false
+    }
 
     func origin(of window: AXElement) throws -> ScreenPoint {
         try api.rect(of: window).map { ScreenPoint(x: $0.x, y: $0.y) } ?? ScreenPoint(x: 0, y: 0)

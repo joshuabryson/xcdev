@@ -17,6 +17,13 @@ public enum MacRoles {
     ]
     /// Element types the driver focuses instead of pressing.
     public static let textEntry: Set<Int> = [45, 49, 50, 52]
+    /// Subroles of the buttons every titled window has in its title bar: they are the window's, not the app's content.
+    public static let titleBarButtons: Set<String> = ["AXCloseButton", "AXMinimizeButton", "AXZoomButton", "AXFullScreenButton"]
+
+    /// Whether an element is a window or a title-bar button, which says nothing about whether a window holds content.
+    public static func isWindowChrome(role: String, subrole: String?) -> Bool {
+        role == "AXWindow" || (role == "AXButton" && subrole.map(titleBarButtons.contains) == true)
+    }
 
     public static func elementType(role: String, subrole: String?) -> Int {
         if let subrole, let type = bySubrole[subrole] { return type }
