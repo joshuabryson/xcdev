@@ -17,7 +17,7 @@ struct UICommand: AsyncParsableCommand {
 
         Captures go to ui.media.dir (default .xcdev-media/<worktree>/<branch> in the main checkout); each prints its path.
         """,
-        subcommands: [Tree.self, Tap.self, LongPress.self, TypeText.self, Swipe.self, Wait.self, Button.self, Rotate.self,
+        subcommands: [Tree.self, Tap.self, LongPress.self, TypeText.self, Swipe.self, Wait.self, Button.self, Rotate.self, Menu.self,
                       Screenshot.self, Record.self, Stop.self]
     )
 

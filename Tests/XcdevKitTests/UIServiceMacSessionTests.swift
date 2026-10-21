@@ -37,4 +37,22 @@ import XcdevTestSupport
         let button = await #expect(throws: XcdError.self) { try await service.button("home", base.options, in: &ctx) }
         #expect(tree?.next == tap?.next && button?.code == .appNotBuilt && button?.next == tap?.next)
     }
+
+    @Test func menuListsAndPressesOnAMacAndIsRefusedOnASimulator() async throws {
+        defer { base.worktree.remove() }
+        var app = UIServiceMacTests.app
+        app.menuBar = MacMenuTests.menuBar
+        let api = FakeAccessibility(app: app)
+        var (service, ctx) = try base.setup(api)
+        let listed = try await service.menu(nil, base.options, in: &ctx)
+        #expect(listed.text.contains("File > Save… (disabled)") && listed.text.contains("Probe > Bump by ten"))
+        var withTree = base.options
+        withTree.tree = true
+        let pressed = try await service.menu("Probe > Bump by ten", withTree, in: &ctx)
+        #expect(pressed.text.hasPrefix("pressed Probe > Bump by ten") && pressed.tree != nil && api.events.contains("AXPress Bump by ten"))
+        var phone = base.options
+        phone.device = "iphone"
+        let refused = await #expect(throws: XcdError.self) { try await service.menu(nil, phone, in: &ctx) }
+        #expect(refused?.code == .platformUnsupported)
+    }
 }

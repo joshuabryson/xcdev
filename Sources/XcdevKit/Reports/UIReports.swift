@@ -162,3 +162,23 @@ public struct UIStopReport: Reportable {
 
     public var envelopeWorktree: String? { worktree }
 }
+
+/// `xcd ui menu`.
+public struct UIMenuReport: Reportable {
+    public let device: String
+    public let items: [MacMenuItem]?
+    public let pressed: String?
+    public let tree: TreeResult?
+    public let worktree: String
+
+    public var text: String {
+        if let items {
+            return items.isEmpty ? "the app has no menu bar items" : items.map { $0.path + ($0.enabled ? "" : " (disabled)") }.joined(separator: "\n")
+        }
+        var lines = ["pressed \(pressed ?? "")"]
+        if let tree { lines += UIText.tree(tree) }
+        return lines.joined(separator: "\n")
+    }
+
+    public var envelopeWorktree: String? { worktree }
+}
