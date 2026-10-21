@@ -38,8 +38,13 @@ public struct MacMenu {
 
     /// The items of a menu-bar item or a submenu item: the children of its one `AXMenu` child.
     func children(of parent: Node) throws -> [Node] {
-        guard let menu = try api.elements(kAXChildrenAttribute, of: parent.element).first(where: { try api.string(kAXRoleAttribute, of: $0) == "AXMenu" }) else { return [] }
+        guard let menu = try submenu(of: parent) else { return [] }
         return try api.elements(kAXChildrenAttribute, of: menu).compactMap { try node($0) }
+    }
+
+    /// The `AXMenu` a menu-bar item or an item with a submenu holds; nil for a plain item.
+    func submenu(of parent: Node) throws -> AXElement? {
+        try api.elements(kAXChildrenAttribute, of: parent.element).first(where: { try api.string(kAXRoleAttribute, of: $0) == "AXMenu" })
     }
 
     public func items() throws -> [MacMenuItem] {
@@ -62,6 +67,9 @@ public struct MacMenu {
             throw XcdError(.usage, "'\(path)' is not a menu path", next: "write it as \"<Menu> > <Item>\", e.g. \"File > Save…\"")
         }
         let (node, walked) = try find(first, titles.dropFirst(), in: try barItems(), walked: [])
+        guard try submenu(of: node) == nil else {
+            throw XcdError(.elementNotHittable, "'\(path)' is a submenu, not an item", next: "name an item inside it, from `xcd ui menu`")
+        }
         guard node.enabled else { throw XcdError(.elementNotHittable, "\(walked) is disabled", next: "do what enables it first") }
         guard api.perform(kAXPressAction, on: node.element) else { throw XcdError(.runnerFailed, "the app refused the press", next: "run `xcd ui tree`, then retry") }
         return MacMenuItem(path: walked, enabled: true)

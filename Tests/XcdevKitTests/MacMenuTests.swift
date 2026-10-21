@@ -30,8 +30,28 @@ import XcdevTestSupport
         #expect(try menu.press(path: "Probe > Bump by ten").path == "Probe > Bump by ten" && api.events == ["AXPress Bump by ten"])
         #expect(try menu.press(path: "File > Export > PNG").path == "File > Export > PNG")
         let disabled = #expect(throws: XcdError.self) { try menu.press(path: "File > Save...") }
-        #expect(disabled?.code == .elementNotHittable)
+        #expect(disabled?.code == .elementNotHittable && disabled?.message == "File > Save… is disabled" && disabled?.next == "do what enables it first")
         let missing = #expect(throws: XcdError.self) { try menu.press(path: "File > Print") }
-        #expect(missing?.code == .elementNotFound && missing?.details.contains("File > New") == true)
+        #expect(missing?.code == .elementNotFound && missing?.message == "no menu item File > Print")
+        #expect(missing?.next == "run `xcd ui menu` to list the menu bar" && missing?.details.contains("File > New") == true)
+        let single = #expect(throws: XcdError.self) { try menu.press(path: "File") }
+        #expect(single?.code == .usage && single?.message == "'File' is not a menu path")
+        #expect(single?.next == "write it as \"<Menu> > <Item>\", e.g. \"File > Save…\"")
+    }
+
+    /// The bar item's menu is level 1 and two submenus nest below it: four segments are listed, five are not.
+    @Test func submenusAreListedToThreeLevelsAndNoDeeper() throws {
+        let deep = Self.item("A", children: [Self.item("B", children: [Self.item("C", children: [Self.item("D")])])])
+        let api = FakeAccessibility(app: FakeApp(windows: [], menuBar: [Self.bar("M", [deep])]))
+        let paths = try MacMenu(api: api, app: api.application(pid: 7)).items().map(\.path)
+        #expect(paths == ["M > A > B > C"])
+    }
+
+    /// A press on a submenu's parent could open the submenu on screen, so it is refused and nothing is performed.
+    @Test func aSubmenuIsNotPressed() throws {
+        let api = FakeAccessibility(app: FakeApp(windows: [], menuBar: Self.menuBar))
+        let refused = #expect(throws: XcdError.self) { try MacMenu(api: api, app: api.application(pid: 7)).press(path: "File > Export") }
+        #expect(refused?.code == .elementNotHittable && refused?.message == "'File > Export' is a submenu, not an item")
+        #expect(refused?.next == "name an item inside it, from `xcd ui menu`" && api.events.isEmpty)
     }
 }
