@@ -7,6 +7,10 @@ public enum MacScreenLock {
     /// The login session's dictionary has this key, set to 1, only while the screen is locked.
     static let lockedKey = "CGSSessionScreenIsLocked"
 
+    /// The one refusal of a Mac `ui` command, screenshot, or recording while the screen is locked.
+    public static let refusal = XcdError(.runnerFailed, "the Mac's screen is locked, so the app's windows cannot be read",
+                                         next: "ask the user to unlock the Mac, then run the command again")
+
     public static func isLocked() -> Bool { isLocked(session: CGSessionCopyCurrentDictionary() as? [String: Any]) }
 
     /// No session dictionary (no console session, as over ssh) is not a locked screen.

@@ -59,4 +59,19 @@ import XcdevTestSupport
         #expect(detached.stops.isEmpty)
         #expect(ctx.paths.recordingFiles == [ctx.paths.recordingFile(device: "ui")])
     }
+
+    /// A Mac window recorder is `xcd _record-window`, not simctl, and it runs while that process does.
+    @Test func aMacWindowRecorderIsSeenRunningByItsOwnMarker() async throws {
+        let (project, ctx) = try await fake.doctorProject()
+        defer { project.remove() }
+        let detached = FakeDetachedProcesses()
+        let recorder = ProcessIdentity(pid: 4, startTime: 1, arguments: ["/usr/local/bin/xcd", MacWindowRecorder.marker, "--window", "15610"])
+        try Recordings.save(RecordingRecord(device: "mac", udid: "mac", path: ctx.paths.root + "/mac.mp4", log: "/l", process: recorder,
+                                            startedAt: Date(), recorder: MacWindowRecorder.marker), to: ctx.paths.recordingFile(device: "mac"))
+        detached.adopt(recorder)
+        let service = DoctorService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home),
+                                    discovery: XcodeDiscovery(runner: fake, applicationsDirectories: []), detached: detached)
+        let check = try #require(await service.run(fix: false, from: nil).checks.first { $0.id == "recordings" })
+        #expect(check.problems.isEmpty && check.inProgress.count == 1 && check.inProgress[0].contains("is recording mac to "))
+    }
 }

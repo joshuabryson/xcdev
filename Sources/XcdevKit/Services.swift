@@ -20,6 +20,9 @@ public struct Services: Sendable {
     public let runnerTransport: any RunnerTransport
     /// Notes added while the command runs, printed after its result.
     public let notes = Notes()
+    /// The xcd a Mac recording runs as `xcd _record-window`. Under `swift test` this binary is the test host, so a
+    /// test that records through these services names the built xcd here.
+    public var xcdExecutable = Bundle.main.executablePath ?? CommandLine.arguments[0]
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, currentDirectory: String,
                 environment: [String: String], progress: @escaping @Sendable (String) -> Void = { _ in },
@@ -66,7 +69,9 @@ public struct Services: Sendable {
     }
     public var provisioner: DeviceProvisioner { DeviceProvisioner(runner: runner, globalPaths: globalPaths) }
     public var xcodeOpener: XcodeOpener { XcodeOpener(runner: runner, provisioner: provisioner) }
-    public var media: MediaService { MediaService(provisioner: provisioner, detached: detached, currentDirectory: currentDirectory) }
+    public var media: MediaService {
+        MediaService(provisioner: provisioner, detached: detached, currentDirectory: currentDirectory, xcdExecutable: xcdExecutable)
+    }
     public var runnerBuilder: RunnerBuilder { RunnerBuilder(runner: runner, globalPaths: globalPaths, progress: progress) }
     public var runners: RunnerSupervisor {
         RunnerSupervisor(provisioner: provisioner, builder: runnerBuilder, detached: detached,

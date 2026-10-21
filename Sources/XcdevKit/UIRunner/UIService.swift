@@ -188,10 +188,7 @@ extension UIService {
             throw XcdError(.platformUnsupported, "a Mac has no Home Screen to drive: --system is for Springboard, and the desktop is the person's",
                            next: "drop --system; the app's own windows, sheets, and menus are in `xcd ui tree`")
         }
-        if screenLocked() {
-            throw XcdError(.runnerFailed, "the Mac's screen is locked, so the app's windows cannot be read",
-                           next: "ask the user to unlock the Mac, then run the command again")
-        }
+        if screenLocked() { throw MacScreenLock.refusal }
         let api = accessibility()
         try MacPermissions.read(api: api, hostApp: hostApp()).require(screenRecording: screenRecording)
         let pid = try await macPid(options, device: name, in: ctx)

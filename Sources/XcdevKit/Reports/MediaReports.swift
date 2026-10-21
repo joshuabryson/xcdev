@@ -10,7 +10,8 @@ func gitignoreLines(added: String?, warning: String?, in checkout: String?) -> [
 
 public struct ScreenshotReport: Reportable {
     public let device: String
-    public let udid: String
+    /// The simulator's; nil for a Mac, which has none.
+    public let udid: String?
     public let path: String
     public let width: Int?
     public let height: Int?

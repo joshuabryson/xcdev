@@ -9,15 +9,23 @@ public struct RecordingRecord: Codable, Sendable, Equatable {
     public let log: String
     public let process: ProcessIdentity
     public let startedAt: Date
+    /// The argument that identifies a recorder other than simctl's: `_record-window` for a Mac window. Nil for simctl,
+    /// and in records written before there was another.
+    public var recorder: String?
 
-    public init(device: String, udid: String, path: String, log: String, process: ProcessIdentity, startedAt: Date) {
+    public init(device: String, udid: String, path: String, log: String, process: ProcessIdentity, startedAt: Date,
+                recorder: String? = nil) {
         self.device = device
         self.udid = udid
         self.path = path
         self.log = log
         self.process = process
         self.startedAt = startedAt
+        self.recorder = recorder
     }
+
+    /// What its process's arguments must contain while the recording runs: ask every liveness question with this.
+    public var marker: String { recorder ?? Recordings.marker }
 }
 
 extension WorktreePaths {
@@ -64,7 +72,7 @@ public enum Recordings {
     /// the record file, unless another xcd has saved a different recording's record there meanwhile.
     public static func stop(_ record: RecordingRecord, file: String, detached: any DetachedProcessLaunching,
                             now: Date) async -> RecordingStop {
-        let outcome = await detached.stop(record.process, marker: marker, signal: SIGINT, timeout: MediaService.stopTimeout)
+        let outcome = await detached.stop(record.process, marker: record.marker, signal: SIGINT, timeout: MediaService.stopTimeout)
         // A record that no longer decodes can't be acted on, so it goes too; one naming another process stays.
         if load(file).map({ $0.process == record.process }) ?? true { try? FileManager.default.removeItem(atPath: file) }
         let bytes = ((try? FileManager.default.attributesOfItem(atPath: record.path))?[.size] as? NSNumber)?.int64Value ?? 0

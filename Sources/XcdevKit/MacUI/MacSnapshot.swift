@@ -49,8 +49,7 @@ public struct MacSnapshot {
     /// own coordinates, then the menus the application element lists itself (pop-up menus), measured from the main
     /// window. A context menu sits under the cell it opened on, so the window walk finds it. The menu bar is not read.
     public func read(app: AXElement) throws -> MacScene {
-        // With the screen locked, `AXWindows` lists the application itself; it is not a window.
-        let windows = try api.elements(kAXWindowsAttribute, of: app).filter { $0 != app }
+        let windows = try windows(of: app)
         let main = try mainWindow(of: app, windows: windows)
         let walk = Walk(app: app)
         var children: [SnapshotNode] = []
@@ -71,6 +70,17 @@ public struct MacSnapshot {
                                 handle: String(app.token))
         return MacScene(root: root, windows: windows, mainWindow: main, mainTitle: title,
                         hidden: try api.bool(kAXHiddenAttribute, of: app) ?? false, capped: walk.capped)
+    }
+
+    /// The title of the window `read(app:)` calls main, without walking the tree, or nil when the app has no window: the
+    /// window a screenshot or a recording takes is the one ScreenCaptureKit lists under this title.
+    public func mainTitle(app: AXElement) throws -> String? {
+        try mainWindow(of: app, windows: windows(of: app)).map { try api.string(kAXTitleAttribute, of: $0) ?? "" }
+    }
+
+    /// `AXWindows`, without the application itself, which a locked screen lists there.
+    func windows(of app: AXElement) throws -> [AXElement] {
+        try api.elements(kAXWindowsAttribute, of: app).filter { $0 != app }
     }
 
     /// The window with the app's content. A link opened on a hidden SwiftUI app adds an empty twin that becomes

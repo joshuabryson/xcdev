@@ -31,7 +31,7 @@ public struct RecordingsCheck: DoctorCheck {
     public func detect(_ env: DoctorEnvironment) async -> [DoctorProblem] {
         found(env).compactMap { item in
             let owner = "\(item.entry.project)/\(item.entry.name)"
-            guard env.detached.inspector.isRunning(item.record.process, marker: Recordings.marker) else {
+            guard env.detached.inspector.isRunning(item.record.process, marker: item.record.marker) else {
                 return DoctorProblem(check: id, message: "\(owner) has a record of a \(item.record.device) recording that already ended",
                                      action: .forgetRecording, fix: "delete the record (the video is kept)", subject: item.file,
                                      projectRoot: item.entry.projectRoot)
@@ -47,7 +47,7 @@ public struct RecordingsCheck: DoctorCheck {
 
     public func inProgress(_ env: DoctorEnvironment) -> [String] {
         found(env).filter {
-            env.detached.inspector.isRunning($0.record.process, marker: Recordings.marker) && age($0, env) <= limit($0.entry)
+            env.detached.inspector.isRunning($0.record.process, marker: $0.record.marker) && age($0, env) <= limit($0.entry)
         }.map { "\($0.entry.project)/\($0.entry.name) is recording \($0.record.device) to \($0.record.path)" }
     }
 
@@ -55,14 +55,14 @@ public struct RecordingsCheck: DoctorCheck {
         guard let file = problem.subject, let record = Recordings.load(file) else { return }
         switch problem.action {
         case .forgetRecording?:
-            guard !env.detached.inspector.isRunning(record.process, marker: Recordings.marker) else {
+            guard !env.detached.inspector.isRunning(record.process, marker: record.marker) else {
                 throw DoctorLeftAlone(note: "the \(record.device) recording in \(file) is running again; left alone")
             }
             try FileManager.default.removeItem(atPath: file)
         case .stopRecording?:
             // The record may have been replaced since detect: stop only a recording that is still running and overdue.
             guard let item = found(env).first(where: { $0.file == file }),
-                  env.detached.inspector.isRunning(record.process, marker: Recordings.marker),
+                  env.detached.inspector.isRunning(record.process, marker: record.marker),
                   age(Found(entry: item.entry, file: file, record: record), env) > limit(item.entry) else {
                 throw DoctorLeftAlone(note: "the \(record.device) recording in \(file) changed since doctor looked; left alone")
             }
