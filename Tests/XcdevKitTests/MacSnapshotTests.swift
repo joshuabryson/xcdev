@@ -84,6 +84,28 @@ import XcdevTestSupport
         #expect(scene.root.children[2].frame == ScreenRect(x: 2600, y: 200, w: 100, h: 40))    // measured from the chosen window
     }
 
+    /// A locked screen's tree, as measured on Finder: `AXWindows` and `AXMainWindow` name the application itself, whose
+    /// children list it again beside the menu bar. Nothing is read twice, the menu bar stays out, and the read ends at once.
+    @Test func aLockedScreensTreeThatListsTheApplicationAsItsWindowsIsReadWithoutLooping() throws {
+        let copy = FakeNode(role: "AXMenuItem", title: "Copy", frame: ScreenRect(x: 10, y: 10, w: 100, h: 20), actions: ["AXPress"])
+        let popUp = FakeNode(role: "AXMenu", frame: ScreenRect(x: 10, y: 10, w: 100, h: 40), children: [copy, .application, .ancestor(0)])
+        let file = FakeNode(role: "AXMenuBarItem", title: "File", frame: ScreenRect(x: 40, y: 0, w: 40, h: 24), actions: ["AXPress"])
+        let api = FakeAccessibility(app: FakeApp(windows: [.application, .application, .application], menus: [popUp], menuBar: [file]))
+        let app = api.application(pid: 7)
+        #expect(try api.elements(kAXWindowsAttribute, of: app) == [app, app, app] && api.element(kAXMainWindowAttribute, of: app) == app)
+        let scene = try MacSnapshot(api: api).read(app: app)
+        #expect(scene.windows.isEmpty && scene.mainWindow == nil && scene.capped == false && scene.root.frame == ScreenRect(x: 0, y: 0, w: 0, h: 0))
+        #expect(scene.root.children.map(\.elementType) == [53] && scene.root.children[0].children.map(\.label) == ["Copy"])
+        #expect(Self.count(scene.root) == 3)    // the application, the menu, its one item: no repeats and no menu bar
+        // The same loops and a menu bar inside a window: none of them is walked, and none of them is content.
+        let bar = FakeNode(role: "AXMenuBar", frame: ScreenRect(x: 0, y: 0, w: 900, h: 24), children: [file])
+        let looping = FakeAccessibility(app: FakeApp(windows: [Self.window([bar, .application, .ancestor(0)])]))
+        let window = try #require(looping.elements(kAXWindowsAttribute, of: looping.application(pid: 7)).first)
+        let inWindow = try MacSnapshot(api: looping).read(app: looping.application(pid: 7))
+        #expect(inWindow.root.children.first?.children.isEmpty == true && inWindow.capped == false)
+        #expect(try MacSnapshot(api: looping).holdsContent(window, app: looping.application(pid: 7)) == false)
+    }
+
     @Test func theTreeStopsAtTheDepthCapAndSaysSo() throws {
         var deep = FakeNode(role: "AXGroup", frame: ScreenRect(x: 0, y: 0, w: 10, h: 10))
         for _ in 0..<50 { deep = FakeNode(role: "AXGroup", frame: ScreenRect(x: 0, y: 0, w: 10, h: 10), children: [deep]) }

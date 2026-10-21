@@ -18,6 +18,18 @@ public struct FakeNode: Sendable {
     public var focused = false
     public var actions: Set<String> = []
     public var children: [FakeNode] = []
+    /// Set on a node that stands for an element already in the tree; the fake lists that element in its place.
+    public var link: FakeLink?
+
+    /// The application element itself, listed as a window or a child, as a locked screen's tree lists it.
+    public static let application = FakeNode(linkingTo: .application)
+    /// The node `levels` above the one that lists it; 0 is that node itself. A child that loops back up the tree.
+    public static func ancestor(_ levels: Int) -> FakeNode { FakeNode(linkingTo: .ancestor(levels)) }
+
+    init(linkingTo link: FakeLink) {
+        self.init(role: "", frame: ScreenRect(x: 0, y: 0, w: 0, h: 0))
+        self.link = link
+    }
 
     public init(role: String, subrole: String? = nil, title: String? = nil, description: String? = nil, value: String? = nil,
                 identifier: String? = nil, placeholder: String? = nil, frame: ScreenRect, enabled: Bool = true, selected: Bool = false,
@@ -26,6 +38,12 @@ public struct FakeNode: Sendable {
         self.identifier = identifier; self.placeholder = placeholder; self.frame = frame; self.enabled = enabled
         self.selected = selected; self.focused = focused; self.actions = actions; self.children = children
     }
+}
+
+/// An element a `FakeNode` stands for instead of a new one.
+public enum FakeLink: Sendable {
+    case application
+    case ancestor(Int)
 }
 
 public struct FakeApp: Sendable {
@@ -52,22 +70,39 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
         var parents: [Int: Int] = [:]
         /// Each token's children's tokens, in order.
         var children: [Int: [Int]] = [:]
+        /// What `AXWindows` lists, in order.
+        var windows: [Int] = []
         var events: [String] = []
         var failing: Set<String> = []
 
-        mutating func index(_ node: FakeNode, parent: Int) {
+        /// Lists the node under `parent` and returns its token; a link lists the element it names instead.
+        @discardableResult
+        mutating func index(_ node: FakeNode, parent: Int) -> Int {
+            if let link = node.link {
+                let token = target(of: link, listedBy: parent)
+                children[parent, default: []].append(token)
+                return token
+            }
             let token = nodes.count + 1
             nodes[token] = node
             parents[token] = parent
             children[parent, default: []].append(token)
             for child in node.children { index(child, parent: token) }
+            return token
+        }
+
+        func target(of link: FakeLink, listedBy parent: Int) -> Int {
+            guard case .ancestor(let levels) = link else { return 0 }
+            var token = parent
+            for _ in 0..<levels { token = parents[token] ?? 0 }
+            return token
         }
     }
     let state: Mutex<State>
 
     public init(app: FakeApp) {
         var initial = State(app: app)
-        for window in app.windows { initial.index(window, parent: 0) }
+        for window in app.windows { initial.windows.append(initial.index(window, parent: 0)) }
         for menu in app.menus { initial.index(menu, parent: 0) }
         if !app.menuBar.isEmpty { initial.index(FakeNode(role: "AXMenuBar", frame: ScreenRect(x: 0, y: 0, w: 0, h: 0), children: app.menuBar), parent: 0) }
         state = Mutex(initial)
@@ -90,7 +125,7 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
         }
     }
     func children(of parent: Int) -> [AXElement] { state.withLock { ($0.children[parent] ?? []).map(AXElement.init(token:)) } }
-    func windows() throws -> [AXElement] { try children(of: 0).filter { try node($0)?.role == "AXWindow" } }
+    func windows() -> [AXElement] { state.withLock { $0.windows.map(AXElement.init(token:)) } }
 
     public var isTrusted: Bool { true }
     public var screenCaptureAllowed: Bool { true }
@@ -131,7 +166,7 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
 
     public func element(_ attribute: String, of element: AXElement) throws -> AXElement? {
         switch attribute {
-        case kAXMainWindowAttribute: return element.token == 0 ? try windows().first : nil
+        case kAXMainWindowAttribute: return element.token == 0 ? windows().first : nil
         case kAXMenuBarAttribute: return element.token == 0 ? try children(of: 0).first { try node($0)?.role == "AXMenuBar" } : nil
         case kAXParentAttribute: return state.withLock { $0.parents[element.token] }.map(AXElement.init(token:))
         case kAXFocusedUIElementAttribute: return state.withLock { $0.nodes.first { $0.value.focused }?.key }.map(AXElement.init(token:))
@@ -144,7 +179,7 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
 
     public func elements(_ attribute: String, of element: AXElement) throws -> [AXElement] {
         switch (attribute, element.token) {
-        case (kAXWindowsAttribute, 0): return try windows()
+        case (kAXWindowsAttribute, 0): return windows()
         case (kAXChildrenAttribute, _): return children(of: element.token)
         default: return []
         }

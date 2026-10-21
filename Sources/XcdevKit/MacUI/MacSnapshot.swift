@@ -22,12 +22,20 @@ public struct MacSnapshot {
 
     public init(api: any AccessibilityAPI) { self.api = api }
 
-    /// A walk in progress: the window's origin that frames are measured from, and the nodes used so far.
+    /// The role of the menu bar, which `ui menu` lists and the tree never holds.
+    static let menuBarRole = "AXMenuBar"
+
+    /// A walk in progress: the window's origin that frames are measured from, the nodes used so far, and the path.
     final class Walk {
         var origin = ScreenPoint(x: 0, y: 0)
         /// The root is the first.
         var nodes = 1
         var capped = false
+        /// The application and the elements from the top of the walk down to the element being read. A child that is
+        /// one of them loops back up the tree (a locked screen lists the application under itself) and is not read.
+        var path: Set<AXElement>
+
+        init(app: AXElement) { path = [app] }
 
         /// Whether one more node fits under the cap. When it does not, the walk is capped: something was left out.
         func admitsAnother() -> Bool {
@@ -41,19 +49,20 @@ public struct MacSnapshot {
     /// own coordinates, then the menus the application element lists itself (pop-up menus), measured from the main
     /// window. A context menu sits under the cell it opened on, so the window walk finds it. The menu bar is not read.
     public func read(app: AXElement) throws -> MacScene {
-        let windows = try api.elements(kAXWindowsAttribute, of: app)
+        // With the screen locked, `AXWindows` lists the application itself; it is not a window.
+        let windows = try api.elements(kAXWindowsAttribute, of: app).filter { $0 != app }
         let main = try mainWindow(of: app, windows: windows)
-        let walk = Walk()
+        let walk = Walk(app: app)
         var children: [SnapshotNode] = []
         for window in windows {
             guard walk.admitsAnother() else { break }
             walk.origin = try origin(of: window)
-            children.append(try node(window, depth: 1, parentType: 2, walk: walk))
+            if let node = try node(window, depth: 1, parentType: 2, walk: walk) { children.append(node) }
         }
         walk.origin = try main.map(origin(of:)) ?? ScreenPoint(x: 0, y: 0)
         for menu in try menus(of: app) {
             guard walk.admitsAnother() else { break }
-            children.append(try node(menu, depth: 1, parentType: 2, walk: walk))
+            if let node = try node(menu, depth: 1, parentType: 2, walk: walk) { children.append(node) }
         }
         let size = try main.flatMap { try api.rect(of: $0) } ?? ScreenRect(x: 0, y: 0, w: 0, h: 0)
         let title = try main.flatMap { try api.string(kAXTitleAttribute, of: $0) } ?? ""
@@ -68,27 +77,29 @@ public struct MacSnapshot {
     /// `AXMainWindow` while the controls stay in the other. So: `AXMainWindow` when it holds anything, else
     /// the first window that does, else `AXMainWindow`, else the first window.
     func mainWindow(of app: AXElement, windows: [AXElement]) throws -> AXElement? {
-        let named = try api.element(kAXMainWindowAttribute, of: app)
-        if let named, try holdsContent(named) { return named }
-        return try windows.first(where: holdsContent) ?? named ?? windows.first
+        let named = try api.element(kAXMainWindowAttribute, of: app).flatMap { $0 == app ? nil : $0 }    // a locked screen's answer
+        if let named, try holdsContent(named, app: app) { return named }
+        return try windows.first { try holdsContent($0, app: app) } ?? named ?? windows.first
     }
 
-    /// Whether the window's subtree holds an element that is neither a window nor a title-bar button: an empty twin
-    /// still lists its close, minimize, and zoom buttons.
-    func holdsContent(_ window: AXElement) throws -> Bool {
-        var budget = Self.maxNodes
-        return try holdsContent(window, depth: 1, budget: &budget)
+    /// Whether the window's subtree holds an element the walk would list that is neither a window nor a title-bar
+    /// button: an empty twin still lists its close, minimize, and zoom buttons.
+    func holdsContent(_ window: AXElement, app: AXElement) throws -> Bool {
+        try holdsContent(window, depth: 1, walk: Walk(app: app))
     }
 
-    /// The search stops at the depth and node caps, as the walk does, so a tree that loops back on itself ends.
-    func holdsContent(_ element: AXElement, depth: Int, budget: inout Int) throws -> Bool {
+    /// The search skips what the walk skips (loops back up the tree, the menu bar) and stops at the same caps.
+    func holdsContent(_ element: AXElement, depth: Int, walk: Walk) throws -> Bool {
         guard depth < Self.maxDepth else { return false }
-        for child in try api.elements(kAXChildrenAttribute, of: element) {
-            budget -= 1
-            guard budget > 0 else { return false }
+        walk.path.insert(element)
+        defer { walk.path.remove(element) }
+        for child in try api.elements(kAXChildrenAttribute, of: element) where !walk.path.contains(child) {
+            guard walk.admitsAnother() else { return false }
+            walk.nodes += 1
             let role = try api.string(kAXRoleAttribute, of: child) ?? "AXUnknown"
+            if role == Self.menuBarRole { continue }
             if !MacRoles.isWindowChrome(role: role, subrole: try api.string(kAXSubroleAttribute, of: child)) { return true }
-            if try holdsContent(child, depth: depth + 1, budget: &budget) { return true }
+            if try holdsContent(child, depth: depth + 1, walk: walk) { return true }
         }
         return false
     }
@@ -102,9 +113,13 @@ public struct MacSnapshot {
         try api.elements(kAXChildrenAttribute, of: app).filter { try api.string(kAXRoleAttribute, of: $0) == "AXMenu" }
     }
 
-    func node(_ element: AXElement, depth: Int, parentType: Int, walk: Walk) throws -> SnapshotNode {
-        walk.nodes += 1
+    /// The element as a node, with its children; nil for a menu bar, which is `ui menu`'s and never the tree's.
+    func node(_ element: AXElement, depth: Int, parentType: Int, walk: Walk) throws -> SnapshotNode? {
         let role = try api.string(kAXRoleAttribute, of: element) ?? "AXUnknown"
+        guard role != Self.menuBarRole else { return nil }
+        walk.nodes += 1
+        walk.path.insert(element)
+        defer { walk.path.remove(element) }
         let type = MacRoles.elementType(role: role, subrole: try api.string(kAXSubroleAttribute, of: element), parentType: parentType)
         let value = try api.string(kAXValueAttribute, of: element)
         let children = try children(of: element, depth: depth, type: type, walk: walk)
@@ -116,9 +131,10 @@ public struct MacSnapshot {
                             focused: try api.bool(kAXFocusedAttribute, of: element) ?? false, handle: String(element.token))
     }
 
-    /// The element's children, until the depth or the node cap; any child left out marks the walk capped.
+    /// The element's children, until the depth or the node cap; any child left out marks the walk capped. A child that
+    /// is the application or an element on the path down to this one is a loop, not a child, and is skipped.
     func children(of element: AXElement, depth: Int, type: Int, walk: Walk) throws -> [SnapshotNode] {
-        let elements = try api.elements(kAXChildrenAttribute, of: element)
+        let elements = try api.elements(kAXChildrenAttribute, of: element).filter { !walk.path.contains($0) }
         guard depth < Self.maxDepth else {
             if !elements.isEmpty { walk.capped = true }
             return []
@@ -126,7 +142,7 @@ public struct MacSnapshot {
         var children: [SnapshotNode] = []
         for child in elements {
             guard walk.admitsAnother() else { break }
-            children.append(try node(child, depth: depth + 1, parentType: type, walk: walk))
+            if let node = try node(child, depth: depth + 1, parentType: type, walk: walk) { children.append(node) }
         }
         return children
     }
