@@ -38,6 +38,23 @@ import XcdevTestSupport
         #expect(tree?.next == tap?.next && button?.code == .appNotBuilt && button?.next == tap?.next)
     }
 
+    /// `AXShowMenu` opens the context menu on the person's screen, hidden app or not (measured 2026-10-20: a menu window
+    /// at the pop-up menu level, opaque, until an item was pressed), so a long-press on a Mac is refused before any
+    /// session is built: nothing is read, pressed, or looked up.
+    @Test func aLongPressIsRefusedOnAMacBeforeAnythingIsRead() async throws {
+        defer { base.worktree.remove() }
+        let api = FakeAccessibility(app: UIServiceMacTests.app)
+        var (service, ctx) = try base.setup(api)
+        let refused = await #expect(throws: XcdError.self) {
+            try await service.longPress("id:increment", duration: .seconds(1), base.options, in: &ctx)
+        }
+        #expect(refused?.code == .platformUnsupported)
+        #expect(refused?.message == "a long-press opens the element's context menu on the person's screen (a visible menu window until one of its items is pressed)")
+        #expect(refused?.next == "use `xcd ui menu \"<Menu> > <Item>\"` for the app's commands; a flag that allows a visible context menu is a follow-up")
+        #expect(api.events.isEmpty && !base.worktree.runner.calls.contains { $0.argv[0] == "ps" })
+        #expect(!FileManager.default.fileExists(atPath: MacRefStore.file(ctx.paths, device: "mac")))
+    }
+
     @Test func menuListsAndPressesOnAMacAndIsRefusedOnASimulator() async throws {
         defer { base.worktree.remove() }
         var app = UIServiceMacTests.app

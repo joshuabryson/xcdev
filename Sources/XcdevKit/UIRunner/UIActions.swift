@@ -132,6 +132,7 @@ extension UIService {
 
     public func longPress(_ target: String, duration: Duration, _ options: UIOptions,
                           in ctx: inout WorktreeContext) async throws -> UIActionReport {
+        if isMac(options.device, in: ctx) { throw Self.macLongPress }
         guard duration >= .milliseconds(100), duration <= .seconds(20) else {
             throw XcdError(.usage, "--duration \(DurationText.format(duration)) is outside 0.1s to 20s", next: "pass a duration like 1s or 2.5s")
         }

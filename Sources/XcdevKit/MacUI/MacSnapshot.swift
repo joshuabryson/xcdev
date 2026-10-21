@@ -48,21 +48,15 @@ public struct MacSnapshot {
     /// The root is the application. Its children are the windows in `AXWindows` order, each walked with frames in its
     /// own coordinates, then the menus the application element lists itself (pop-up menus), measured from the main
     /// window. A context menu sits under the cell it opened on, so the window walk finds it. The menu bar is not read.
+    /// A window or an element that goes away during the walk is left out; a failure on the application itself, or on
+    /// the main window once chosen, is the read's.
     public func read(app: AXElement) throws -> MacScene {
         let windows = try windows(of: app)
         let main = try mainWindow(of: app, windows: windows)
         let walk = Walk(app: app)
-        var children: [SnapshotNode] = []
-        for window in windows {
-            guard walk.admitsAnother() else { break }
-            walk.origin = try origin(of: window)
-            if let node = try node(window, depth: 1, parentType: 2, walk: walk) { children.append(node) }
-        }
-        walk.origin = try main.map(origin(of:)) ?? ScreenPoint(x: 0, y: 0)
-        for menu in try menus(of: app) {
-            guard walk.admitsAnother() else { break }
-            if let node = try node(menu, depth: 1, parentType: 2, walk: walk) { children.append(node) }
-        }
+        var children = try topNodes(windows, walk: walk) { try origin(of: $0) }
+        let mainOrigin = try main.map(origin(of:)) ?? ScreenPoint(x: 0, y: 0)
+        children += try topNodes(menus(of: app), walk: walk) { _ in mainOrigin }
         let size = try main.flatMap { try api.rect(of: $0) } ?? ScreenRect(x: 0, y: 0, w: 0, h: 0)
         let title = try main.flatMap { try api.string(kAXTitleAttribute, of: $0) } ?? ""
         let root = SnapshotNode(elementType: 2, identifier: "", label: "", value: nil, placeholder: nil,
@@ -70,6 +64,30 @@ public struct MacSnapshot {
                                 handle: String(app.token))
         return MacScene(root: root, windows: windows, mainWindow: main, mainTitle: title,
                         hidden: try api.bool(kAXHiddenAttribute, of: app) ?? false, capped: walk.capped)
+    }
+
+    /// The root's children: each window or menu walked with frames from the origin `origin` gives it, until the node cap.
+    func topNodes(_ elements: [AXElement], walk: Walk, origin: (AXElement) throws -> ScreenPoint) throws -> [SnapshotNode] {
+        var nodes: [SnapshotNode] = []
+        for element in elements {
+            guard walk.admitsAnother() else { break }
+            let node = try surviving {
+                walk.origin = try origin(element)
+                return try self.node(element, depth: 1, parentType: 2, walk: walk)
+            }
+            if let node { nodes.append(node) }
+        }
+        return nodes
+    }
+
+    /// What `read` gives, or nil when the element it reads went away meanwhile: an app that rebuilds its content (a
+    /// SwiftUI app right after a link, measured 2026-10-20) drops elements under the walk, and the rest is still right.
+    func surviving<T>(_ read: () throws -> T?) throws -> T? {
+        do {
+            return try read()
+        } catch MacAXError.elementGone {
+            return nil
+        }
     }
 
     /// The title of the window `read(app:)` calls main, without walking the tree, or nil when the app has no window: the
@@ -93,12 +111,13 @@ public struct MacSnapshot {
     }
 
     /// Whether the window's subtree holds an element the walk would list that is neither a window nor a title-bar
-    /// button: an empty twin still lists its close, minimize, and zoom buttons.
+    /// button: an empty twin still lists its close, minimize, and zoom buttons. A window that is gone holds nothing.
     func holdsContent(_ window: AXElement, app: AXElement) throws -> Bool {
-        try holdsContent(window, depth: 1, walk: Walk(app: app))
+        try surviving { try holdsContent(window, depth: 1, walk: Walk(app: app)) } ?? false
     }
 
-    /// The search skips what the walk skips (loops back up the tree, the menu bar) and stops at the same caps.
+    /// The search skips what the walk skips (loops back up the tree, the menu bar, an element that went away) and stops
+    /// at the same caps.
     func holdsContent(_ element: AXElement, depth: Int, walk: Walk) throws -> Bool {
         guard depth < Self.maxDepth else { return false }
         walk.path.insert(element)
@@ -106,21 +125,26 @@ public struct MacSnapshot {
         for child in try api.elements(kAXChildrenAttribute, of: element) where !walk.path.contains(child) {
             guard walk.admitsAnother() else { return false }
             walk.nodes += 1
-            let role = try api.string(kAXRoleAttribute, of: child) ?? "AXUnknown"
-            if role == Self.menuBarRole { continue }
-            if !MacRoles.isWindowChrome(role: role, subrole: try api.string(kAXSubroleAttribute, of: child)) { return true }
-            if try holdsContent(child, depth: depth + 1, walk: walk) { return true }
+            if try surviving({ try isContent(child, depth: depth, walk: walk) }) == true { return true }
         }
         return false
+    }
+
+    /// Whether a child of an element at `depth` is content, or holds some below it; the menu bar is neither.
+    func isContent(_ child: AXElement, depth: Int, walk: Walk) throws -> Bool {
+        let role = try api.string(kAXRoleAttribute, of: child) ?? "AXUnknown"
+        if role == Self.menuBarRole { return false }
+        if !MacRoles.isWindowChrome(role: role, subrole: try api.string(kAXSubroleAttribute, of: child)) { return true }
+        return try holdsContent(child, depth: depth + 1, walk: walk)
     }
 
     func origin(of window: AXElement) throws -> ScreenPoint {
         try api.rect(of: window).map { ScreenPoint(x: $0.x, y: $0.y) } ?? ScreenPoint(x: 0, y: 0)
     }
 
-    /// The application's own children that are menus: not its windows, and not its menu bar.
+    /// The application's own children that are menus: not its windows, not its menu bar, and not one that went away.
     func menus(of app: AXElement) throws -> [AXElement] {
-        try api.elements(kAXChildrenAttribute, of: app).filter { try api.string(kAXRoleAttribute, of: $0) == "AXMenu" }
+        try api.elements(kAXChildrenAttribute, of: app).filter { child in try surviving { try api.string(kAXRoleAttribute, of: child) } == "AXMenu" }
     }
 
     /// The element as a node, with its children; nil for a menu bar, which is `ui menu`'s and never the tree's.
@@ -142,7 +166,8 @@ public struct MacSnapshot {
     }
 
     /// The element's children, until the depth or the node cap; any child left out marks the walk capped. A child that
-    /// is the application or an element on the path down to this one is a loop, not a child, and is skipped.
+    /// is the application or an element on the path down to this one is a loop, not a child, and is skipped; so is one
+    /// that went away while it was read.
     func children(of element: AXElement, depth: Int, type: Int, walk: Walk) throws -> [SnapshotNode] {
         let elements = try api.elements(kAXChildrenAttribute, of: element).filter { !walk.path.contains($0) }
         guard depth < Self.maxDepth else {
@@ -152,7 +177,7 @@ public struct MacSnapshot {
         var children: [SnapshotNode] = []
         for child in elements {
             guard walk.admitsAnother() else { break }
-            if let node = try node(child, depth: depth + 1, parentType: type, walk: walk) { children.append(node) }
+            if let node = try surviving({ try node(child, depth: depth + 1, parentType: type, walk: walk) }) { children.append(node) }
         }
         return children
     }

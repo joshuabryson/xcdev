@@ -7,7 +7,8 @@ extension UICommand {
         static let configuration = CommandConfiguration(
             commandName: "long-press",
             abstract: "Press and hold an element or a point.",
-            discussion: "Like `xcd ui tap`, held for --duration. Check what it did with --tree, `xcd ui wait`, or `xcd ui tree`."
+            discussion: "Like `xcd ui tap`, held for --duration. Check what it did with --tree, `xcd ui wait`, or `xcd ui tree`. "
+                + "Refused on a Mac app: its context menu would open on the person's screen; `xcd ui menu` presses the app's commands."
         )
         @Argument(help: "What to press, e.g. id:photo, \"label:Message\", e4 (a ref from the tree), or @120,300.") var target: String
         @Option(help: "How long to hold, from 0.1s to 20s (default: 1s).") var duration: String?

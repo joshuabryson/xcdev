@@ -45,6 +45,19 @@ import XcdevTestSupport
         #expect(gone.code == RunnerFailure.Code.internal && gone.message == "the element is no longer there; the app may have quit or the window closed")
     }
 
+    /// A read that loses the application's own window list (the app rebuilding its windows) is made once more; a list
+    /// still gone then is the read's failure, as before.
+    @Test func aReadThatLosesTheWindowListIsMadeOnceMoreThenFails() throws {
+        let api = FakeAccessibility(app: FakeApp(windows: [Self.window]))
+        api.loseWindowList(forReads: 1)
+        let driver = MacDriver(pid: 7, api: api)
+        #expect(try driver.appSnapshot("dev.x").children.first?.children.count == 4)
+        api.loseWindowList(forReads: 2)
+        let error = #expect(throws: RunnerFailure.self) { try driver.appSnapshot("dev.x") }
+        #expect(error?.message == "the element is no longer there; the app may have quit or the window closed")
+        #expect(error?.issues == ["reading the tree: elementGone(\"AXWindows\")"])
+    }
+
     /// The engine re-reads the tree while it polls, so an element met again must keep its token, not grow the table.
     /// Creating an application element and comparing two of them are local: no app is asked anything.
     @Test func theRealTableGivesAnElementMetAgainItsFirstToken() {

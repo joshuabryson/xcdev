@@ -74,6 +74,9 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
         var windows: [Int] = []
         var events: [String] = []
         var failing: Set<String> = []
+        var vanished: Set<String> = []
+        /// How many more reads of the application's `AXWindows` throw `elementGone`.
+        var windowListLosses = 0
         var trusted = true
         var capture = true
         /// The app quits after the next action it performs, as one that crashes on a press would.
@@ -119,6 +122,14 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
         get { state.withLock { $0.failing } }
         set { state.withLock { $0.failing = newValue } }
     }
+    /// Identifiers whose elements are gone: every read of one, its children included, throws `elementGone`, as the
+    /// real API does for an element the app dropped while it rebuilt its content.
+    public var vanished: Set<String> {
+        get { state.withLock { $0.vanished } }
+        set { state.withLock { $0.vanished = newValue } }
+    }
+    /// The next `reads` reads of the application's `AXWindows` throw `elementGone`.
+    public func loseWindowList(forReads reads: Int) { state.withLock { $0.windowListLosses = reads } }
     /// The token of the first node with this identifier.
     public func token(of identifier: String) -> Int? {
         state.withLock { state in state.nodes.filter { $0.value.identifier == identifier }.keys.min() }
@@ -144,11 +155,25 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
         try state.withLock { state in
             guard let node = state.nodes[element.token] else { return nil }
             if let id = node.identifier, state.failing.contains(id) { throw MacAXError.cannotComplete(id) }
+            if let id = node.identifier, state.vanished.contains(id) { throw MacAXError.elementGone(id) }
             return node
         }
     }
-    func children(of parent: Int) -> [AXElement] { state.withLock { ($0.children[parent] ?? []).map(AXElement.init(token:)) } }
-    func windows() -> [AXElement] { state.withLock { $0.windows.map(AXElement.init(token:)) } }
+    func children(of parent: Int) throws -> [AXElement] {
+        try state.withLock { state in
+            if let id = state.nodes[parent]?.identifier, state.vanished.contains(id) { throw MacAXError.elementGone(id) }
+            return (state.children[parent] ?? []).map(AXElement.init(token:))
+        }
+    }
+    func windows() throws -> [AXElement] {
+        try state.withLock { state in
+            if state.windowListLosses > 0 {
+                state.windowListLosses -= 1
+                throw MacAXError.elementGone(kAXWindowsAttribute)
+            }
+            return state.windows.map(AXElement.init(token:))
+        }
+    }
 
     public var isTrusted: Bool { state.withLock { $0.trusted } }
     public var screenCaptureAllowed: Bool { state.withLock { $0.capture } }
@@ -189,7 +214,7 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
 
     public func element(_ attribute: String, of element: AXElement) throws -> AXElement? {
         switch attribute {
-        case kAXMainWindowAttribute: return element.token == 0 ? windows().first : nil
+        case kAXMainWindowAttribute: return element.token == 0 ? state.withLock { $0.windows.first }.map(AXElement.init(token:)) : nil
         case kAXMenuBarAttribute: return element.token == 0 ? try children(of: 0).first { try node($0)?.role == "AXMenuBar" } : nil
         case kAXParentAttribute: return state.withLock { $0.parents[element.token] }.map(AXElement.init(token:))
         case kAXFocusedUIElementAttribute: return state.withLock { $0.nodes.first { $0.value.focused }?.key }.map(AXElement.init(token:))
@@ -202,8 +227,8 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
 
     public func elements(_ attribute: String, of element: AXElement) throws -> [AXElement] {
         switch (attribute, element.token) {
-        case (kAXWindowsAttribute, 0): return windows()
-        case (kAXChildrenAttribute, _): return children(of: element.token)
+        case (kAXWindowsAttribute, 0): return try windows()
+        case (kAXChildrenAttribute, _): return try children(of: element.token)
         default: return []
         }
     }

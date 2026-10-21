@@ -208,6 +208,13 @@ extension UIService {
         return pid
     }
 
+    /// `AXShowMenu` opens the context menu on screen even for a hidden app: an opaque menu window at the pop-up menu
+    /// level, there until one of its items is pressed (measured 2026-10-20). The driver's press stays for an opt-in.
+    static let macLongPress = XcdError(
+        .platformUnsupported,
+        "a long-press opens the element's context menu on the person's screen (a visible menu window until one of its items is pressed)",
+        next: "use `xcd ui menu \"<Menu> > <Item>\"` for the app's commands; a flag that allows a visible context menu is a follow-up")
+
     /// Whether `device` (or the default device) is a Mac; false for a name .xcdev.yml does not have.
     func isMac(_ device: String?, in ctx: WorktreeContext) -> Bool {
         guard let name = try? supervisor.provisioner.deviceName(device, config: ctx.config) else { return false }

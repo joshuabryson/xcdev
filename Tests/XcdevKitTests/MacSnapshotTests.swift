@@ -106,6 +106,20 @@ import XcdevTestSupport
         #expect(try MacSnapshot(api: looping).holdsContent(window, app: looping.application(pid: 7)) == false)
     }
 
+    /// An app that rebuilds its content while the tree is read (a SwiftUI app right after a link, measured 2026-10-20)
+    /// drops elements under the walk. One that is gone is left out, a gone window too, and the rest is read as usual.
+    @Test func anElementOrAWindowThatGoesAwayDuringTheWalkIsLeftOutAndTheRestIsRead() throws {
+        let gone = FakeNode(role: "AXWindow", title: "Probe", identifier: "old-window", frame: ScreenRect(x: 2558, y: 249, w: 900, h: 552),
+                            children: [Self.text])
+        let menu = FakeNode(role: "AXMenu", identifier: "old-menu", frame: ScreenRect(x: 2700, y: 300, w: 100, h: 40))
+        let api = FakeAccessibility(app: FakeApp(windows: [gone, Self.window([Self.text, Self.button, Self.field], x: 100, y: 100)], menus: [menu]))
+        api.vanished = ["old-window", "increment", "old-menu"]
+        let scene = try MacSnapshot(api: api).read(app: api.application(pid: 7))
+        #expect(scene.root.children.count == 1 && scene.mainWindow == scene.windows.last && scene.mainTitle == "Probe")
+        #expect(try #require(scene.root.children.first).children.map(\.identifier) == ["count", "name"])
+        #expect(scene.root.frame == ScreenRect(x: 0, y: 0, w: 900, h: 552) && scene.capped == false)
+    }
+
     @Test func theTreeStopsAtTheDepthCapAndSaysSo() throws {
         var deep = FakeNode(role: "AXGroup", frame: ScreenRect(x: 0, y: 0, w: 10, h: 10))
         for _ in 0..<50 { deep = FakeNode(role: "AXGroup", frame: ScreenRect(x: 0, y: 0, w: 10, h: 10), children: [deep]) }

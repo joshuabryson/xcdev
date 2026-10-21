@@ -38,7 +38,7 @@ An element keeps its ref from one tree to the next (`xcd ui tree`, or an action 
 | Command | What it does |
 |---|---|
 | `xcd ui tap <target>` | Taps the element's centre. |
-| `xcd ui long-press <target> [--duration 2s]` | Presses and holds (default 1s). |
+| `xcd ui long-press <target> [--duration 2s]` | Presses and holds (default 1s). Refused on a Mac app. |
 | `xcd ui type <text> [--into <target>] [--clear] [--submit]` | Types into the field (`--into` taps it first), or into whatever has focus. `--clear` replaces what the field holds. `--submit` presses Return. |
 | `xcd ui swipe up\|down\|left\|right [--on <target>]` | Swipes from the centre of the element, or of the screen. The direction is the way the finger moves, so `up` scrolls a list towards its end. |
 | `xcd ui swipe --from x,y --to x,y` | Swipes between two points. |
@@ -72,7 +72,7 @@ The same loop drives the Mac build of the app, with the app hidden: `xcd run --d
 - **Taps** press the element; a tap on a field focuses it. `@x,y` is refused: clicks posted to a background Mac app do not land, so name the element.
 - **Typing** focuses the field, then posts the keys to the app; `--clear` empties it first and `--submit` presses Return. A tab in the text acts as the Tab key and moves focus on. `--clear` is the only chord there is: every other ⌘ shortcut is refused. One `ui type` takes at most 2000 characters. A field that will not take focus is `element_not_hittable`.
 - **Shortcuts** go through the menu bar: `xcd ui menu "File > Save…"` presses the item; posted ⌘-chords do not reach a background app. A submenu is not an item: name one inside it.
-- **A long-press** opens the element's context menu, which the next tree lists as a `menu` with `menuItem` rows to tap. It takes about 1.5 s and ignores `--duration`.
+- **A long-press** is refused with `platform_unsupported`: it would open the element's context menu on the person's screen, hidden app or not, as a menu window that stays there until one of its items is pressed. The message reads "a long-press opens the element's context menu on the person's screen (a visible menu window until one of its items is pressed)", and `next:` says to use `xcd ui menu "<Menu> > <Item>"` for the app's commands.
 - **A swipe** scrolls the enclosing scroll area one page (`up` towards the end), through its scroll bar; `--from`/`--to`, `ui button`, and `ui rotate` are refused.
 - **Screenshots and recordings** take the app's main window, hidden or covered, through ScreenCaptureKit. They need the Screen Recording permission; macOS reminds the person now and then that the host app can record the screen. A recording is stills at about 5 per second, so motion looks stepped.
 - **Windows the app restored** (macOS brings an app back with the windows it had) are all in the tree; the header says `windows: n` when there is more than one. When an identifier appears in more than one window, narrow it with `--index` or close the extra window. A screenshot takes the main window, and after a link can land on an empty twin of it.

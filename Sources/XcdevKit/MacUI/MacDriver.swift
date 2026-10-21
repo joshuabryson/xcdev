@@ -36,11 +36,22 @@ public final class MacDriver: DeviceDriving {
 
     public func appSnapshot(_ bundleId: String) throws -> SnapshotNode {
         do {
-            let scene = try MacSnapshot(api: api).read(app: app)
+            let scene = try readScene()
             lastScene = scene
             return scene.root
         } catch let error as MacAXError {
             throw Self.failure(for: error, during: "reading the tree")
+        }
+    }
+
+    /// The read skips what goes away under the walk; what it cannot skip (the application's own windows changing) is
+    /// read once more, 100 ms later.
+    func readScene() throws -> MacScene {
+        do {
+            return try MacSnapshot(api: api).read(app: app)
+        } catch MacAXError.elementGone {
+            pause(0.1)
+            return try MacSnapshot(api: api).read(app: app)
         }
     }
 
