@@ -85,7 +85,7 @@ The same loop drives the Mac build of the app, with the app hidden: `xcd run --d
 - **System prompts** the app raises (contacts, photos, automation) belong to the person at the Mac; while one is up, reads fail with `runner_failed` saying so. Ask the user to answer it once.
 - **App Nap** is off for an app xcd launches. An app started some other way while hidden answers slowly, many times slower, so start it with `xcd run` or `xcd launch`.
 - **Refs** last across commands as on a simulator, and a relaunch makes them all stale (numbers start again at e1). `xcd ui stop` forgets them; there is no runner to stop.
-- **`xcd sim …`** commands do not apply to a Mac device: it has no simulator to act on, and the pasteboard, appearance, and text size are the person's.
+- **`xcd sim …`** commands are all refused on a Mac device with `platform_unsupported`, "device 'mac' is a macOS device and has no simulator"; its `next:` points to `xcd ui …` after `xcd run --device mac`, and `xcd launch --device mac --show` to show the app to a person. The pasteboard, appearance, and text size are the person's.
 
 ## When something fails
 

@@ -50,9 +50,7 @@ public struct DeviceProvisioner: Sendable {
             throw XcdError(.deviceUnknown, "no device named '\(name)'")
         }
         guard !spec.isMac else {
-            throw XcdError(.platformUnsupported, "device '\(name)' is a macOS device and has no simulator",
-                           next: "a Mac app is driven with `xcd ui …` after `xcd run --device \(name)`, and shown to a person with "
-                               + "`xcd launch --device \(name) --show`; for a simulator, pass --device with a simulator device")
+            throw DeviceResolver.macHasNoSimulator(name)
         }
         return spec
     }

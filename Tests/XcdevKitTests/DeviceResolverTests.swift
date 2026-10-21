@@ -59,7 +59,9 @@ import Testing
         let error = #expect(throws: XcdError.self) {
             try DeviceResolver.resolve(name: "mac", spec: DeviceSpec(platform: "macOS"), catalog: catalog)
         }
-        #expect(error?.code == .usage)
+        #expect(error?.code == .platformUnsupported)
+        #expect(error?.message == "device 'mac' is a macOS device and has no simulator")
+        #expect(error?.next?.contains("xcd launch --device mac --show") == true)
     }
 
     func compatibility(iOS sdk: String) -> RuntimeCompatibility {
