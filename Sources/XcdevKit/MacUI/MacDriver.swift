@@ -70,20 +70,4 @@ public final class MacDriver: DeviceDriving {
         }
         return AXElement(token: token)
     }
-
-    // Temporary until the actions arrive in `MacDriver+Actions.swift`.
-
-    static func notYet(_ action: String) -> RunnerFailure {
-        RunnerFailure(code: RunnerFailure.Code.unsupported, message: "\(action) on a Mac is not built yet")
-    }
-
-    public func tap(x: Double, y: Double) throws { throw Self.notYet("a tap") }
-    public func press(x: Double, y: Double, duration: Double) throws { throw Self.notYet("a long-press") }
-    public func drag(from: ScreenPoint, to: ScreenPoint, duration: Double) throws { throw Self.notYet("a drag") }
-    public func typeText(_ text: String) throws { throw Self.notYet("typing") }
-    public func pressKey(_ key: String, command: Bool) throws { throw Self.notYet("a key press") }
-    public func pressButton(_ button: HardwareButton) throws -> Bool { throw Self.notYet("a button press") }
-    public func rotate(to orientation: DeviceOrientation) throws { throw Self.notYet("a rotation") }
-    public func setPasteboard(text: String) { /* the Mac's pasteboard is the person's; nothing is written */ }
-    public func setPasteboard(image: Data) -> Bool { false }
 }

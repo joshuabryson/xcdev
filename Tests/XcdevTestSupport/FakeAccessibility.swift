@@ -115,6 +115,10 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
         get { state.withLock { $0.failing } }
         set { state.withLock { $0.failing = newValue } }
     }
+    /// The token of the first node with this identifier.
+    public func token(of identifier: String) -> Int? {
+        state.withLock { state in state.nodes.filter { $0.value.identifier == identifier }.keys.min() }
+    }
     public func setRunning(_ running: Bool) { state.withLock { $0.app.running = running } }
 
     func node(_ element: AXElement) throws -> FakeNode? {
@@ -209,7 +213,7 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
         state.withLock { state in
             guard let node = state.nodes[element.token], node.actions.contains(action) else { return false }
             state.events.append("\(action) \(node.identifier ?? node.title ?? "?")")
-            return true
+            return action != "AXShowMenu"      // the real AXShowMenu answers cannotComplete after ~1.5 s though the menu opens
         }
     }
 
