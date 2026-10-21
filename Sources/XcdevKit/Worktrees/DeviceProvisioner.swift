@@ -43,15 +43,23 @@ public struct DeviceProvisioner: Sendable {
         SimctlClient(runner: runner, developerDir: ctx.xcode?.developerDir)
     }
 
-    /// This worktree's clone for `name`, cloning (and pairing) it on first use or if it was deleted.
-    public func ensure(_ name: String, in ctx: inout WorktreeContext) async throws -> ProvisionedDevice {
-        guard let spec = ctx.config.allDevices[name] else {
-            _ = try deviceName(name, config: ctx.config)      // throws device_unknown with suggestions
+    /// The simulator device `name`, or `device_unknown`, or `platform_unsupported` for a Mac.
+    private func simulatorSpec(_ name: String, config: XcdevConfig) throws -> DeviceSpec {
+        guard let spec = config.allDevices[name] else {
+            _ = try deviceName(name, config: config)      // throws device_unknown with suggestions
             throw XcdError(.deviceUnknown, "no device named '\(name)'")
         }
         guard !spec.isMac else {
-            throw XcdError(.usage, "device '\(name)' is a macOS device and has no simulator")
+            throw XcdError(.platformUnsupported, "device '\(name)' is a macOS device and has no simulator",
+                           next: "a Mac app is driven with `xcd ui …` after `xcd run --device \(name)`, and shown to a person with "
+                               + "`xcd launch --device \(name) --show`; for a simulator, pass --device with a simulator device")
         }
+        return spec
+    }
+
+    /// This worktree's clone for `name`, cloning (and pairing) it on first use or if it was deleted.
+    public func ensure(_ name: String, in ctx: inout WorktreeContext) async throws -> ProvisionedDevice {
+        let spec = try simulatorSpec(name, config: ctx.config)
         let xcode = try await ensureXcode(&ctx)
         let simctl = simctl(for: ctx)
         let catalog = try await simctl.catalog()
@@ -72,8 +80,7 @@ public struct DeviceProvisioner: Sendable {
         let cloneName = SimNaming.clone(project: ctx.state.project, worktree: ctx.state.name, device: name)
         // Never delete by name: another project with the same basename shares it. Orphans are for `xcd doctor`.
         let udid = try await simctl.clone(udid: template, name: cloneName)
-        let device = ProvisionedDevice(udid: udid, deviceType: resolved.deviceType.name,
-                                       deviceTypeIdentifier: resolved.deviceType.identifier,
+        let device = ProvisionedDevice(udid: udid, deviceType: resolved.deviceType.name, deviceTypeIdentifier: resolved.deviceType.identifier,
                                        runtime: resolved.runtime.name, runtimeIdentifier: resolved.runtime.identifier)
         ctx.state.devices[name] = device
         try WorktreeStateStore.save(ctx.state, ctx.paths)

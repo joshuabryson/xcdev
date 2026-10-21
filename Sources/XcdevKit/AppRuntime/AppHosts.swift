@@ -102,11 +102,25 @@ public struct MacAppHost: AppHost {
     let sleep: @Sendable (Duration) async throws -> Void
     /// The link `launch` starts the app with: a cold start.
     private(set) var link: String?
+    /// Start visible and in front, for a person. Every other launch is hidden.
+    private(set) var show = false
+    /// Keeps a hidden app from being napped between commands.
+    static let appNapArguments = ["-NSAppSleepDisabled", "YES"]
 
     public init(runner: any ProcessRunning,
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.runner = runner
         self.sleep = sleep
+    }
+
+    public func showing(_ show: Bool) -> MacAppHost {
+        var host = self
+        host.show = show
+        return host
+    }
+
+    static func withAppNapOff(_ arguments: [String]) -> [String] {
+        arguments.contains(appNapArguments[0]) ? arguments : appNapArguments + arguments
     }
 
     public func install(_ product: AppProduct) async throws {}
@@ -115,11 +129,13 @@ public struct MacAppHost: AppHost {
     public func launch(_ product: AppProduct, arguments: [String], environment: [String: String],
                        logFile: String) async throws -> Int32? {
         let before = try await lookup.pids(of: product.executablePath)
-        var args = ["-n", "-g", "--stdout", logFile, "--stderr", logFile]
+        var args = ["-n"] + (show ? [] : ["-g", "-j"]) + ["--stdout", logFile, "--stderr", logFile]
+        if show { Notes.current?.add("shown and brought to the front at your request") }
         let env = AppEnvironment.captureOutput.merging(environment, uniquingKeysWith: { $1 })
         for (key, value) in env.sorted(by: { $0.key < $1.key }) { args += ["--env", "\(key)=\(value)"] }
         // With a link, the app is named by `-a` and the link is what `open` opens with it.
         args += link.map { ["-a", product.path, $0] } ?? [product.path]
+        let arguments = Self.withAppNapOff(arguments)
         if !arguments.isEmpty { args += ["--args"] + arguments }
         try await runner.runChecked(Invocation("/usr/bin/open", args), next: "read the app log: \(logFile)")
         for _ in 0..<20 {

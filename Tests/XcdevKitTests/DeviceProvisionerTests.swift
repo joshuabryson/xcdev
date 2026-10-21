@@ -136,7 +136,8 @@ import XcdevTestSupport
         _ = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
         var ctx = try context()
         let error = await #expect(throws: XcdError.self) { try await provisioner.ensure("mac", in: &ctx) }
-        #expect(error?.code == .usage)
+        #expect(error?.code == .platformUnsupported)
+        #expect(error?.next?.contains("xcd launch --device mac --show") == true)
     }
 
     @Test func bootClonesThenBoots() async throws {

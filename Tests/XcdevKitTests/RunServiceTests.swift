@@ -215,6 +215,36 @@ import XcdevTestSupport
         #expect(!fake.calls.contains { $0.argv[0] == "kill" })
     }
 
+    /// Every ref is stale after a relaunch, so a Mac launch deletes the saved ones.
+    @Test func aMacLaunchForgetsTheSavedRefs() async throws {
+        defer { worktree.remove() }
+        _ = try setUp()
+        var ctx = try context()
+        try recordMacBuild(ctx)
+        let file = MacRefStore.file(ctx.paths, device: "mac")
+        try MacRefStore.save(MacRefs(refs: [:], lastRef: 3), to: file)
+        let polls = Counter()
+        fake.stub(["ps"]) { _ in ProcessOutput(stdout: polls.increment() > 2 ? "  77 /dd/Mac.app/Contents/MacOS/Mac\n" : "") }
+        fake.stub(["open"])
+        let svc = service()
+        let app = try await svc.prepare("mac", boot: true, in: &ctx)
+        _ = try await svc.begin(app, LaunchPlan(), in: &ctx)
+        #expect(!FileManager.default.fileExists(atPath: file))
+    }
+
+    /// A simulator is shown with `xcd sim open`; this is refused before anything is booted.
+    @Test func showOnASimulatorIsRefusedBeforeItIsBooted() async throws {
+        defer { worktree.remove() }
+        _ = try setUp()
+        var ctx = try context()
+        let error = await #expect(throws: XcdError.self) {
+            try await service().launch(device: "iphone", options: LaunchOptions(show: true), in: &ctx)
+        }
+        #expect(error?.code == .usage && error?.message == "--show is for a Mac app")
+        #expect(error?.next == "a simulator is shown with `xcd sim open`")
+        #expect(!fake.calls.contains { $0.arguments.contains("boot") })
+    }
+
     @Test func macRunStopsTheRunningCopyBeforeLaunching() async throws {
         defer { worktree.remove() }
         _ = try setUp()
@@ -245,7 +275,7 @@ import XcdevTestSupport
         try recordMacBuild(ctx)
         fake.stub(["ps"])                                        // the app dies before `ps` sees it
         fake.stub(["open"]) { inv in
-            try "Mac/MacApp.swift:9: Fatal error: crashed in init\n".write(toFile: inv.arguments[3], atomically: true, encoding: .utf8)
+            try "Mac/MacApp.swift:9: Fatal error: crashed in init\n".write(toFile: inv.arguments[4], atomically: true, encoding: .utf8)
             try FileManager.default.createDirectory(atPath: crashDir, withIntermediateDirectories: true)
             try Fixture.crashReport(in: nil).write(toFile: crashDir + "/Mac-2026-09-30-195619.ips", atomically: true, encoding: .utf8)
             return ProcessOutput()

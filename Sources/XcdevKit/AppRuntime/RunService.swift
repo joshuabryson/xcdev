@@ -5,9 +5,12 @@ public struct LaunchOptions: Sendable {
     public var arguments: [String]
     public var environment: [String: String]
     public var crashWindow: Duration
+    /// Mac apps: start visible and in front.
+    public var show: Bool
 
     public init(preset: String? = nil, arguments: [String] = [], environment: [String: String] = [:],
-                crashWindow: Duration = .seconds(5)) {
+                crashWindow: Duration = .seconds(5), show: Bool = false) {
+        self.show = show
         self.preset = preset
         self.arguments = arguments
         self.environment = environment
@@ -94,7 +97,7 @@ public struct RunService: Sendable {
             guard report.succeeded else { return RunReport(buildFailed: report, worktree: ctx.state.name) }
             buildReport = report
         }
-        let app = try await prepare(build.device, boot: true, in: &ctx)
+        let app = try await prepare(build.device, boot: true, show: launch.show, in: &ctx)
         try await app.host.install(app.product)
         return try await start(app, plan, build: buildReport, in: &ctx)
     }
@@ -102,7 +105,7 @@ public struct RunService: Sendable {
     /// Launch the already-installed build (booting the clone if needed) and watch for a crash.
     public func launch(device: String?, options: LaunchOptions, in ctx: inout WorktreeContext) async throws -> RunReport {
         let plan = try options.plan(config: ctx.config)
-        let app = try await prepare(device, boot: true, in: &ctx)
+        let app = try await prepare(device, boot: true, show: options.show, in: &ctx)
         return try await start(app, plan, build: nil, in: &ctx)
     }
 
@@ -150,13 +153,18 @@ public struct RunService: Sendable {
     }
 
     /// The latest build's app for `device` and its host, cloning the simulator on first use.
-    func prepare(_ device: String?, boot: Bool, in ctx: inout WorktreeContext) async throws -> PreparedApp {
+    func prepare(_ device: String?, boot: Bool, show: Bool = false,
+                 in ctx: inout WorktreeContext) async throws -> PreparedApp {
         let container = try ProjectContainer.resolve(config: ctx.config, worktreeRoot: ctx.location.worktreeRoot)
         let name = try builds.provisioner.targetName(device, container: container, config: ctx.config)
+        if show, ctx.config.allDevices[name]?.isMac != true {
+            throw XcdError(.usage, "--show is for a Mac app", next: "a simulator is shown with `xcd sim open`")
+        }
         let product = try Self.product(for: name, requested: device, in: ctx)
         let target = try await builds.provisioner.buildTarget(device, container: container, in: &ctx)
         guard let clone = target.device else {
-            return PreparedApp(target: target, product: product, host: MacAppHost(runner: builds.runner, sleep: sleep))
+            let host = MacAppHost(runner: builds.runner, sleep: sleep).showing(show)
+            return PreparedApp(target: target, product: product, host: host)
         }
         if boot { _ = try await builds.provisioner.boot(target.name, in: &ctx) }
         let host = SimulatorAppHost(simctl: builds.provisioner.simctl(for: ctx), udid: clone.udid)
@@ -177,6 +185,7 @@ public struct RunService: Sendable {
         if app.target.device == nil, try await app.host.terminate(app.product) {
             builds.progress("stopped the running \(app.product.executableName)")
         }
+        if app.target.device == nil { MacRefStore.forgetAll(in: ctx.paths) }      // every ref is stale after a relaunch
         let launchedAt = builds.now()
         let appLog = ctx.paths.newArtifact(in: ctx.paths.logs, kind: "app", ext: "log", now: launchedAt)
         var started: StartedApp

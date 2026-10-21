@@ -70,9 +70,9 @@ import XcdevTestSupport
             .launch(macProduct, arguments: ["-flag"], environment: ["GREETING": "hi"], logFile: "/w/app.log")
         #expect(pid == 300)
         let open = try #require(fake.calls.first { $0.argv[0] == "open" })
-        #expect(open.arguments == ["-n", "-g", "--stdout", "/w/app.log", "--stderr", "/w/app.log",
+        #expect(open.arguments == ["-n", "-g", "-j", "--stdout", "/w/app.log", "--stderr", "/w/app.log",
                                    "--env", "GREETING=hi", "--env", "NSUnbufferedIO=YES", "--env", "OS_ACTIVITY_DT_MODE=YES",
-                                   macProduct.path, "--args", "-flag"])
+                                   macProduct.path, "--args", "-NSAppSleepDisabled", "YES", "-flag"])
     }
 
     @Test func macLaunchThatIsNeverSeenRunningHasNoPid() async throws {
@@ -107,8 +107,8 @@ import XcdevTestSupport
         #expect(try await host.launch(macProduct, arguments: ["-flag"], environment: [:], logFile: "/w/app.log") == 300)
         let open = try #require(fake.calls.first { $0.argv[0] == "open" })
         // As a plain launch up to the app, which `-a` now names, with the link after it and before the arguments.
-        #expect(open.arguments.starts(with: ["-n", "-g", "--stdout", "/w/app.log", "--stderr", "/w/app.log", "--env"]))
-        #expect(open.arguments.suffix(5) == ["-a", macProduct.path, "myapp://item?id=1", "--args", "-flag"])
+        #expect(open.arguments.starts(with: ["-n", "-g", "-j", "--stdout", "/w/app.log", "--stderr", "/w/app.log", "--env"]))
+        #expect(open.arguments.suffix(7) == ["-a", macProduct.path, "myapp://item?id=1", "--args", "-NSAppSleepDisabled", "YES", "-flag"])
     }
 
     /// Only the system can start a simulator's app for a link.

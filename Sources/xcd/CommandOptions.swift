@@ -21,11 +21,13 @@ struct LaunchFlags: ParsableArguments {
     @Option(help: "An environment variable for the app, KEY=VALUE. Repeatable.") var env: [String] = []
     @Option(name: .customLong("crash-window"), help: "How long to watch for a crash after launch (default: 5s).")
     var crashWindow: String?
+    @Flag(help: "Mac apps: start visible and in front, for a person to watch. Every other launch is hidden.") var show = false
     @Argument(parsing: .postTerminator, help: "Launch arguments for the app, after `--`, e.g. `xcd run -- -resetOnboarding YES`.")
     var args: [String] = []
 
     func options() throws -> LaunchOptions {
         LaunchOptions(preset: preset, arguments: args, environment: try LaunchOptions.parseEnvironment(env),
-                      crashWindow: try DurationText.option(crashWindow, flag: "--crash-window") ?? .seconds(5))
+                      crashWindow: try DurationText.option(crashWindow, flag: "--crash-window") ?? .seconds(5),
+                      show: show)
     }
 }

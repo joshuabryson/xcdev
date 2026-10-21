@@ -224,6 +224,6 @@ import XcdevTestSupport
         defer { worktree.remove() }
         var (svc, ctx) = try setup()
         let error = await #expect(throws: XcdError.self) { _ = try await svc.openURL("https://x", device: "mac", in: &ctx) }
-        #expect(error?.code == .usage)
+        #expect(error?.code == .platformUnsupported)
     }
 }

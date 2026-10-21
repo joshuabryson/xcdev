@@ -46,7 +46,8 @@ import XcdevTestSupport
         }
         fake.stub(["open"]) { [running] inv in
             guard inv.arguments.first == "-n" else { return ProcessOutput() }      // a link for the copy that is up
-            try "Mac launched\n".write(toFile: inv.arguments[3], atomically: true, encoding: .utf8)
+            let log = inv.arguments.drop { $0 != "--stdout" }.dropFirst().first ?? ""
+            try "Mac launched\n".write(toFile: log, atomically: true, encoding: .utf8)
             running.set([4242])
             return ProcessOutput()
         }
@@ -55,9 +56,12 @@ import XcdevTestSupport
     /// The `open` and `kill` commands, in order.
     var steps: [[String]] { fake.calls.filter { ["open", "kill"].contains($0.argv[0]) }.map(\.argv) }
 
-    /// The `open -n -g` command that starts the app with its output in `log`, up to the app or the link.
+    /// What every Mac launch ends with: App Nap off, then the preset's own arguments.
+    func napOff(_ arguments: [String] = []) -> [String] { ["--args", "-NSAppSleepDisabled", "YES"] + arguments }
+
+    /// The `open -n -g -j` command that starts the app with its output in `log`, up to the app or the link.
     func start(log: String, environment: [String] = []) -> [String] {
-        ["open", "-n", "-g", "--stdout", log, "--stderr", log] + environment.flatMap { ["--env", $0] }
+        ["open", "-n", "-g", "-j", "--stdout", log, "--stderr", log] + environment.flatMap { ["--env", $0] }
             + ["--env", "NSUnbufferedIO=YES", "--env", "OS_ACTIVITY_DT_MODE=YES"]
     }
 
@@ -78,7 +82,7 @@ import XcdevTestSupport
         try setUp(ctx)
         let report = try await service().open(item, OpenOptions(device: "mac"), in: &ctx)
         let log = try #require(report.app?.log)
-        #expect(steps == [start(log: log) + [app], ["open", "-g", "-a", app, Self.link]])
+        #expect(steps == [start(log: log) + [app] + napOff(), ["open", "-g", "-a", app, Self.link]])
         #expect(report.app?.state == .started && report.app?.pid == 4242 && report.linkSent == true)
         let record = try #require(try AppStateStore.load(ctx.paths).lastLaunch)
         #expect(record.target == "mac" && record.pid == 4242 && record.appLog == log)
@@ -90,7 +94,7 @@ import XcdevTestSupport
         try setUp(ctx, pids: [500])
         let report = try await service().open(.route(name: "welcome", values: [:]), OpenOptions(device: "mac"), in: &ctx)
         let log = try #require(report.app?.log)
-        #expect(steps == [["kill", "-TERM", "500"], start(log: log, environment: ["MODE=fresh"]) + [app, "--args", "-reset"],
+        #expect(steps == [["kill", "-TERM", "500"], start(log: log, environment: ["MODE=fresh"]) + [app] + napOff(["-reset"]),
                           ["open", "-g", "-a", app, "sampleapp://sample/welcome"]])
         #expect(report.app?.state == .restarted && report.preset == "fresh")
     }
@@ -103,7 +107,7 @@ import XcdevTestSupport
         let log = try #require(report.app?.log)
         // The preset's variables and the route's, in name order, with the two that capture output among them.
         #expect(steps == [start(log: log, environment: ["MODE=fresh"])
-                          + ["--env", "STEP=2", app, "--args", "-reset", "-startRoute", "onboarding/2"]])
+                          + ["--env", "STEP=2", app] + napOff(["-reset", "-startRoute", "onboarding/2"])])
         #expect(report.app?.state == .started && report.kind == .launch && report.linkSent == nil)
     }
 
@@ -116,7 +120,7 @@ import XcdevTestSupport
         let report = try await service().open(item, OpenOptions(device: "mac", preset: "fresh", cold: true), in: &ctx)
         let log = try #require(report.app?.log)
         #expect(steps == [["kill", "-TERM", "500"],
-                          start(log: log, environment: ["MODE=fresh"]) + ["-a", app, Self.link, "--args", "-reset"]])
+                          start(log: log, environment: ["MODE=fresh"]) + ["-a", app, Self.link] + napOff(["-reset"])])
         #expect(report.app?.state == .startedByLink && report.app?.pid == 4242 && report.preset == "fresh")
         #expect(report.linkSent == true && report.failure == nil)
         #expect(try String(contentsOfFile: log, encoding: .utf8) == "Mac launched\n")
@@ -129,7 +133,7 @@ import XcdevTestSupport
         try setUp(ctx)
         let report = try await service().open(.url("SampleApp://direct"), OpenOptions(device: "mac", cold: true), in: &ctx)
         let log = try #require(report.app?.log)
-        #expect(steps == [start(log: log) + ["-a", app, "SampleApp://direct"]])
+        #expect(steps == [start(log: log) + ["-a", app, "SampleApp://direct"] + napOff()])
         #expect(report.app?.state == .startedByLink && report.route == nil)
     }
 
