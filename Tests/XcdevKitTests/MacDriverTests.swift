@@ -53,6 +53,15 @@ import XcdevTestSupport
         #expect(throws: MacAXError.elementGone(kAXRoleAttribute)) { try api.string(kAXRoleAttribute, of: AXElement(token: 99)) }
     }
 
+    /// A window's top-left often sits on a screen's top edge, which the screen's frame leaves out, so the screen that
+    /// counts is the one under the window's centre. The second screen's top edge is Quartz y -458 (982 - 1440).
+    @Test func theScaleIsTheScreenUnderTheWindowsCentre() {
+        let frames = [CGRect(x: 0, y: 0, width: 1512, height: 982), CGRect(x: 1512, y: 0, width: 2560, height: 1440)]
+        #expect(SystemAccessibility.screenIndex(containing: ScreenRect(x: 1600, y: -458, w: 900, h: 552), frames: frames) == 1)
+        #expect(SystemAccessibility.screenIndex(containing: ScreenRect(x: 0, y: 0, w: 900, h: 552), frames: frames) == 0)
+        #expect(SystemAccessibility.screenIndex(containing: ScreenRect(x: 9000, y: 0, w: 10, h: 10), frames: frames) == nil)
+    }
+
     @Test func theSystemAndAlertsAreNotAMacThing() {
         let driver = MacDriver(pid: 7, api: FakeAccessibility(app: FakeApp(windows: [Self.window])))
         #expect(driver.systemAlert() == nil)

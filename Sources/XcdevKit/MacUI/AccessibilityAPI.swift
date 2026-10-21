@@ -153,12 +153,19 @@ public final class SystemAccessibility: AccessibilityAPI {
         up.postToPid(pid)
     }
 
-    /// The backing scale of the screen under the rect's origin. Quartz measures from the top-left of the main
-    /// screen; AppKit from its bottom-left, so y is flipped against the main screen's height.
+    /// The backing scale of the screen under the rect's centre.
     public func screenScale(containing rect: ScreenRect) -> Double {
-        let mainHeight = NSScreen.screens.first?.frame.height ?? 0
-        let point = NSPoint(x: rect.x, y: mainHeight - rect.y)
-        let screen = NSScreen.screens.first { NSPointInRect(point, $0.frame) } ?? NSScreen.main
+        let screens = NSScreen.screens
+        let screen = Self.screenIndex(containing: rect, frames: screens.map(\.frame)).map { screens[$0] } ?? NSScreen.main
         return Double(screen?.backingScaleFactor ?? 2)
+    }
+
+    /// The index of the screen frame (AppKit's, the main screen first) that holds the rect's centre. The centre, not
+    /// the top-left: a frame excludes its top edge, where a window's top-left often sits. Quartz measures from the
+    /// top-left of the main screen and AppKit from its bottom-left, so y is flipped against the main screen's height.
+    static func screenIndex(containing rect: ScreenRect, frames: [CGRect]) -> Int? {
+        let mainHeight = frames.first?.height ?? 0
+        let centre = CGPoint(x: rect.midX, y: mainHeight - rect.midY)
+        return frames.firstIndex { $0.contains(centre) }
     }
 }
