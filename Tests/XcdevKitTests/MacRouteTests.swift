@@ -18,12 +18,15 @@ import XcdevTestSupport
 
     let arrival = FakeArrival()
 
-    func service(_ probe: FakeProbe = FakeProbe()) -> RouteService {
+    func service(_ probe: FakeProbe = FakeProbe(), arrival: FakeArrival? = nil) -> RouteService {
         let builds = BuildService(runner: fake, provisioner: worktree.provisioner, now: { Date(timeIntervalSince1970: 1_790_040_000) })
         let watcher = CrashWatcher(probe: probe, locator: CrashReportLocator(directory: worktree.root + "/DiagnosticReports"),
                                    sleep: Instant.sleep)
-        return RouteService(apps: RunService(builds: builds, watcher: watcher, sleep: Instant.sleep), arrival: arrival)
+        return RouteService(apps: RunService(builds: builds, watcher: watcher, sleep: Instant.sleep), arrival: arrival ?? self.arrival)
     }
+
+    /// A look before the link that does not see the element, then one after it that does.
+    static func appearing() -> FakeArrival { FakeArrival([.success(.missing(onScreen: [], away: nil)), .success(.found(seconds: 0.6))]) }
 
     /// A built Mac app that registers `sampleapp`. `pids` are its running copies; starting it leaves 4242 as the only one.
     func setUp(_ ctx: WorktreeContext, pids: [Int32] = []) throws {
@@ -150,31 +153,33 @@ import XcdevTestSupport
         #expect(report.failure?.message == "the link was sent, and the app exited 0.2s later without a crash report")
     }
 
-    /// UI driving does not reach a Mac app, so a route's `expect` is skipped there, and says so. An https link is
-    /// handed straight to the app on a Mac, so there is nothing to note about Safari: the note says what every
-    /// worktree's build of the app shares.
-    @Test func theArrivalCheckIsSkippedOnAMac() async throws {
+    /// The arrival check looks on a Mac as on a simulator, through the engine xcd runs itself: once before the link
+    /// goes to the copy that is up, and once after. An https link is handed straight to
+    /// the app on a Mac, so there is nothing to note about Safari: the note says what every worktree's build of the
+    /// app shares.
+    @Test func theArrivalCheckLooksOnAMacAsOnASimulator() async throws {
         defer { worktree.remove() }
         var ctx = try context()
         try setUp(ctx, pids: [500])
-        let svc = service()
+        let arrival = Self.appearing()
+        let svc = service(arrival: arrival)
         let report = try await svc.open(.route(name: "checked", values: ["id": "Milk"]), OpenOptions(device: "mac"), in: &ctx)
-        #expect(report.check == OpenReport.Check(target: "label~Milk", outcome: .skipped, seconds: nil,
-                                                 reason: "the arrival check needs UI driving, which works on iPhone and iPad simulators only"))
-        #expect(arrival.looks.isEmpty && report.failure == nil)
+        #expect(report.check == OpenReport.Check(target: "label~Milk", outcome: .appeared, seconds: 0.6, reason: nil))
+        #expect(arrival.looks.map(\.device) == ["mac", "mac"] && report.failure == nil)
         let web = try await svc.open(.route(name: "web", values: [:]), OpenOptions(device: "mac"), in: &ctx)
         #expect(web.note == RunReport.sharedData(of: "dev.x.Mac") && steps.last == ["open", "-g", "-a", app, "https://example.com/item"])
         #expect(report.note == web.note && report.text.hasSuffix("\nnote: " + (web.note ?? "")))
     }
 
-    /// A skipped check makes no look, so the watch's 2 s window (9 checks) is all that xcd watches: a Mac app that
-    /// ends after it is not asked for again.
-    @Test func aSkippedCheckDoesNotLengthenTheWatch() async throws {
+    /// A look lengthens the watch on a Mac as on a simulator: the app is asked for again once the look is done, so a
+    /// Mac app alive through the watch's 2 s window (9 checks) and gone after the look is this command's to report.
+    @Test func aLookOnAMacLengthensTheWatch() async throws {
         defer { worktree.remove() }
         var ctx = try context()
         try setUp(ctx, pids: [500])
-        let report = try await service(FakeProbe(runningChecks: 9)).open(.route(name: "checked", values: ["id": "Milk"]), OpenOptions(device: "mac"), in: &ctx)
-        #expect(report.check?.outcome == .skipped && report.failure == nil && report.exitedAfter == nil)
+        let report = try await service(FakeProbe(runningChecks: 9), arrival: Self.appearing())
+            .open(.route(name: "checked", values: ["id": "Milk"]), OpenOptions(device: "mac"), in: &ctx)
+        #expect(report.check?.outcome == .appeared && report.failure?.code == .appCrashed && report.exitedAfter != nil)
     }
 
     @Test func aMacAppThatWasNeverBuiltSaysWhatToRun() async throws {

@@ -74,6 +74,10 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
         var windows: [Int] = []
         var events: [String] = []
         var failing: Set<String> = []
+        var trusted = true
+        var capture = true
+        /// The app quits after the next action it performs, as one that crashes on a press would.
+        var exitAfterPress = false
 
         /// Lists the node under `parent` and returns its token; a link lists the element it names instead.
         @discardableResult
@@ -120,6 +124,14 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
         state.withLock { state in state.nodes.filter { $0.value.identifier == identifier }.keys.min() }
     }
     public func setRunning(_ running: Bool) { state.withLock { $0.app.running = running } }
+    /// The Accessibility grant (`isTrusted`) and the Screen Recording grant (`screenCaptureAllowed`).
+    public func setTrusted(_ trusted: Bool, capture: Bool) {
+        state.withLock { state in
+            state.trusted = trusted
+            state.capture = capture
+        }
+    }
+    public func exitAfterNextPress() { state.withLock { $0.exitAfterPress = true } }
 
     func node(_ element: AXElement) throws -> FakeNode? {
         try state.withLock { state in
@@ -131,8 +143,8 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
     func children(of parent: Int) -> [AXElement] { state.withLock { ($0.children[parent] ?? []).map(AXElement.init(token:)) } }
     func windows() -> [AXElement] { state.withLock { $0.windows.map(AXElement.init(token:)) } }
 
-    public var isTrusted: Bool { true }
-    public var screenCaptureAllowed: Bool { true }
+    public var isTrusted: Bool { state.withLock { $0.trusted } }
+    public var screenCaptureAllowed: Bool { state.withLock { $0.capture } }
     public func isRunning(pid: Int32) -> Bool { state.withLock { $0.app.running } }
     public func application(pid: Int32) -> AXElement { AXElement(token: 0) }
 
@@ -213,6 +225,7 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
         state.withLock { state in
             guard let node = state.nodes[element.token], node.actions.contains(action) else { return false }
             state.events.append("\(action) \(node.identifier ?? node.title ?? "?")")
+            if state.exitAfterPress { state.app.running = false }
             return action != "AXShowMenu"      // the real AXShowMenu answers cannotComplete after ~1.5 s though the menu opens
         }
     }

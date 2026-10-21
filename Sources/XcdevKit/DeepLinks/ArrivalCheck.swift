@@ -50,7 +50,6 @@ struct ArrivalResult: Sendable {
 enum ArrivalCheck {
     /// How long the element has to show up after a delivery.
     static let wait: Duration = .seconds(10)
-    static let onMac = "the arrival check needs UI driving, which works on iPhone and iPad simulators only"
 
     /// The result of the look that followed a delivery. `sent` says what reached the device ("the link was sent"),
     /// so a failure tells the agent that the device changed. `web` is true for an http or https link.
@@ -105,10 +104,9 @@ enum ArrivalCheck {
 }
 
 extension RouteService {
-    /// Why the arrival check cannot run on this device, when it cannot: UI driving is for iPhone and iPad
-    /// simulators on iOS 17 or later.
+    /// Why the arrival check cannot run on this device, when it cannot: UI driving is for Mac apps and for iPhone
+    /// and iPad simulators on iOS 17 or later. A Mac device has no clone, so it always can.
     func arrivalUnavailable(on device: String, in ctx: WorktreeContext) -> String? {
-        if ctx.config.allDevices[device]?.isMac == true { return ArrivalCheck.onMac }
         guard let clone = ctx.state.devices[device] else { return nil }
         do {
             try Runners.requireIOS(clone, name: device)

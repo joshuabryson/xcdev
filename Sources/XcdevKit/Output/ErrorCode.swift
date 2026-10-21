@@ -24,6 +24,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
     case platformUnsupported = "platform_unsupported"
     case runnerFailed = "runner_failed"
     case postureFailed = "posture_failed"
+    case permissionMissing = "permission_missing"
     case hookFailed = "hook_failed"
     case routeFailed = "route_failed"
     case lintFailed = "lint_failed"
@@ -53,7 +54,8 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
              .notConfigured, .arrivalUnproven:
             return 2
         case .xcodeMissing, .xcodeRuntimeMismatch, .runtimeMissing, .cloneFailed, .simulatorFailed,
-             .subprocessFailed, .gitFailed, .timeout, .doctorProblems, .internalError, .runnerFailed, .toolMissing, .postureFailed:
+             .subprocessFailed, .gitFailed, .timeout, .doctorProblems, .internalError, .runnerFailed, .toolMissing, .postureFailed,
+             .permissionMissing:
             return 3
         }
     }
@@ -79,9 +81,10 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .arrivalUnproven: return "`xcd open` found the route's `expect` on screen but cannot show that the link brought it: it was there before the link was sent, or xcd could not look before."
         case .elementAmbiguous: return "More than one element matched the target; the error lists them with refs."
         case .staleRef: return "A ref from an earlier `xcd ui tree` no longer names one element; read the tree again."
-        case .platformUnsupported: return "UI driving works on iPhone and iPad simulators running iOS 17 or later, some hardware buttons exist only on some devices, a watchOS simulator opens no custom-scheme link, and only a foldable (the iPhone Duo) has a hinge for `xcd sim fold`."
-        case .runnerFailed: return "The UI runner inside the simulator could not be built or started, or stopped answering."
+        case .platformUnsupported: return "The device cannot do this: UI driving works on iPhone and iPad simulators (iOS 17+) and on Mac apps, where point taps, drags, hardware buttons, rotation, and --system are refused; some hardware buttons exist only on some devices; a watchOS simulator opens no custom-scheme link; only the iPhone Duo has a hinge; and `sim` commands need a simulator."
+        case .runnerFailed: return "The UI runner inside the simulator, or the Mac driver, could not be built or started, or stopped answering."
         case .postureFailed: return "A foldable's hinge or rotation could not be set: no route reached the simulator's pose pipeline, or the simulator never showed the change; details name the step."
+        case .permissionMissing: return "A Mac `ui` command needs Accessibility (every command) or Screen Recording (screenshot and record) for the app that runs xcd; the error names the app and the System Settings pane."
         case .hookFailed: return "A hook from .xcdev.yml exited non-zero; the error names the hook and its log."
         case .routeFailed: return "A route's script failed, or its link did not start the app."
         case .lintFailed: return "`xcd lint` showed a finding the linter marks as an error, or the project's lint command exited non-zero."

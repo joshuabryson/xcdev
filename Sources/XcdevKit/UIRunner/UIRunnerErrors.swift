@@ -45,23 +45,26 @@ enum UIRunnerErrors {
         }
     }
 
-    /// The runner says why: disabled, no size, off screen, or covered by a system alert or the keyboard.
+    /// What to do for each reason an element is not hittable, by a word of the reason, the first match winning. The
+    /// Mac driver's refusals come first: "would not take keyboard focus" names the keyboard, but no keyboard is up.
+    static let notHittableNexts: [(reason: String, next: String)] = [
+        ("would not take keyboard focus", "the window may be minimized or mostly off screen: `xcd ui screenshot` to see it, or name another field"),
+        ("has no press action", "give the view an accessibility action or identifier, or tap an element inside it"),
+        ("no scroll area encloses it", "name an element inside a scroll view, or swipe without --on"),
+        ("disabled", "it can't be tapped while disabled; do what enables it first"),
+        ("system alert", "answer the system alert first (`xcd ui tree` lists its buttons), then retry"),
+        ("keyboard", "dismiss the keyboard first (tap its Return or Done key), then retry"),
+        ("no size", "wait for it to lay out (`xcd ui wait`), then retry; `xcd ui tree --all` lists every element"),
+    ]
+
+    /// The runner says why: disabled, no size, off screen, or covered by a system alert or the keyboard; the Mac
+    /// driver also says when an element takes no focus, has no press action, or is in no scroll area.
     static func notHittable(_ failure: RunnerFailure, target: String, _: Duration) -> XcdError {
         let reason = failure.message.hasPrefix("the element ") ? String(failure.message.dropFirst("the element ".count)) : failure.message
         let message = "\(target) \(reason.hasPrefix("is ") || reason.hasPrefix("has ") ? reason : "is not hittable: \(reason)")"
             + (failure.frame.map { " (\($0.text))" } ?? "")
-        let next: String
-        if failure.message.contains("disabled") {
-            next = "it can't be tapped while disabled; do what enables it first"
-        } else if failure.message.contains("system alert") {
-            next = "answer the system alert first (`xcd ui tree` lists its buttons), then retry"
-        } else if failure.message.contains("keyboard") {
-            next = "dismiss the keyboard first (tap its Return or Done key), then retry"
-        } else if failure.message.contains("no size") {
-            next = "wait for it to lay out (`xcd ui wait`), then retry; `xcd ui tree --all` lists every element"
-        } else {
-            next = "scroll it into view, then retry; `xcd ui tree --all` lists off-screen elements"
-        }
+        let next = notHittableNexts.first { failure.message.contains($0.reason) }?.next
+            ?? "scroll it into view, then retry; `xcd ui tree --all` lists off-screen elements"
         return XcdError(.elementNotHittable, message, next: next)
     }
 
@@ -114,6 +117,11 @@ enum UIRunnerErrors {
     }
 
     static func internalFailure(_ failure: RunnerFailure, target: String, timeout: Duration) -> XcdError {
+        // The Mac driver's timeout, which `RunnerEngine.tree` wraps in its own words.
+        if failure.message.contains(MacDriver.notAnswering) {
+            return XcdError(.runnerFailed, MacDriver.notAnswering,
+                            next: "run `xcd ui screenshot` to see the window, or ask the user whether a system prompt is up")
+        }
         // XCTest's own words when text is typed with no field focused.
         if failure.issues.contains(where: { $0.localizedCaseInsensitiveContains("keyboard focus") }) {
             return nothingFocused(failure, target: target, timeout)

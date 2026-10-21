@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// The options every `xcd ui` driving command takes.
@@ -46,13 +47,29 @@ public struct UIService: Sendable {
     /// Finds the crash report of an app that an action ended.
     public let crashes: CrashReportLocator
     let now: @Sendable () -> Date
+    /// The Accessibility API for a Mac device, made fresh for each command: the real one holds CF objects.
+    let accessibility: @Sendable () -> any AccessibilityAPI
+    /// The app macOS attributes xcd's grants to.
+    let hostApp: @Sendable () -> String
+    /// The pids of the running apps with a bundle id, for `--bundle` on a Mac.
+    let running: @Sendable (String) -> [Int32]
+    /// Whether the Mac's screen is locked, which makes every window read meaningless.
+    let screenLocked: @Sendable () -> Bool
 
     public init(supervisor: RunnerSupervisor, client: RunnerClient, crashes: CrashReportLocator = CrashReportLocator(),
-                now: @escaping @Sendable () -> Date = { Date() }) {
+                now: @escaping @Sendable () -> Date = { Date() },
+                accessibility: @escaping @Sendable () -> any AccessibilityAPI = { SystemAccessibility() },
+                hostApp: @escaping @Sendable () -> String = { MacHostApp.live() },
+                running: @escaping @Sendable (String) -> [Int32] = { NSRunningApplication.runningApplications(withBundleIdentifier: $0).map(\.processIdentifier) },
+                screenLocked: @escaping @Sendable () -> Bool = { MacScreenLock.isLocked() }) {
         self.supervisor = supervisor
         self.client = client
         self.crashes = crashes
         self.now = now
+        self.accessibility = accessibility
+        self.hostApp = hostApp
+        self.running = running
+        self.screenLocked = screenLocked
     }
 
     public func tree(all: Bool, _ options: UIOptions, in ctx: inout WorktreeContext) async throws -> UITreeReport {
@@ -87,6 +104,13 @@ public struct UIService: Sendable {
     /// Stops the device's runner. With `rebuild`, also discards the cached runner build for this Xcode.
     public func stop(device: String?, rebuild: Bool, in ctx: inout WorktreeContext) async throws -> UIStopReport {
         let name = try supervisor.provisioner.deviceName(device, config: ctx.config)
+        if ctx.config.allDevices[name]?.isMac == true {
+            let file = MacRefStore.file(ctx.paths, device: name)
+            let had = Disk.exists(file)
+            MacRefStore.forget(file)
+            return UIStopReport(device: name, stopped: [(had ? "forgot the refs of \(name)" : "no refs to forget for \(name)") + "; there is no runner to stop on a Mac"]
+                                + (rebuild ? ["--rebuild does nothing on a Mac"] : []), rebuild: false, worktree: ctx.state.name)
+        }
         let stopped = try await supervisor.stop(device: name, in: ctx)
         if rebuild { try await supervisor.builder.discard(xcode: try await supervisor.provisioner.ensureXcode(&ctx)) }
         return UIStopReport(device: name, stopped: stopped, rebuild: rebuild, worktree: ctx.state.name)
@@ -130,6 +154,9 @@ public struct UIService: Sendable {
         func call(_ session: RunnerSession) async throws -> Result<Payload, RunnerFailure> {
             try await client.call(exchange.path, exchange.request, to: session.endpoint, timeout: httpTimeout)
         }
+        if let mac = try await macSession(options, in: ctx) {
+            return (mac.session, try mac.perform(exchange.path, exchange.request))
+        }
         let session = try await supervisor.session(device: options.device, in: &ctx)
         do {
             return (session, try await call(session))
@@ -146,5 +173,46 @@ public struct UIService: Sendable {
                                next: "run `xcd ui stop`, then `xcd doctor`")
             }
         }
+    }
+}
+
+/// A Mac device runs the engine in-process over the Accessibility API instead of a runner.
+extension UIService {
+    /// A Mac device's session, or nil for a simulator device. `--system` is refused, then a locked screen (whose
+    /// windows read as garbage, granted or not), then a missing grant; only then is the app's process looked for.
+    func macSession(_ options: UIOptions, screenRecording: Bool = false, in ctx: WorktreeContext) async throws -> MacUISession? {
+        let name = try supervisor.provisioner.deviceName(options.device, config: ctx.config)
+        guard ctx.config.allDevices[name]?.isMac == true else { return nil }
+        if options.system {
+            throw XcdError(.platformUnsupported, "a Mac has no Home Screen to drive: --system is for Springboard, and the desktop is the person's",
+                           next: "drop --system; the app's own windows, sheets, and menus are in `xcd ui tree`")
+        }
+        if screenLocked() {
+            throw XcdError(.runnerFailed, "the Mac's screen is locked, so the app's windows cannot be read",
+                           next: "ask the user to unlock the Mac, then run the command again")
+        }
+        let api = accessibility()
+        try MacPermissions.read(api: api, hostApp: hostApp()).require(screenRecording: screenRecording)
+        let pid = try await macPid(options, device: name, in: ctx)
+        return MacUISession(device: name, pid: pid, api: api, refFile: MacRefStore.file(ctx.paths, device: name))
+    }
+
+    /// `--bundle` names a running app; otherwise the build record's product must be running from this worktree's path.
+    func macPid(_ options: UIOptions, device: String, in ctx: WorktreeContext) async throws -> Int32 {
+        guard let bundle = options.bundle else {
+            return try await MacAppLookup.runningPid(device: device, runner: supervisor.provisioner.runner, in: ctx)
+        }
+        let running = self.running(bundle)
+        guard running.count == 1, let pid = running.first else {
+            throw XcdError(.usage, running.isEmpty ? "no running app has the bundle id \(bundle)" : "\(running.count) running apps have the bundle id \(bundle)",
+                           next: running.isEmpty ? "start it first, or drop --bundle to drive this worktree's build" : "quit the others, or drop --bundle")
+        }
+        return pid
+    }
+
+    /// Whether `device` (or the default device) is a Mac; false for a name .xcdev.yml does not have.
+    func isMac(_ device: String?, in ctx: WorktreeContext) -> Bool {
+        guard let name = try? supervisor.provisioner.deviceName(device, config: ctx.config) else { return false }
+        return ctx.config.allDevices[name]?.isMac == true
     }
 }

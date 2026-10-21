@@ -83,10 +83,12 @@ extension UIService {
     /// The error for an action that left the app no longer running. The report is looked for by the built app's
     /// process name, for up to three seconds: it is written a moment after the crash. Another `--bundle` has no name
     /// to look for. Only a report from this worktree's simulator counts: another worktree's clone can run the same app.
+    /// On a Mac, only one from the Mac itself: a simulator's app can have the same name.
     func crashed(during what: String, since: Date, _ options: UIOptions, in ctx: WorktreeContext) async -> XcdError {
         let device = try? supervisor.provisioner.deviceName(options.device, config: ctx.config)
         let product = device.flatMap { (try? AppStateStore.load(ctx.paths))?.builds[$0]?.product }
-        let origin = device.flatMap { ctx.state.devices[$0]?.udid }.map(CrashOrigin.simulator) ?? .anywhere
+        let isMac = device.flatMap { ctx.config.allDevices[$0]?.isMac } ?? false
+        let origin: CrashOrigin = isMac ? .mac : device.flatMap { ctx.state.devices[$0]?.udid }.map(CrashOrigin.simulator) ?? .anywhere
         var report: CrashReport?
         if let product, options.bundle == nil || options.bundle == product.bundleId {
             for _ in 0..<6 where report == nil {
@@ -141,6 +143,11 @@ extension UIService {
     }
 
     public func swipe(_ swipe: SwipeOptions, _ options: UIOptions, in ctx: inout WorktreeContext) async throws -> UIActionReport {
+        // The engine would hand --from/--to to `drag`, which on a Mac scrolls the first scroll area.
+        if swipe.from != nil || swipe.to != nil, isMac(options.device, in: ctx) {
+            throw XcdError(.platformUnsupported, "a swipe between points does not reach a background Mac app",
+                           next: "swipe on an element instead: `xcd ui swipe up --on <target>`")
+        }
         let request = try swipeRequest(swipe, options, in: ctx)
         let target = swipe.on ?? "the screen"
         let done = try await act(ActionCall(path: RunnerProtocol.swipePath, request: request, what: "swipe", target: target), options, in: &ctx)
@@ -229,6 +236,10 @@ extension UIService {
 
     /// Puts an image file on the device's pasteboard through the runner: simctl can only copy text.
     public func setPasteboardImage(file: String, device: String?, in ctx: inout WorktreeContext) async throws -> DeviceStateReport {
+        if isMac(device, in: ctx) {
+            throw XcdError(.platformUnsupported, "the Mac's pasteboard is the person's; xcd never reads or writes it",
+                           next: "copy on the Mac yourself, or use a simulator device")
+        }
         guard let image = FileManager.default.contents(atPath: file), !image.isEmpty else {
             throw XcdError(.usage, "\(file) doesn't exist or is empty", next: "pass a PNG or JPEG file")
         }

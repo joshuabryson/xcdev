@@ -19,6 +19,11 @@ enum Disk {
         return below.sorted().filter { isRegularFile(path + "/" + $0) }
     }
 
+    /// The names of what the folder holds, one level down only, in order. Empty when it is not a folder.
+    static func names(in path: String) -> [String] {
+        ((try? FileManager().contentsOfDirectory(atPath: path)) ?? []).sorted()
+    }
+
     /// Whether something is at `path`. A link is followed, so one that leads nowhere is not there.
     static func exists(_ path: String) -> Bool {
         access(path, F_OK) == 0

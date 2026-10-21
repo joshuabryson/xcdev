@@ -282,7 +282,8 @@ import XcdevTestSupport
         #expect(report.failure?.code == .appCrashed && report.failure?.message == "the link was sent, and the app crashed 0.0s later")
     }
 
-    /// UI driving is for iPhone and iPad simulators on iOS 17 or later. Elsewhere the check is skipped, and says why.
+    /// UI driving is for Mac apps and for iPhone and iPad simulators on iOS 17 or later. Elsewhere the check is
+    /// skipped, and says why.
     @Test func theCheckIsSkippedWhereUIDrivingDoesNotWork() async throws {
         defer { base.worktree.remove() }
         var ctx = try context(pids: [500])
@@ -292,7 +293,7 @@ import XcdevTestSupport
         let arrival = looker()
         let svc = base.service(arrival: arrival)
         #expect(svc.arrivalUnavailable(on: "iphone", in: ctx) == "the UI runner needs iOS 17 or later; 'iphone' runs iOS 16.4")
-        #expect(svc.arrivalUnavailable(on: "mac", in: ctx) == "the arrival check needs UI driving, which works on iPhone and iPad simulators only")
+        #expect(svc.arrivalUnavailable(on: "mac", in: ctx) == nil)                 // a Mac app is driven in-process
         ctx.state.devices["iphone"]?.runtimeIdentifier = "com.apple.CoreSimulator.SimRuntime.watchOS-27-0"
         ctx.state.devices["iphone"]?.runtime = "watchOS 27.0"
         #expect(svc.arrivalUnavailable(on: "iphone", in: ctx) == "UI driving supports iPhone and iPad simulators; 'iphone' runs watchOS 27.0")

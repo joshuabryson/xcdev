@@ -195,12 +195,14 @@ import XcdevTestSupport
         #expect(report.check?.outcome == .failed)
     }
 
-    @Test func aScriptRoutesExpectIsSkippedOnAMac() async throws {
+    /// On a Mac too: the engine xcd runs itself looks once the script is done.
+    @Test func aScriptRoutesExpectIsCheckedOnAMacToo() async throws {
         defer { worktree.remove() }
         var ctx = try context()
         let arrival = FakeArrival()
         let report = try await service(arrival: arrival).open(.route(name: "settings/about", values: [:]), OpenOptions(device: "mac"), in: &ctx)
-        #expect(report.check?.outcome == .skipped && arrival.looks.isEmpty && report.failure == nil)
+        #expect(report.check == OpenReport.Check(target: "id:about", outcome: .appeared, seconds: 0.6, reason: nil))
+        #expect(arrival.looks.map(\.device) == ["mac"] && report.failure == nil)
         #expect(report.note == nil)                                                   // xcd leaves the app to the script
     }
 

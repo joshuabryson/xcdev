@@ -32,8 +32,19 @@ enum UIText {
 }
 
 extension UIText {
-    /// The tree's header line and its rows, as `xcd ui tree` and an action with `--tree` print them.
+    static let cappedNote = "note: the tree was capped (5000 nodes or depth 40); the rest is not listed"
+    static let noWindowNext = "next: the app has no window; open one with `xcd open <route>`, or watch it with `xcd launch --show`"
+
+    /// The tree's header line and its rows, as `xcd ui tree` and an action with `--tree` print them. A Mac's tree
+    /// (`hidden` is set) has its own header; one of an app with no window has no rows to explain.
     static func tree(_ tree: TreeResult) -> [String] {
+        var lines = [tree.hidden == nil ? header(tree) : macHeader(tree)] + UIText.rows(tree.elements)
+        if tree.elements.isEmpty, tree.windows != 0 { lines.append("(no elements; `xcd ui tree --all` shows containers and off-screen elements)") }
+        if tree.capped == true { lines.append(cappedNote) }
+        return lines
+    }
+
+    static func header(_ tree: TreeResult) -> String {
         let subject: String
         switch tree.state {
         case "system": subject = "springboard"
@@ -41,11 +52,19 @@ extension UIText {
         case "background": subject = "app \(tree.bundleId ?? "") (background; showing Springboard)"
         default: subject = "app \(tree.bundleId ?? "") (not running; showing Springboard)"
         }
-        let header = "\(subject)  screen \(ScreenRect.number(tree.screen.w))x\(ScreenRect.number(tree.screen.h))pt "
+        return "\(subject)  screen \(ScreenRect.number(tree.screen.w))x\(ScreenRect.number(tree.screen.h))pt "
             + "@\(ScreenRect.number(tree.scale))x  \(tree.orientation)  keyboard: \(tree.keyboard ? "shown" : "hidden")"
-        var lines = [header] + UIText.rows(tree.elements)
-        if tree.elements.isEmpty { lines.append("(no elements; `xcd ui tree --all` shows containers and off-screen elements)") }
-        return lines
+    }
+
+    /// `running (hidden)  window: Probe 900x552 @2x`: the window node itself is structural and not in the default
+    /// tree, so its title is here; the size is the main window's, which frames are measured in.
+    static func macHeader(_ tree: TreeResult) -> String {
+        let state = "running (\(tree.hidden == true ? "hidden" : "visible"))"
+        guard tree.windows != 0 else { return state + "  no windows" }
+        let title = tree.windowTitle.flatMap { $0.isEmpty ? nil : $0 } ?? "untitled"
+        let size = "\(ScreenRect.number(tree.screen.w))x\(ScreenRect.number(tree.screen.h))"
+        let count = tree.windows.flatMap { $0 > 1 ? "  windows: \($0)" : nil } ?? ""
+        return "\(state)  window: \(title) \(size) @\(ScreenRect.number(tree.scale))x" + count
     }
 }
 
@@ -62,6 +81,7 @@ public struct UITreeReport: Reportable {
         if restarted { lines.append(UIText.restartNote) }
         if tree.state == "not_running" { lines.append("next: start the app with `xcd run` or `xcd launch`") }
         if tree.state == "background" { lines.append("next: bring it forward with `xcd launch`, or act on the Home Screen with `--system`") }
+        if tree.hidden != nil, tree.windows == 0 { lines.append(UIText.noWindowNext) }
         return lines.joined(separator: "\n")
     }
 
