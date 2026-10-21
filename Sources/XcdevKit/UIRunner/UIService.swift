@@ -139,6 +139,7 @@ public struct UIService: Sendable {
         if let bundle = options.bundle { return bundle }
         let name = try supervisor.provisioner.deviceName(options.device, config: ctx.config)
         guard let id = try AppStateStore.load(ctx.paths).builds[name]?.product?.bundleId else {
+            if ctx.config.allDevices[name]?.isMac == true { throw MacAppLookup.notBuilt(name) }      // no Home Screen to fall back on
             throw XcdError(.appNotBuilt, "no app has been built for \(name) in this worktree, so xcd doesn't know which app to drive",
                            next: "pass --bundle <id>, use --system for the Home Screen, or build first with `xcd build --device \(name)`")
         }

@@ -132,6 +132,13 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
         }
     }
     public func exitAfterNextPress() { state.withLock { $0.exitAfterPress = true } }
+    /// Adds a node after the first window's other children, as a view that appears does; every token already given stays.
+    public func addToFirstWindow(_ node: FakeNode) {
+        state.withLock { state in
+            guard let window = state.windows.first else { return }
+            state.index(node, parent: window)
+        }
+    }
 
     func node(_ element: AXElement) throws -> FakeNode? {
         try state.withLock { state in

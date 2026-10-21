@@ -80,8 +80,9 @@ import XcdevTestSupport
         #expect(error?.code.exitCode == 3 && !worktree.runner.calls.contains { $0.argv[0] == "ps" })
     }
 
-    /// With the screen locked, a hidden app's windows collapse into a loop, so nothing is read, granted or not.
-    @Test func aLockedScreenIsRefusedBeforeAnythingElse() async throws {
+    /// With the screen locked, a hidden app's windows collapse into a loop, so nothing is read, granted or not. Only
+    /// `--system` is refused before the lock: that is the invocation's fault whatever the Mac's state.
+    @Test func aLockedScreenIsRefusedBeforeThePermissionsAndThePid() async throws {
         defer { worktree.remove() }
         let api = FakeAccessibility(app: Self.app)
         api.setTrusted(false, capture: false)
