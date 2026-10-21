@@ -39,6 +39,17 @@ import XcdevTestSupport
         #expect(notes.all == ["shown and brought to the front at your request"])
     }
 
+    /// With `--show` the launch drops `-g -j` and adds nothing; the preset's own arguments pass through.
+    @Test func aShownLaunchAddsNoArgumentsOfItsOwn() async throws {
+        stubRunning([7])
+        _ = try await host(show: true).launch(product, arguments: [], environment: [:], logFile: "/tmp/x/app.log")
+        let bare = try #require(fake.calls.first { $0.executable == "/usr/bin/open" })
+        #expect(!bare.arguments.contains("--args"))
+        _ = try await host(show: true).launch(product, arguments: ["-flag"], environment: [:], logFile: "/tmp/x/app.log")
+        let preset = try #require(fake.calls.last { $0.executable == "/usr/bin/open" })
+        #expect(Array(preset.arguments.drop { $0 != "--args" }) == ["--args", "-flag"])
+    }
+
     @Test func anAppNapArgumentFromThePresetIsNotDoubled() async throws {
         stubRunning([7])
         _ = try await host().launch(product, arguments: ["-NSAppSleepDisabled", "NO"], environment: [:], logFile: "/tmp/x/app.log")

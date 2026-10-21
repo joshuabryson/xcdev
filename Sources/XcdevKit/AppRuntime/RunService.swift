@@ -91,6 +91,7 @@ public struct RunService: Sendable {
     public func run(_ build: BuildOptions, noBuild: Bool, launch: LaunchOptions,
                     in ctx: inout WorktreeContext) async throws -> RunReport {
         let plan = try launch.plan(config: ctx.config)
+        try requireMacForShow(build.device, launch.show, in: ctx)
         var buildReport: BuildReport?
         if !noBuild {
             let report = try await builds.buildNotingSetup(build, in: &ctx)
@@ -105,6 +106,7 @@ public struct RunService: Sendable {
     /// Launch the already-installed build (booting the clone if needed) and watch for a crash.
     public func launch(device: String?, options: LaunchOptions, in ctx: inout WorktreeContext) async throws -> RunReport {
         let plan = try options.plan(config: ctx.config)
+        try requireMacForShow(device, options.show, in: ctx)
         let app = try await prepare(device, boot: true, show: options.show, in: &ctx)
         return try await start(app, plan, build: nil, in: &ctx)
     }
@@ -152,14 +154,21 @@ public struct RunService: Sendable {
         return product
     }
 
+    /// `--show` is for a Mac app: refused before any build or boot, with the device named as `prepare` names it.
+    func requireMacForShow(_ device: String?, _ show: Bool, in ctx: WorktreeContext) throws {
+        guard show else { return }
+        let container = try ProjectContainer.resolve(config: ctx.config, worktreeRoot: ctx.location.worktreeRoot)
+        let name = try builds.provisioner.targetName(device, container: container, config: ctx.config)
+        guard ctx.config.allDevices[name]?.isMac == true else {
+            throw XcdError(.usage, "--show is for a Mac app", next: "a simulator is shown with `xcd sim open`")
+        }
+    }
+
     /// The latest build's app for `device` and its host, cloning the simulator on first use.
     func prepare(_ device: String?, boot: Bool, show: Bool = false,
                  in ctx: inout WorktreeContext) async throws -> PreparedApp {
         let container = try ProjectContainer.resolve(config: ctx.config, worktreeRoot: ctx.location.worktreeRoot)
         let name = try builds.provisioner.targetName(device, container: container, config: ctx.config)
-        if show, ctx.config.allDevices[name]?.isMac != true {
-            throw XcdError(.usage, "--show is for a Mac app", next: "a simulator is shown with `xcd sim open`")
-        }
         let product = try Self.product(for: name, requested: device, in: ctx)
         let target = try await builds.provisioner.buildTarget(device, container: container, in: &ctx)
         guard let clone = target.device else {

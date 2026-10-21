@@ -245,6 +245,18 @@ import XcdevTestSupport
         #expect(!fake.calls.contains { $0.arguments.contains("boot") })
     }
 
+    /// `xcd run --show` on a simulator is refused before the build, not after it.
+    @Test func runWithShowOnASimulatorIsRefusedBeforeAnyBuildOrBoot() async throws {
+        defer { worktree.remove() }
+        _ = try setUp()
+        var ctx = try context()
+        let error = await #expect(throws: XcdError.self) {
+            try await service().run(BuildOptions(device: "iphone"), noBuild: false, launch: LaunchOptions(show: true), in: &ctx)
+        }
+        #expect(error?.code == .usage && error?.next == "a simulator is shown with `xcd sim open`")
+        #expect(!fake.calls.contains { $0.argv.contains("xcodebuild") || $0.arguments.contains("boot") })
+    }
+
     @Test func macRunStopsTheRunningCopyBeforeLaunching() async throws {
         defer { worktree.remove() }
         _ = try setUp()

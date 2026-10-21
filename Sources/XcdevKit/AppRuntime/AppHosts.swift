@@ -135,7 +135,7 @@ public struct MacAppHost: AppHost {
         for (key, value) in env.sorted(by: { $0.key < $1.key }) { args += ["--env", "\(key)=\(value)"] }
         // With a link, the app is named by `-a` and the link is what `open` opens with it.
         args += link.map { ["-a", product.path, $0] } ?? [product.path]
-        let arguments = Self.withAppNapOff(arguments)
+        let arguments = show ? arguments : Self.withAppNapOff(arguments)      // a shown launch adds nothing
         if !arguments.isEmpty { args += ["--args"] + arguments }
         try await runner.runChecked(Invocation("/usr/bin/open", args), next: "read the app log: \(logFile)")
         for _ in 0..<20 {
