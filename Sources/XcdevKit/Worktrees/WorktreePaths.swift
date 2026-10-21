@@ -29,6 +29,8 @@ public struct WorktreePaths: Sendable, Equatable {
     public var partialSourcePackages: String { sourcePackages + ".partial" }
     public var logs: String { stateDirectory + "/logs" }
     public var results: String { stateDirectory + "/results" }
+    /// The re-signed copies of Mac apps that `isolation: suffix` launches, one `<App>.app` each.
+    public var macCopies: String { stateDirectory + "/mac" }
 
     public var appStateFile: String { stateDirectory + "/app.json" }
 

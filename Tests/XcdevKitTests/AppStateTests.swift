@@ -51,4 +51,25 @@ import Testing
         #expect(paths.newArtifact(in: paths.logs, kind: "build", ext: "log", now: now)
                 == dir + "/.xcdev/logs/20260930-211205-build-2.log")
     }
+
+    @Test func isolatedProductLivesUnderXcdevMacWithTheSuffixedId() {
+        let built = AppProduct(path: "/w/.xcdev/DerivedData/Build/Products/Debug/Mac.app", bundleId: "dev.x.Mac",
+                               executableName: "Mac", platform: "macosx")
+        let copy = built.isolated(worktreeName: "Feature/Login", in: WorktreePaths(root: "/w"))
+        #expect(copy == AppProduct(path: "/w/.xcdev/mac/Mac.app", bundleId: "dev.x.Mac.xcd-feature-login",
+                                   executableName: "Mac", platform: "macosx"))
+        #expect(copy.executablePath == "/w/.xcdev/mac/Mac.app/Contents/MacOS/Mac")
+        #expect(WorktreePaths(root: "/w").macCopies == "/w/.xcdev/mac")
+    }
+
+    @Test func modificationDateIsTheFilesAndNilWhenNothingIsThere() throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let file = dir + "/Mac"
+        FileManager.default.createFile(atPath: file, contents: Data("x".utf8))
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: file)
+        #expect(Disk.modificationDate(file) == date)
+        #expect(Disk.modificationDate(dir + "/missing") == nil)
+    }
 }

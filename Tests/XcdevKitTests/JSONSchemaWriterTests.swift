@@ -14,9 +14,11 @@ import Testing
         let devices = try #require(properties["devices"] as? [String: Any])
         let device = try #require(devices["additionalProperties"] as? [String: Any])
         let deviceProps = try #require(device["properties"] as? [String: Any])
-        #expect(deviceProps.keys.sorted() == ["pairWith", "platform", "runtime", "type"])
+        #expect(deviceProps.keys.sorted() == ["isolation", "pairWith", "platform", "runtime", "type"])
         let platform = try #require(deviceProps["platform"] as? [String: Any])
         #expect(platform["enum"] as? [String] == ["macOS"])
+        let isolation = try #require(deviceProps["isolation"] as? [String: Any])
+        #expect(isolation["enum"] as? [String] == ["shared", "suffix"])
     }
 
     @Test func everyNodeHasADescription() throws {

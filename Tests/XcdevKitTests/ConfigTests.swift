@@ -244,4 +244,32 @@ import Testing
         }
         #expect(error?.details == ["ui.media.dir: must not be empty"])
     }
+
+    @Test func isolationDecodesOnAMacDeviceAndDefaultsToShared() throws {
+        let config = try ConfigLoader.parse(main: """
+        version: 1
+        project: A.xcodeproj
+        devices:
+          mac: { platform: macOS, isolation: suffix }
+          other: { platform: macOS }
+        """)
+        #expect(config.allDevices["mac"]?.isolation == "suffix" && config.allDevices["mac"]?.isolationMode == .suffix)
+        #expect(config.allDevices["other"]?.isolation == nil && config.allDevices["other"]?.isolationMode == .sharedData)
+        #expect(DeviceSpec(platform: "macOS", isolation: "shared").isolationMode == .sharedData)
+        #expect(IsolationMode.allCases.map(\.rawValue) == ["shared", "suffix"])
+    }
+
+    @Test func isolationOnASimulatorDeviceIsInvalid() {
+        let yaml = "version: 1\nproject: A.xcodeproj\ndevices:\n  iphone: { type: \"iPhone 18 Pro\", isolation: suffix }\n"
+        let error = #expect(throws: XcdError.self) { try ConfigLoader.parse(main: yaml) }
+        #expect(error?.code == .configInvalid)
+        #expect(error?.details == ["devices.iphone.isolation: is only for a Mac device (platform: macOS)"])
+    }
+
+    @Test func anUnknownIsolationNamesTheAllowedValues() {
+        let yaml = "version: 1\nproject: A.xcodeproj\ndevices:\n  mac: { platform: macOS, isolation: sometimes }\n"
+        let error = #expect(throws: XcdError.self) { try ConfigLoader.parse(main: yaml) }
+        #expect(error?.code == .configInvalid)
+        #expect(error?.details == ["devices.mac.isolation: must be one of: shared, suffix"])
+    }
 }

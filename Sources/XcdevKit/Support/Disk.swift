@@ -44,4 +44,9 @@ enum Disk {
     static func isExecutable(_ path: String) -> Bool {
         access(path, X_OK) == 0 && isRegularFile(URL(fileURLWithPath: path).resolvingSymlinksInPath().path)
     }
+
+    /// When the file at `path` last changed, or nil when nothing is there.
+    static func modificationDate(_ path: String) -> Date? {
+        (try? FileManager().attributesOfItem(atPath: path))?[.modificationDate] as? Date
+    }
 }

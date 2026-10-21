@@ -61,4 +61,16 @@ import Yams
         #expect(try ConfigExplainer.explain("ui.record.maxDuration").defaultValue == "10m")
         #expect(!ConfigSchema.reservedTopLevelKeys.contains("ui"))
     }
+
+    @Test func isolationIsExplainedWithItsValuesAndItsDefault() throws {
+        #expect(try ConfigExplainReport(key: "devices.mac.isolation").text == """
+        devices.<name>.isolation (string)
+        Mac apps only. shared (the default) runs the built app with its real bundle id, so every worktree's copy and the user's installed copy share its data; suffix launches a re-signed copy whose bundle id ends in .xcd-<worktree>, so each worktree keeps its own data, for an app that needs no provisioning profile.
+        allowed: shared, suffix
+        default: shared
+        example:
+          devices:
+            mac: { platform: macOS, isolation: suffix }
+        """)
+    }
 }

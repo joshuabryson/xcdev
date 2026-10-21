@@ -99,6 +99,7 @@ private struct FailedSample: Reportable {
         #expect(ErrorCode.worktreeDirty.exitCode == 2)
         #expect(ErrorCode.runtimeMissing.exitCode == 3)
         #expect(ErrorCode.timeout.exitCode == 3)
+        #expect(ErrorCode.appInUse.exitCode == 3)
     }
 }
 
@@ -114,5 +115,7 @@ private struct FailedSample: Reportable {
         #expect(Set(report.errors.map(\.code)).count == report.errors.count)
         #expect(report.errors.allSatisfy { !$0.summary.isEmpty })
         #expect(report.text.contains("\nhook_failed             1  A hook from .xcdev.yml exited non-zero; the error names the hook and its log.\n"))
+        #expect(report.text.contains("\napp_in_use              3  A Mac launch under isolation: shared found the same app running from another worktree, which would share its data; the error names that worktree. isolation: suffix gives each worktree its own copy.\n"))
+        #expect(ErrorCode.permissionMissing.summary.contains("or `xcd doctor --grant-…` at the user's word"))
     }
 }

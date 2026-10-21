@@ -74,6 +74,7 @@ public enum ConfigLoader {
         if spec.isMac && spec.type != nil {
             issues.append(ConfigIssue(path: "devices.\(name)", message: "set either type or platform: macOS, not both"))
         }
+        issues += isolationIssues(name, spec)
         guard let partner = spec.pairWith else { return issues }
         let path = "devices.\(name).pairWith"
         if devices[partner] == nil || partner == name {
@@ -85,6 +86,12 @@ public enum ConfigLoader {
             issues.append(ConfigIssue(path: path, message: "'\(partner)' also has pairWith; pairing chains are not supported"))
         }
         return issues
+    }
+
+    /// `isolation` is a Mac device's key; an unknown value is the schema's error.
+    static func isolationIssues(_ name: String, _ spec: DeviceSpec) -> [ConfigIssue] {
+        guard spec.isolation != nil, !spec.isMac else { return [] }
+        return [ConfigIssue(path: "devices.\(name).isolation", message: "is only for a Mac device (platform: macOS)")]
     }
 
     /// `logs:` and `ui:`.

@@ -19,6 +19,16 @@ public struct AppProduct: Codable, Sendable, Equatable {
     public var executablePath: String { isMac ? path + "/Contents/MacOS/" + executableName : path + "/" + executableName }
 }
 
+extension AppProduct {
+    /// This worktree's copy of a Mac product under `isolation: suffix`: `.xcdev/mac/<App>.app`, the bundle
+    /// id suffixed with the worktree's slug, and the product's executable name, so logs and crash reports still match.
+    public func isolated(worktreeName: String, in paths: WorktreePaths) -> AppProduct {
+        AppProduct(path: paths.macCopies + "/" + (path as NSString).lastPathComponent,
+                   bundleId: MacBundleSlug.bundleId(bundleId, worktreeName: worktreeName),
+                   executableName: executableName, platform: platform)
+    }
+}
+
 public struct BuildRecord: Codable, Sendable, Equatable {
     public var scheme: String
     public var configuration: String?

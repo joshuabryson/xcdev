@@ -69,6 +69,8 @@ public enum ConfigSchema {
                         example: "devices:\n  iphone: { type: \"iPhone 18 Pro\", runtime: \"iOS 26.5\" }"),
             SchemaField("platform", .string("Set to macOS for Mac apps. They build and run natively and have no simulator.", allowed: ["macOS"]),
                         example: "devices:\n  mac: { platform: macOS }"),
+            SchemaField("isolation", .string("Mac apps only. shared (the default) runs the built app with its real bundle id, so every worktree's copy and the user's installed copy share its data; suffix launches a re-signed copy whose bundle id ends in .xcd-<worktree>, so each worktree keeps its own data, for an app that needs no provisioning profile.", allowed: IsolationMode.allCases.map(\.rawValue)),
+                        default: "shared", example: "devices:\n  mac: { platform: macOS, isolation: suffix }"),
             SchemaField("pairWith", .string("For watch devices: the phone device (a key under devices) to pair with."),
                         example: "devices:\n  watch: { type: \"Apple Watch Series 11 (46mm)\", pairWith: iphone }"),
         ])), example: "devices:\n  iphone: { type: \"iPhone 18 Pro\", runtime: latest }\n  mac: { platform: macOS }"),

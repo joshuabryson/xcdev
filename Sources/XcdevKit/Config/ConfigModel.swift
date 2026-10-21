@@ -68,16 +68,28 @@ public struct DeviceSpec: Codable, Sendable, Equatable {
     public var runtime: String?
     public var platform: String?
     public var pairWith: String?
+    /// Mac devices only: "shared" (the default) or "suffix". Kept as written, so an unknown
+    /// value is the schema's error rather than a decoding one.
+    public var isolation: String?
 
-    public init(type: String? = nil, runtime: String? = nil, platform: String? = nil, pairWith: String? = nil) {
+    public init(type: String? = nil, runtime: String? = nil, platform: String? = nil, pairWith: String? = nil,
+                isolation: String? = nil) {
         self.type = type
         self.runtime = runtime
         self.platform = platform
         self.pairWith = pairWith
+        self.isolation = isolation
     }
 
     public var isMac: Bool { platform == "macOS" }
+    /// How a Mac launch keeps this worktree's data apart: `shared` when the key is absent.
+    public var isolationMode: IsolationMode { IsolationMode(rawValue: isolation ?? "shared") ?? .sharedData }
 }
+
+/// `devices.<name>.isolation`: `shared` runs the built app with its real bundle id; `suffix`
+/// runs a re-signed copy whose bundle id ends in `.xcd-<worktree>`, so each worktree keeps its own data. The case for
+/// `shared` is `sharedData`: linters read a dot followed by the bare word as singleton access.
+public enum IsolationMode: String, Codable, Sendable, Equatable, CaseIterable { case sharedData = "shared", suffix }
 
 public struct LaunchPreset: Codable, Sendable, Equatable {
     public var args: [String]?
