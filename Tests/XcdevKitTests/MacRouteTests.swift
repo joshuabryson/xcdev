@@ -183,6 +183,22 @@ import XcdevTestSupport
         #expect(apps.queries.isEmpty && report.note == "isolation: dev.x.Mac.xcd-feat")
     }
 
+    /// Under `isolation: suffix` the scheme check reads the build's Info.plist: before a launch has made the copy, the
+    /// copy has none, and a check on it would let any link through. A scheme the build does not register is refused
+    /// before anything is copied, signed, or started.
+    @Test func aSchemeTheBuildDoesNotRegisterIsRefusedBeforeAnyCopyIsMade() async throws {
+        defer { worktree.remove() }
+        var ctx = try worktree.context(Self.suffixConfig, container: "App.xcodeproj")
+        let (isolation, _) = try suffixed(ctx)
+        let refused = await #expect(throws: XcdError.self) {
+            _ = try await service(isolation: isolation).open(.url("other://x"), OpenOptions(device: "mac"), in: &ctx)
+        }
+        #expect(refused?.message == "dev.x.Mac does not register the scheme 'other'" && refused?.code == .usage)
+        // `ditto` runs for real and is not listed: the missing copies folder shows it never ran.
+        #expect(!fake.calls.contains { ["codesign", "open", "kill"].contains($0.argv[0]) })
+        #expect(!FileManager.default.fileExists(atPath: ctx.paths.macCopies))
+    }
+
     /// `open -a` would hand the app a link whose scheme it does not register, which no real link could do.
     @Test func aSchemeTheMacAppDoesNotRegisterIsRefused() async throws {
         defer { worktree.remove() }
