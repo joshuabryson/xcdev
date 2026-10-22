@@ -86,7 +86,7 @@ public enum ErrorCode: String, Codable, Sendable, CaseIterable {
         case .runnerFailed: return "The UI runner inside the simulator, or the Mac driver, could not be built or started, or stopped answering."
         case .postureFailed: return "A foldable's hinge or rotation could not be set: no route reached the simulator's pose pipeline, or the simulator never showed the change; details name the step."
         case .permissionMissing: return "A Mac `ui` command needs Accessibility (every command) or Screen Recording (screenshot and record) for the app that runs xcd, or `xcd doctor --grant-…` ended without the grant; the error names the app, the System Settings pane, and the grant command."
-        case .appInUse: return "A Mac launch under isolation: shared found the same app running from another worktree, which would share its data; the error names that worktree. isolation: suffix gives each worktree its own copy."
+        case .appInUse: return "A Mac launch found the same app running from another worktree: under isolation: shared the same bundle id (both would share its data), under suffix a copy whose worktree name slugs to the same suffix; the error names that worktree. isolation: suffix gives each worktree its own copy, and worktrees whose names slug alike need renaming."
         case .hookFailed: return "A hook from .xcdev.yml exited non-zero; the error names the hook and its log."
         case .routeFailed: return "A route's script failed, or its link did not start the app."
         case .lintFailed: return "`xcd lint` showed a finding the linter marks as an error, or the project's lint command exited non-zero."

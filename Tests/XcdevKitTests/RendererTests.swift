@@ -115,7 +115,7 @@ private struct FailedSample: Reportable {
         #expect(Set(report.errors.map(\.code)).count == report.errors.count)
         #expect(report.errors.allSatisfy { !$0.summary.isEmpty })
         #expect(report.text.contains("\nhook_failed             1  A hook from .xcdev.yml exited non-zero; the error names the hook and its log.\n"))
-        #expect(report.text.contains("\napp_in_use              3  A Mac launch under isolation: shared found the same app running from another worktree, which would share its data; the error names that worktree. isolation: suffix gives each worktree its own copy.\n"))
+        #expect(report.text.contains("\napp_in_use              3  A Mac launch found the same app running from another worktree: under isolation: shared the same bundle id (both would share its data), under suffix a copy whose worktree name slugs to the same suffix; the error names that worktree. isolation: suffix gives each worktree its own copy, and worktrees whose names slug alike need renaming.\n"))
         #expect(ErrorCode.permissionMissing.summary.contains("the error names the app, the System Settings pane, and the grant command."))
     }
 }
