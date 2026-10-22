@@ -28,21 +28,27 @@ public protocol AppHost: Sendable {
 struct ProcessLookup: Sendable {
     let runner: any ProcessRunning
 
-    /// Pids whose executable is `path`. `ps -o comm` prints the full executable path on macOS. Paths are compared in
-    /// canonical form, so a link or a `/private` prefix in either one does not hide a match. `ps` answers in a
-    /// twentieth of a second, but on a saturated Mac it has taken over ten, so it gets thirty.
+    /// Pids whose executable is `path`.
     func pids(of path: String) async throws -> Set<Int32> {
+        try await pids(of: [path])[path] ?? []
+    }
+
+    /// Pids whose executable is one of `paths`, by the path as given, from one listing; a path with none has no entry.
+    /// `ps -o comm` prints the full executable path on macOS. Paths are compared in canonical form, so a link or a
+    /// `/private` prefix in either one does not hide a match. `ps` answers in a twentieth of a second, but on a
+    /// saturated Mac it has taken over ten, so it gets thirty.
+    func pids(of paths: [String]) async throws -> [String: Set<Int32>] {
         let out = try await runner.runChecked(Invocation("/bin/ps", ["-axo", "pid=,comm="], timeout: .seconds(30)))
-        let wanted = Paths.canonical(path)
-        let name = (path as NSString).lastPathComponent
-        var pids = Set<Int32>()
+        let wanted = Dictionary(paths.map { (Paths.canonical($0), $0) }) { first, _ in first }
+        let names = Set(paths.map { ($0 as NSString).lastPathComponent })
+        var pids: [String: Set<Int32>] = [:]
         for line in out.stdoutString.split(separator: "\n") {
             let trimmed = line.drop { $0 == " " }
             guard let space = trimmed.firstIndex(of: " "), let pid = Int32(trimmed[..<space]) else { continue }
             let command = String(trimmed[trimmed.index(after: space)...])
             // Most processes are something else: compare names before resolving a path.
-            guard command.hasSuffix(name), Paths.canonical(command) == wanted else { continue }
-            pids.insert(pid)
+            guard names.contains(where: { command.hasSuffix($0) }), let path = wanted[Paths.canonical(command)] else { continue }
+            pids[path, default: []].insert(pid)
         }
         return pids
     }
@@ -146,11 +152,17 @@ public struct MacAppHost: AppHost {
     }
 
     public func terminate(_ product: AppProduct) async throws -> Bool {
-        let running = try await lookup.pids(of: product.executablePath).sorted()
-        for pid in running {
+        try await !terminate([product]).isEmpty
+    }
+
+    /// Stops every process running from one of `products`, found in one look at the process list: the products that
+    /// had one, in the order given. Each process is asked to stop (SIGTERM) and not waited for.
+    func terminate(_ products: [AppProduct]) async throws -> [AppProduct] {
+        let running = try await lookup.pids(of: products.map(\.executablePath))
+        for pid in running.values.reduce(into: Set<Int32>(), { $0.formUnion($1) }).sorted() {
             _ = try await runner.run(Invocation("/bin/kill", ["-TERM", String(pid)]))
         }
-        return !running.isEmpty
+        return products.filter { running[$0.executablePath] != nil }
     }
 
     public func runningPid(_ product: AppProduct) async throws -> Int32? {

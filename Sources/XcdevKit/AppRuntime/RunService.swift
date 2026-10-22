@@ -150,9 +150,9 @@ public struct RunService: Sendable {
 
     public func terminate(device: String?, in ctx: inout WorktreeContext) async throws -> AppActionReport {
         let app = try await prepare(device, boot: false, in: &ctx)
-        let stopped = try await app.host.terminate(app.product)
+        let (stopped, note) = try await stop(app, in: ctx)
         return AppActionReport(action: stopped ? "terminated" : "not running", bundleId: app.product.bundleId,
-                               target: app.target.name, note: nil, worktree: ctx.state.name)
+                               target: app.target.name, note: note, worktree: ctx.state.name)
     }
 
     /// The latest build's app for this target as every command sees it: under `isolation: suffix`, this worktree's
@@ -199,12 +199,14 @@ public struct RunService: Sendable {
     }
 
     /// Starts the app, replacing a running copy, with its output going to a new log. Then records the launch and
-    /// runs the post-launch hook (`settle`). On a Mac, the isolation's launch step comes once this worktree's running
-    /// copy is stopped and its refs are forgotten: under `suffix` the copy is made or refreshed, so a running copy is
-    /// never rewritten under its process; under `shared` another worktree's running copy is refused.
+    /// runs the post-launch hook (`settle`). On a Mac, the isolation's launch step comes once this worktree's processes
+    /// at the build's path and the copy's have been asked to stop (SIGTERM, not awaited) and its refs are forgotten:
+    /// under `suffix` the copy is made or refreshed and replaced by rename, so a process still exiting keeps its unlinked
+    /// files, and a worktree whose name slugs alike is refused; under `shared` another worktree's running copy is
+    /// refused.
     func begin(_ app: PreparedApp, _ plan: LaunchPlan, in ctx: inout WorktreeContext) async throws -> StartedApp {
         // `simctl launch --terminate-running-process` replaces a running copy; `open -n` would start a second one.
-        if app.target.device == nil, try await app.host.terminate(app.product) {
+        if app.target.device == nil, try await !stopOwnProcesses(app, in: ctx).isEmpty {
             builds.progress("stopped the running \(app.product.executableName)")
         }
         if app.target.device == nil {
@@ -328,5 +330,26 @@ extension RunService {
         } catch let error as XcdError where error.code == .appNotBuilt || error.code == .usage {
             return nil
         }
+    }
+}
+
+/// How `begin` and `terminate` stop this worktree's own app.
+extension RunService {
+    /// Stops this worktree's processes of a Mac app at both of its places, the build's and the `isolation: suffix`
+    /// copy's (`.xcdev/mac`), whatever the mode: a switch of the device's isolation while the app runs leaves the other
+    /// mode's process up, and both places lie under this worktree, so neither is another's. Each process is asked to
+    /// stop (SIGTERM) and not waited for. The products that had one.
+    func stopOwnProcesses(_ app: PreparedApp, in ctx: WorktreeContext) async throws -> [AppProduct] {
+        let copy = app.built.isolated(worktreeName: ctx.state.name, in: ctx.paths)
+        return try await MacAppHost(runner: builds.runner, sleep: sleep).terminate([app.built, copy])
+    }
+
+    /// What `terminate` stops: a simulator's app, or on a Mac both of this worktree's places, with a note naming the
+    /// process stopped where the current mode does not run the app.
+    func stop(_ app: PreparedApp, in ctx: WorktreeContext) async throws -> (stopped: Bool, note: String?) {
+        guard app.target.device == nil else { return (try await app.host.terminate(app.product), nil) }
+        let stopped = try await stopOwnProcesses(app, in: ctx)
+        let other = stopped.first { $0.path != app.product.path }
+        return (!stopped.isEmpty, other.map { "stopped \($0.bundleId) at \($0.path), started under the device's other isolation mode" })
     }
 }

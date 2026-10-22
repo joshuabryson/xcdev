@@ -134,14 +134,46 @@ import XcdevTestSupport
         #expect(try await service.prepareLaunch(built: built, device: "mac", in: ctx) == built)
     }
 
-    /// Each worktree's copy has its own identifier, so another worktree's copy running is no reason to refuse.
-    @Test func prepareLaunchSkipsTheGuardUnderSuffix() async throws {
+    /// Each worktree's copy has its own identifier, so another worktree's shared build running is no reason to refuse:
+    /// the guard asks only for the copy's id.
+    @Test func anotherWorktreesSharedBuildNeverBlocksUnderSuffix() async throws {
         defer { worktree.remove() }
         let ctx = try worktree.context(Self.yaml("suffix"))
         let built = Self.macBuild(ctx)
         let service = try Self.copying(built.path, on: fake, apps: apps)
         apps.set([MacRunningCopy(pid: 300, executablePath: Self.betaCopy)], for: "dev.x.Mac")
         let product = try await service.prepareLaunch(built: built, device: "mac", in: ctx)
-        #expect(product.bundleId == "dev.x.Mac.xcd-feat" && apps.queries.isEmpty)
+        #expect(product.bundleId == "dev.x.Mac.xcd-feat" && apps.queries == ["dev.x.Mac.xcd-feat"])
+    }
+
+    /// Worktree names that differ only in characters the slug joins (`feature_login`, `feature-login`) get one suffix,
+    /// so one id and one container: the other's running copy of that id is `app_in_use`. The copy is made first, so a
+    /// refused product still copies nothing and a blocked launch leaves a fresh copy.
+    @Test func aSuffixLaunchBesideAWorktreeWhoseNameSlugsAlikeIsAppInUse() async throws {
+        defer { worktree.remove() }
+        var ctx = try worktree.context(Self.yaml("suffix"))
+        ctx.state.name = "feature-login"
+        let built = Self.macBuild(ctx)
+        let service = try Self.copying(built.path, on: fake, apps: apps)
+        let other = "/Users/u/App.worktrees/feature_login/.xcdev/mac/Mac.app/Contents/MacOS/Mac"
+        apps.set([MacRunningCopy(pid: 310, executablePath: other)], for: "dev.x.Mac.xcd-feature-login")
+        let error = await #expect(throws: XcdError.self) { try await service.prepareLaunch(built: built, device: "mac", in: ctx) }
+        #expect(error?.code == .appInUse && apps.queries == ["dev.x.Mac.xcd-feature-login"])
+        #expect(error?.message.hasPrefix("dev.x.Mac.xcd-feature-login is already running from the worktree at "
+                                         + "/Users/u/App.worktrees/feature_login (pid 310); both worktrees slug to `.xcd-feature-login`") == true)
+        #expect(error?.next == "rename one worktree so its slug differs, or run `xcd terminate --device mac` in that worktree")
+        #expect(fake.calls.contains { $0.argv[0] == "codesign" })
+    }
+
+    /// This worktree's own copy never blocks its launch: `begin` has just asked it to stop.
+    @Test func thisWorktreesOwnRunningCopyNeverBlocksASuffixLaunch() async throws {
+        defer { worktree.remove() }
+        let ctx = try worktree.context(Self.yaml("suffix"))
+        let built = Self.macBuild(ctx)
+        let service = try Self.copying(built.path, on: fake, apps: apps)
+        let own = ctx.paths.macCopies + "/Mac.app/Contents/MacOS/Mac"
+        apps.set([MacRunningCopy(pid: 320, executablePath: own)], for: "dev.x.Mac.xcd-feat")
+        let product = try await service.prepareLaunch(built: built, device: "mac", in: ctx)
+        #expect(product.bundleId == "dev.x.Mac.xcd-feat" && apps.queries == ["dev.x.Mac.xcd-feat"])
     }
 }

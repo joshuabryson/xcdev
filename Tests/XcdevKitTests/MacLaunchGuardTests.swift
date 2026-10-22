@@ -19,7 +19,7 @@ import XcdevTestSupport
     }
 
     /// This worktree's build, and its `isolation: suffix` copy left running from before a config change, are its own:
-    /// `begin` stops the first by path, as today.
+    /// `begin` stops both by path.
     @Test func theWorktreesOwnCopyNeverBlocks() {
         let own = [Self.running(41, Self.betaApp), Self.running(42, Self.beta + "/.xcdev/mac/App.app")]
         #expect(MacLaunchGuard.blocker(among: own, worktreeRoot: Self.beta) == nil)
@@ -67,6 +67,28 @@ import XcdevTestSupport
         #expect(apps.queries == ["dev.x.App"])
         apps.set([Self.running(41, product.path)], for: "dev.x.App")        // this worktree's own copy
         #expect(throws: Never.self) { try MacLaunchGuard.check(product: product, device: "mac", in: ctx, apps: apps) }
+    }
+
+    /// Under `isolation: suffix` only a worktree whose name slugs alike runs a copy of this worktree's copy id: the
+    /// error names the suffix the two share and the rename that parts them. This worktree's own copy and
+    /// one outside every `.xcdev/` never block.
+    @Test func theSuffixErrorNamesTheSharedSlugAndTheRename() throws {
+        let worktree = FakeWorktree(prefix: "xcd guard")
+        defer { worktree.remove() }
+        var ctx = try worktree.context(MacIsolationServiceTests.yaml("suffix"))
+        ctx.state.name = "Feature.Login"
+        let copy = AppProduct(path: ctx.paths.macCopies + "/App.app", bundleId: "dev.x.App.xcd-feature-login",
+                              executableName: "App", platform: "macosx")
+        let apps = FakeRunningApps()
+        apps.set([Self.running(42, copy.path), Self.running(43, "/Applications/App.app"),
+                  Self.running(41, "/Users/u/P.worktrees/feature_login/.xcdev/mac/App.app")], for: copy.bundleId)
+        let error = #expect(throws: XcdError.self) { try MacLaunchGuard.checkSuffix(copy: copy, device: "mac", in: ctx, apps: apps) }
+        #expect(error?.code == .appInUse && apps.queries == [copy.bundleId])
+        #expect(error?.message == "dev.x.App.xcd-feature-login is already running from the worktree at /Users/u/P.worktrees/feature_login "
+                    + "(pid 41); both worktrees slug to `.xcd-feature-login`, so under isolation: suffix they would share its data")
+        #expect(error?.next == "rename one worktree so its slug differs, or run `xcd terminate --device mac` in that worktree")
+        apps.set([Self.running(42, copy.path), Self.running(43, "/Applications/App.app")], for: copy.bundleId)
+        #expect(throws: Never.self) { try MacLaunchGuard.checkSuffix(copy: copy, device: "mac", in: ctx, apps: apps) }
     }
 
     /// The same worktree reached through a link is still the same worktree.

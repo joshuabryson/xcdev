@@ -434,6 +434,48 @@ import XcdevTestSupport
         #expect(!FileManager.default.fileExists(atPath: ctx.paths.macCopies) && !fake.calls.contains { $0.argv[0] == "codesign" })
     }
 
+    /// A switch from `suffix` to `shared` while the copy runs leaves its process up: a shared launch stops it with the
+    /// build's, since both lie under this worktree, before it starts the build.
+    @Test func aSharedLaunchAlsoStopsTheCopyLeftRunningFromSuffix() async throws {
+        defer { worktree.remove() }
+        _ = try setUp()
+        var ctx = try context()
+        let (svc, built) = try isolatedService(ctx)
+        let copyExe = ctx.paths.macCopies + "/Mac.app/Contents/MacOS/Mac"
+        let killed = Counter()
+        fake.stub(["kill"]) { _ in killed.increment(); return ProcessOutput() }
+        fake.stub(["ps"]) { _ in
+            // The copy (60) runs until it is sent SIGTERM; then `open` starts 77 from the build.
+            var out = killed.value == 0 ? "  60 \(copyExe)\n" : ""
+            if fake.calls.contains(where: { $0.argv[0] == "open" }) { out += "  77 \(built.executablePath)\n" }
+            return ProcessOutput(stdout: out)
+        }
+        fake.stub(["open"])
+        let report = try await svc.launch(device: "mac", options: LaunchOptions(), in: &ctx)
+        #expect(report.pid == 77 && report.bundleId == "dev.x.Mac")
+        let kill = try #require(fake.calls.firstIndex { $0.argv[0] == "kill" })
+        let open = try #require(fake.calls.firstIndex { $0.argv[0] == "open" })
+        #expect(fake.calls[kill].arguments == ["-TERM", "60"] && kill < open && fake.calls[open].arguments.contains(built.path))
+    }
+
+    /// A switch from `shared` to `suffix` while the build runs leaves its process up: `terminate` stops it with the
+    /// copy's, from one look at the process list, and its note names it.
+    @Test func terminateUnderSuffixAlsoStopsTheBuildLeftRunningFromShared() async throws {
+        defer { worktree.remove() }
+        _ = try setUp()
+        var ctx = try context(Self.suffixConfig)
+        let (svc, built) = try isolatedService(ctx)
+        let copyExe = ctx.paths.macCopies + "/Mac.app/Contents/MacOS/Mac"
+        let killed = Counter()
+        fake.stub(["kill"]) { _ in killed.increment(); return ProcessOutput() }
+        fake.stub(["ps"]) { _ in ProcessOutput(stdout: killed.value == 0 ? "  50 \(built.executablePath)\n  60 \(copyExe)\n" : "") }
+        let report = try await svc.terminate(device: "mac", in: &ctx)
+        #expect(report.text == "terminated dev.x.Mac.xcd-feat  device=mac\n"
+                    + "note: stopped dev.x.Mac at \(built.path), started under the device's other isolation mode")
+        #expect(fake.calls.filter { $0.argv[0] == "kill" }.map(\.arguments) == [["-TERM", "50"], ["-TERM", "60"]])
+        #expect(fake.calls.filter { $0.argv[0] == "ps" }.count == 1)
+    }
+
     /// The post-launch hook acts on the app xcd just started: under `isolation: suffix` this worktree's copy, so a hook
     /// that writes the app's defaults or opens it never reaches the build every shared launch runs; under `shared`, the
     /// build itself.
