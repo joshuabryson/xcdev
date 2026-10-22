@@ -5,10 +5,14 @@ import Foundation
 public struct DeviceStateService: Sendable {
     public let provisioner: DeviceProvisioner
     public let now: @Sendable () -> Date
+    /// Reads a Mac app's signature, for `sim container` on a Mac device.
+    public let bundleReader: any MacBundleReading
 
-    public init(provisioner: DeviceProvisioner, now: @escaping @Sendable () -> Date = { Date() }) {
+    public init(provisioner: DeviceProvisioner, now: @escaping @Sendable () -> Date = { Date() },
+                bundleReader: any MacBundleReading = SystemBundleReader()) {
         self.provisioner = provisioner
         self.now = now
+        self.bundleReader = bundleReader
     }
 
     /// Opens a URL in whatever app takes it. When the link's scheme is one this worktree's built app registers, the

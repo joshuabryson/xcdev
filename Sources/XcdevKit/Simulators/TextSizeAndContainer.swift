@@ -49,9 +49,10 @@ extension DeviceStateService {
     }
 
     /// Where one of an installed app's containers is on this Mac: `data` (when nil), `app`, an app group's
-    /// identifier, or `groups` for every app group's.
+    /// identifier, or `groups` for every app group's. A Mac device has only `data`, and boots nothing.
     public func container(_ container: String?, bundle: String?, device: String?, in ctx: inout WorktreeContext) async throws -> ContainerReport {
         let name = try provisioner.deviceName(device, config: ctx.config)
+        if ctx.config.allDevices[name]?.isMac == true { return try macContainer(container, bundle: bundle, device: name, in: ctx) }
         let bundleId = try self.bundleId(bundle, device: name, in: ctx)
         let kind = container ?? "data"
         let (clone, _) = try await provisioner.boot(name, in: &ctx)
@@ -63,5 +64,24 @@ extension DeviceStateService {
         }
         return ContainerReport(device: name, udid: clone.udid, bundleId: bundleId, container: kind, path: groups == nil ? answer : nil,
                                groups: groups, worktree: ctx.state.name)
+    }
+
+    /// `sim container` on a Mac device: the app's one container, from the build's entitlements. The bundle id
+    /// is the device's product's, so the copy's under `isolation: suffix`; the entitlements are the build's, which the
+    /// copy keeps, so this answers before a launch has made the copy.
+    func macContainer(_ kind: String?, bundle: String?, device name: String, in ctx: WorktreeContext) throws -> ContainerReport {
+        if bundle != nil {
+            throw XcdError(.usage, "on a Mac, `sim container` reads the built app's entitlements; leave --bundle out",
+                           next: "run it without --bundle, or look under ~/Library/Containers/<id>/Data yourself")
+        }
+        if let kind, kind != "data" {
+            throw XcdError(.usage, "a Mac app has one container, its data; `\(kind)` is for a simulator",
+                           next: "run `xcd sim container --device \(name)` without naming a container")
+        }
+        let bundleId = try RunService.product(for: name, requested: name, in: ctx).bundleId
+        let built = try RunService.recordedProduct(for: name, requested: name, in: ctx)
+        let path = try MacContainer.path(bundleId: bundleId, built: built, reader: bundleReader, home: NSHomeDirectory())
+        return ContainerReport(device: name, udid: nil, bundleId: bundleId, container: "data", path: path, groups: nil,
+                               worktree: ctx.state.name)
     }
 }

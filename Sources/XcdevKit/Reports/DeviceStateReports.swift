@@ -36,7 +36,8 @@ public struct TextSizeReport: Reportable {
 /// its identifier, a tab, and its path.
 public struct ContainerReport: Reportable {
     public let device: String
-    public let udid: String
+    /// The simulator's; nil for a Mac, which has none (the JSON then leaves the key out).
+    public let udid: String?
     public let bundleId: String
     /// `data`, `app`, `groups`, or an app group's identifier.
     public let container: String

@@ -34,6 +34,16 @@ import XcdevTestSupport
 
     func last(_ sub: String) -> Invocation? { worktree.runner.calls.last { $0.arguments.dropFirst().first == sub } }
 
+    /// A recorded Mac build of `dev.x.Mac` whose signature is `signing`, and a service that reads signatures from the
+    /// fake; `isolation` sets the `mac` device's key.
+    func macSetup(_ signing: MacSigningInfo?, isolation: String? = nil) throws -> (DeviceStateService, WorktreeContext) {
+        let ctx = try worktree.context(MacIsolationServiceTests.yaml(isolation))
+        let built = try MacIsolationServiceTests.recordBuild(ctx)
+        let reader = FakeBundleReader()
+        reader.set(signing, for: built.path)
+        return (DeviceStateService(provisioner: worktree.provisioner, bundleReader: reader), ctx)
+    }
+
     @Test func eachCommandBootsTheCloneAndReports() async throws {
         defer { worktree.remove() }
         var (svc, ctx) = try setup()
@@ -225,5 +235,44 @@ import XcdevTestSupport
         var (svc, ctx) = try setup()
         let error = await #expect(throws: XcdError.self) { _ = try await svc.openURL("https://x", device: "mac", in: &ctx) }
         #expect(error?.code == .platformUnsupported)
+    }
+
+    /// No clone is booted and nothing is run: the path comes from the build's entitlements, printed alone.
+    @Test func aMacDeviceContainerComesFromTheEntitlementsWithoutBooting() async throws {
+        defer { worktree.remove() }
+        var (svc, ctx) = try macSetup(try MacIsolationServiceTests.sandboxed())
+        let report = try await svc.container(nil, bundle: nil, device: "mac", in: &ctx)
+        #expect(report.path == NSHomeDirectory() + "/Library/Containers/dev.x.Mac/Data")
+        #expect(report.udid == nil && report.container == "data" && report.bundleId == "dev.x.Mac" && report.groups == nil)
+        #expect(Renderer.report(report, command: "sim container", format: .text) == report.path)
+        let json = Renderer.report(report, command: "sim container", format: .json)
+        #expect(!json.contains("udid") && json.contains(#""container":"data""#))
+        #expect(worktree.runner.calls.isEmpty)
+    }
+
+    /// Under `isolation: suffix` the container is the copy's, and is known before a launch has made the copy.
+    @Test func aMacDeviceContainerUnderSuffixUsesTheCopysId() async throws {
+        defer { worktree.remove() }
+        var (svc, ctx) = try macSetup(try MacIsolationServiceTests.sandboxed(), isolation: "suffix")
+        let report = try await svc.container(nil, bundle: nil, device: "mac", in: &ctx)
+        #expect(report.bundleId == "dev.x.Mac.xcd-feat")
+        #expect(report.path == NSHomeDirectory() + "/Library/Containers/dev.x.Mac.xcd-feat/Data")
+        #expect(!FileManager.default.fileExists(atPath: ctx.paths.macCopies))
+    }
+
+    @Test func aMacDeviceContainerRefusesBundleAndKind() async throws {
+        defer { worktree.remove() }
+        var (svc, ctx) = try macSetup(try MacIsolationServiceTests.sandboxed())
+        let bundle = await #expect(throws: XcdError.self) { _ = try await svc.container(nil, bundle: "dev.other", device: "mac", in: &ctx) }
+        #expect(bundle?.code == .usage && bundle?.message == "on a Mac, `sim container` reads the built app's entitlements; leave --bundle out")
+        #expect(bundle?.next == "run it without --bundle, or look under ~/Library/Containers/<id>/Data yourself")
+        let kind = await #expect(throws: XcdError.self) { _ = try await svc.container("groups", bundle: nil, device: "mac", in: &ctx) }
+        #expect(kind?.code == .usage && kind?.message == "a Mac app has one container, its data; `groups` is for a simulator")
+        #expect(kind?.next == "run `xcd sim container --device mac` without naming a container")
+        #expect(try await svc.container("data", bundle: nil, device: "mac", in: &ctx).container == "data")
+        try AppStateStore.save(AppState(), ctx.paths)
+        let unbuilt = await #expect(throws: XcdError.self) { _ = try await svc.container(nil, bundle: nil, device: "mac", in: &ctx) }
+        #expect(unbuilt?.code == .appNotBuilt && unbuilt?.next == "run `xcd build --device mac` (or `xcd run --device mac`)")
+        #expect(worktree.runner.calls.isEmpty)
     }
 }
