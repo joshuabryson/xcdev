@@ -33,12 +33,13 @@ public struct ContextInfo: Reportable {
                            mediaDir: media(ctx.config, location: ctx.location, worktreeName: ctx.state.name, device: device))
     }
 
-    /// This context with `product` as its app: the product a launch started, which under `isolation: suffix` is a Mac
-    /// app's copy rather than the build `build(ctx:device:output:)` reads.
-    func with(product: AppProduct) -> ContextInfo {
-        ContextInfo(projectRoot: projectRoot, worktree: worktree, worktreeName: worktreeName, device: device, udid: udid,
-                    runtime: runtime, derivedData: derivedData, appPath: product.path, bundleId: product.bundleId,
-                    developerDir: developerDir, output: output, mediaDir: mediaDir)
+    /// This context with `product` as its app, or as it is when there is none: the product that runs on the device,
+    /// which under `isolation: suffix` is a Mac app's copy rather than the build `build(ctx:device:output:)` reads.
+    func with(product: AppProduct?) -> ContextInfo {
+        guard let product else { return self }
+        return ContextInfo(projectRoot: projectRoot, worktree: worktree, worktreeName: worktreeName, device: device, udid: udid,
+                           runtime: runtime, derivedData: derivedData, appPath: product.path, bundleId: product.bundleId,
+                           developerDir: developerDir, output: output, mediaDir: mediaDir)
     }
 
     /// The context before a build resolves its project, simulator, and app (for `pre-build`): the requested device's

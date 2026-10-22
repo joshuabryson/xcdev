@@ -49,7 +49,9 @@ public struct RouteService: Sendable {
         }
         let script = RouteScript(runner: apps.builds.runner, progress: apps.builds.progress, now: apps.builds.now)
         var report = plan.report(device: device, dryRun: false, worktree: ctx.state.name)
-        report.scriptLog = try await script.run(plan.route, context: .build(ctx: ctx, device: device, output: output), logs: ctx.paths)
+        let context = ContextInfo.build(ctx: ctx, device: device, output: output)
+            .with(product: try? RunService.product(for: device, requested: nil, in: ctx))   // the copy under isolation: suffix
+        report.scriptLog = try await script.run(plan.route, context: context, logs: ctx.paths)
         report.deviceSummary = target.summary
         // The script may have built the app, so what xcd knows of it is read once the script is done.
         let product = try? RunService.product(for: device, requested: nil, in: ctx)        // the copy under isolation: suffix

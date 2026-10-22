@@ -116,8 +116,9 @@ import XcdevTestSupport
         #expect(report.deviceSummary == "mac (macOS)")
     }
 
-    /// The report names the app as every other `open` does: under `isolation: suffix`, this worktree's copy, not the
-    /// build it is made from.
+    /// The script and the report name the app as every other `open` does: under `isolation: suffix`, this worktree's
+    /// copy, not the build it is made from, so a script that writes the app's defaults never reaches the build every
+    /// shared launch runs.
     @Test func aMacScriptRouteNamesTheCopyUnderSuffix() async throws {
         defer { worktree.remove() }
         let suffix = Self.config.replacingOccurrences(of: "mac: { platform: macOS }", with: "mac: { platform: macOS, isolation: suffix }")
@@ -126,6 +127,8 @@ import XcdevTestSupport
         fake.stub(["sh"])
         let report = try await service().open(seeded, OpenOptions(device: "mac"), in: &ctx)
         #expect(report.app?.bundleId == "dev.x.Mac.xcd-feat" && report.app?.state == .untouched)
+        #expect(script?.environment["XCD_BUNDLE_ID"] == "dev.x.Mac.xcd-feat")
+        #expect(script?.environment["XCD_APP_PATH"] == ctx.paths.macCopies + "/Mac.app")
     }
 
     @Test func aScriptThatFailsIsRouteFailedWithItsLastLines() async throws {

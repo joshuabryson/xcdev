@@ -24,8 +24,7 @@ public struct HookRunner: Sendable {
     /// Returns the hook's log, or nil when the hook isn't configured.
     @discardableResult
     public func run(_ hook: HookName, in ctx: WorktreeContext, device: String?, product: AppProduct? = nil) async throws -> String? {
-        var context = ContextInfo.build(ctx: ctx, device: device, output: output)
-        if let product { context = context.with(product: product) }
+        let context = ContextInfo.build(ctx: ctx, device: device, output: output).with(product: product)
         return try await run(hook, config: ctx.config, context: context, logs: ctx.paths)
     }
 
