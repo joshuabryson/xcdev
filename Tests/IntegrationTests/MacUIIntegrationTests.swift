@@ -14,12 +14,13 @@ private let enabled = ProcessInfo.processInfo.environment["XCD_INTEGRATION"] == 
 /// change, so a person who moves the pointer or switches apps meanwhile fails the run. Never run with the other
 /// integration suites at once.
 @Suite(.enabled(if: enabled, "set XCD_INTEGRATION=1 to run (needs the Accessibility and Screen Recording grants)"), .serialized)
-struct MacUIIntegrationTests {
+struct MacUIIntegrationTests: HandsOffSuite {
     let runner = SystemProcessRunner()
     let ui = UIOptions(device: "mac", bundle: nil, system: false, role: nil, index: nil, timeout: .seconds(5))
     /// The xcd a recording runs as `xcd _record-window`: under `swift test` the default is the test host.
     let xcd = repoRoot + "/.build/debug/xcd"
-    static let bundleId = "dev.xcdev.MacProbeApp"
+    static let bundleId = macProbeBundleId
+    var watchedBundleIds: [String] { [Self.bundleId] }
     /// A launch that starts with the fixture's one window: the windows an earlier run left are not restored. Without
     /// it, a copy killed with two windows comes back with two, and every identifier matches twice. macOS 27 keeps that
     /// state in `~/Library/Daemon Containers/<uuid>/Data/Library/Saved Application State/<uuid>.savedState`, a folder
@@ -45,18 +46,6 @@ struct MacUIIntegrationTests {
         """, name: "Mac App \(UUID().uuidString.prefix(6))", fixture: repoRoot + "/Fixtures/SampleApp", parent: testsHome)
     }
 
-    /// Builds the fixture into the worktree's DerivedData and records it as the Mac device's build.
-    func install(in ctx: WorktreeContext) async throws -> AppProduct {
-        let out = ctx.paths.derivedData + "/Build/Products/Debug"
-        try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
-        try await runner.runChecked(Invocation("/bin/sh", [repoRoot + "/Tests/Fixtures/MacProbeApp/build.sh", out], timeout: .seconds(300)))
-        let product = AppProduct(path: out + "/MacProbeApp.app", bundleId: Self.bundleId, executableName: "MacProbeApp", platform: "macosx")
-        var state = AppState()
-        state.builds["mac"] = BuildRecord(scheme: "SampleApp", configuration: "Debug", product: product, finishedAt: Date())
-        try AppStateStore.save(state, ctx.paths)
-        return product
-    }
-
     /// Runs `body` on a new project with the fixture installed, then always stops a recording that is still going and
     /// every copy of the fixture at this project's path, and deletes the project. No simulator is involved, so unlike
     /// `withCleanup` it asks simctl for nothing.
@@ -66,7 +55,7 @@ struct MacUIIntegrationTests {
         var svc = services(project)
         svc.xcdExecutable = xcd
         var ctx = try await svc.open(worktree: nil)
-        let product = try await install(in: ctx)
+        let product = try await installMacProbe(in: ctx, runner)
         var failure: (any Error)?
         do { try await body(&ctx, svc, product) } catch { failure = error }
         _ = try? await svc.media.stopRecording(device: "mac", in: ctx)
@@ -92,7 +81,7 @@ struct MacUIIntegrationTests {
     @Test(.timeLimit(.minutes(10))) func drivesAHiddenMacAppWithoutTouchingTheDesk() async throws {
         guard ready() else { return }
         try await withFixture { ctx, svc, product in
-            let start = try await desk()
+            let start = try await desk(runner)
             let ref = try await launchesHiddenAndReads(&ctx, svc)
             try await tapsAndTypes(ref, &ctx, svc)
             try await scrollsAndTapsTheOldRef(ref, &ctx, svc)
@@ -258,45 +247,7 @@ struct MacUIIntegrationTests {
         print("MacUI measured: after the relaunch `\(tree.text.prefix { $0 != "\n" })`; terminate: \(ended.text)")
     }
 
-    // MARK: The desk
-
-    /// Everything a step must leave alone.
-    struct Desk { let front: String; let pointer: CGPoint }
-
-    func frontmost() async throws -> String {
-        let front = try await runner.run(Invocation("/usr/bin/lsappinfo", ["front"])).stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
-        let info = try await runner.run(Invocation("/usr/bin/lsappinfo", ["info", "-only", "name", front])).stdoutString
-        return String(info.prefix { $0 != "\n" })
-    }
-    func pointer() -> CGPoint { CGEvent(source: nil)?.location ?? .zero }
-    func desk() async throws -> Desk { Desk(front: try await frontmost(), pointer: pointer()) }
-
-    /// The windows of any copy of the fixture that are on screen, as their layer and bounds: a hidden app has none.
-    func windowsOnScreen() -> [String] {
-        let pids = Set(NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleId).map(\.processIdentifier))
-        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-        return windows.filter { ($0[kCGWindowOwnerPID as String] as? NSNumber).map { pids.contains($0.int32Value) } == true }.map { window in
-            let bounds = window[kCGWindowBounds as String] as? [String: Any] ?? [:]
-            let rect = ["X", "Y", "Width", "Height"].map { "\(bounds[$0] ?? "?")" }
-            return "layer \(window[kCGWindowLayer as String] ?? "?") at \(rect[0]),\(rect[1]) \(rect[2])x\(rect[3])"
-        }
-    }
-
-    func untouched(_ before: Desk, _ step: String) async throws {
-        let after = try await desk()
-        #expect(after.front == before.front, "\(step) changed the frontmost app from \(before.front) to \(after.front)")
-        #expect(after.pointer == before.pointer, "\(step) moved the pointer from \(before.pointer) to \(after.pointer)")
-        let shown = windowsOnScreen()
-        #expect(shown.isEmpty, "\(step) left windows of the app on screen: \(shown)")
-    }
-
-    /// One step, with the desk read before and after it.
-    func step<T>(_ name: String, _ body: () async throws -> T) async throws -> T {
-        let before = try await desk()
-        let result = try await body()
-        try await untouched(before, name)
-        return result
-    }
+    // MARK: The desk (`desk(_:)`, `untouched(_:_:)`, and `step(_:_:)` are in IntegrationSupport.swift)
 
     /// A step that must be refused with `platform_unsupported`; returns the error.
     @discardableResult
