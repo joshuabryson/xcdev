@@ -9,8 +9,9 @@ public enum MacAppLookup {
                  next: "build and start it with `xcd run --device \(device)` first, or name a running app with `--bundle <id>`")
     }
 
+    /// The pid of this worktree's copy of the app (the build, or its copy under `isolation: suffix`), by executable path.
     public static func runningPid(device: String, runner: any ProcessRunning, in ctx: WorktreeContext) async throws -> Int32 {
-        guard let product = try AppStateStore.load(ctx.paths).builds[device]?.product else { throw notBuilt(device) }
+        guard let product = try RunService.productIfBuilt(for: device, in: ctx) else { throw notBuilt(device) }
         guard let pid = try await ProcessLookup(runner: runner).pids(of: product.executablePath).max() else {
             throw XcdError(.elementNotFound, "the app is not running on this Mac",
                            next: "start it with `xcd run --device \(device)` (or `xcd launch --device \(device)`), then retry")

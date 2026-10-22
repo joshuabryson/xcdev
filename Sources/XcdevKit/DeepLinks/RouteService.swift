@@ -59,12 +59,13 @@ public struct RouteService: Sendable {
 
     func send(_ url: String, _ plan: OpenPlan, in ctx: inout WorktreeContext) async throws -> OpenReport {
         let app = try await apps.prepare(plan.requestedDevice, boot: true, in: &ctx)
-        try RouteErrors.checkScheme(url, registeredBy: app.product)
+        try RouteErrors.checkScheme(url, registeredBy: app.built)        // the copy shares the build's URL schemes
         try RouteErrors.checkPlatform(url, for: app.product)
         let running = try await app.host.runningPid(app.product)
         var delivered: Delivered
         if plan.cold, let host = app.host.launching(with: url) {
-            delivered = try await startWithLink(PreparedApp(target: app.target, product: app.product, host: host), plan, in: &ctx)
+            delivered = try await startWithLink(PreparedApp(target: app.target, product: app.product, host: host, built: app.built),
+                                                plan, in: &ctx)
         } else if plan.cold {
             delivered = try await startByLink(url, app, replacing: running, in: &ctx)
         } else if let pid = running, plan.preset == nil {
@@ -114,15 +115,17 @@ public struct RouteService: Sendable {
             report.crash = crash
             report.appOutput = delivered.captured ? RunService.tail(of: started.appLog, lines: 10) : nil
         }
-        report.note = Self.note(for: app, uncheckedWebLink: check == .none && delivered.linkSent && !report.appEnded && plan.route.isWebLink)
+        let uncheckedWebLink = check == .none && delivered.linkSent && !report.appEnded && plan.route.isWebLink
+        report.note = Self.note(for: app, uncheckedWebLink: uncheckedWebLink, in: ctx)
         return report
     }
 
-    /// What the result notes. A Mac app shares its data with every worktree's build of it. On a simulator the system
-    /// decides where an https link goes, and with no check nothing looked: that is
-    /// said of a link that went out to an app that is still there, since when the app ended, the crash is the result.
-    static func note(for app: PreparedApp, uncheckedWebLink: Bool) -> String? {
-        guard app.target.device != nil else { return RunReport.sharedData(of: app.product.bundleId) }
+    /// What the result notes. A Mac app's data is shared with every worktree's build of it, or kept apart in this
+    /// worktree's copy under `isolation: suffix`. On a simulator the system
+    /// decides where an https link goes, and with no check nothing looked: that is said of a link that went out to an
+    /// app that is still there, since when the app ended, the crash is the result.
+    static func note(for app: PreparedApp, uncheckedWebLink: Bool, in ctx: WorktreeContext) -> String? {
+        guard app.target.device != nil else { return MacIsolationService.note(for: app.built, device: app.target.name, in: ctx) }
         return uncheckedWebLink ? RouteErrors.uncheckedWebLink : nil
     }
 

@@ -25,7 +25,7 @@ public struct DeviceStateService: Sendable {
         }
     }
 
-    public func push(alert: String?, file: String?, bundle: String?, device: String?,
+    public func push(alert: String?, file: String?, bundle: String? = nil, device: String? = nil,
                      in ctx: inout WorktreeContext) async throws -> DeviceStateReport {
         guard (alert == nil) != (file == nil) else {
             throw XcdError(.usage, "a push needs one payload", next: "pass either --alert <text> or --file <payload.json>")
@@ -41,7 +41,7 @@ public struct DeviceStateService: Sendable {
         }
     }
 
-    public func privacy(_ action: PrivacyAction, service: String, bundle: String?, device: String?,
+    public func privacy(_ action: PrivacyAction, service: String, bundle: String? = nil, device: String? = nil,
                         in ctx: inout WorktreeContext) async throws -> DeviceStateReport {
         let name = try provisioner.deviceName(device, config: ctx.config)
         // reset may name no app (every app); grant and revoke need one.
@@ -120,10 +120,10 @@ public struct DeviceStateService: Sendable {
         return DeviceStateReport(action: action, device: name, udid: clone.udid, worktree: ctx.state.name)
     }
 
-    /// `--bundle`, else the bundle id of the last build for `device`.
+    /// `--bundle`, else the bundle id of the last build for `device` (on a Mac under `isolation: suffix`, its copy's).
     func bundleId(_ explicit: String?, device: String, in ctx: WorktreeContext) throws -> String {
         if let explicit { return explicit }
-        guard let id = try AppStateStore.load(ctx.paths).builds[device]?.product?.bundleId else {
+        guard let id = try RunService.productIfBuilt(for: device, in: ctx)?.bundleId else {
             throw XcdError(.appNotBuilt, "no app has been built for \(device) in this worktree, so there's no bundle id to use",
                            next: "pass --bundle <id>, or build first with `xcd build --device \(device)`")
         }

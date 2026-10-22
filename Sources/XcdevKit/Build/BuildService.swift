@@ -125,11 +125,13 @@ public struct BuildService: Sendable {
     }
 
     /// `xcodebuild clean` for the app scheme (no destination, so nothing is cloned), or with `deep`,
-    /// delete this worktree's DerivedData. Either way, recorded builds are forgotten.
+    /// delete this worktree's DerivedData. Either way, recorded builds are forgotten, and the Mac copies made from
+    /// them removed.
     public func clean(scheme: String?, deep: Bool, in ctx: inout WorktreeContext) async throws -> CleanReport {
         let paths = ctx.paths
         var state = try AppStateStore.load(paths)
         state.builds = [:]
+        Disk.remove(paths.macCopies)                // `isolation: suffix` remakes a copy from the next build
         if deep {
             let existed = FileManager.default.fileExists(atPath: paths.derivedData)
             if existed { try FileManager.default.removeItem(atPath: paths.derivedData) }

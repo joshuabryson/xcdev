@@ -175,6 +175,18 @@ import XcdevTestSupport
         #expect(again.text == "nothing to remove; \(ctx.paths.derivedData) does not exist")
     }
 
+    /// The copies `isolation: suffix` makes come from the builds a clean forgets, so they go too, deep or not.
+    @Test func cleanRemovesTheMacCopies() async throws {
+        defer { worktree.remove() }
+        _ = try setUp()
+        var ctx = try context()
+        for deep in [true, false] {
+            try FileManager.default.createDirectory(atPath: ctx.paths.macCopies + "/Mac.app/Contents", withIntermediateDirectories: true)
+            _ = try await service().clean(scheme: nil, deep: deep, in: &ctx)
+            #expect(!FileManager.default.fileExists(atPath: ctx.paths.macCopies))
+        }
+    }
+
     @Test func failedReportText() {
         let report = BuildReport(
             succeeded: false, scheme: "App", target: "iphone", targetSummary: "iphone (iPhone 18 Pro, iOS 27.0)",

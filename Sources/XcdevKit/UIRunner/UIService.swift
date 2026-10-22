@@ -133,12 +133,13 @@ public struct UIService: Sendable {
         return ElementQuery(target: spec, role: options.role, index: options.index)
     }
 
-    /// `--system` means no app; else `--bundle`; else the app of the last build for the device.
+    /// `--system` means no app; else `--bundle`; else the app of the last build for the device (on a Mac under
+    /// `isolation: suffix`, its copy's).
     func bundleId(_ options: UIOptions, in ctx: WorktreeContext) throws -> String? {
         if options.system { return nil }
         if let bundle = options.bundle { return bundle }
         let name = try supervisor.provisioner.deviceName(options.device, config: ctx.config)
-        guard let id = try AppStateStore.load(ctx.paths).builds[name]?.product?.bundleId else {
+        guard let id = try RunService.productIfBuilt(for: name, in: ctx)?.bundleId else {
             if ctx.config.allDevices[name]?.isMac == true { throw MacAppLookup.notBuilt(name) }      // no Home Screen to fall back on
             throw XcdError(.appNotBuilt, "no app has been built for \(name) in this worktree, so xcd doesn't know which app to drive",
                            next: "pass --bundle <id>, use --system for the Home Screen, or build first with `xcd build --device \(name)`")

@@ -86,7 +86,7 @@ extension UIService {
     /// On a Mac, only one from the Mac itself: a simulator's app can have the same name.
     func crashed(during what: String, since: Date, _ options: UIOptions, in ctx: WorktreeContext) async -> XcdError {
         let device = try? supervisor.provisioner.deviceName(options.device, config: ctx.config)
-        let product = device.flatMap { (try? AppStateStore.load(ctx.paths))?.builds[$0]?.product }
+        let product = device.flatMap { try? RunService.product(for: $0, requested: nil, in: ctx) }
         let isMac = device.flatMap { ctx.config.allDevices[$0]?.isMac } ?? false
         let origin: CrashOrigin = isMac ? .mac : device.flatMap { ctx.state.devices[$0]?.udid }.map(CrashOrigin.simulator) ?? .anywhere
         var report: CrashReport?

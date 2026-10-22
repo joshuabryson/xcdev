@@ -20,10 +20,12 @@ import XcdevTestSupport
         try worktree.context(yaml, container: "App.xcodeproj")
     }
 
-    func service(_ probe: FakeProbe = FakeProbe(), now: @escaping @Sendable () -> Date = { Date() }) -> RunService {
+    func service(_ probe: FakeProbe = FakeProbe(), now: @escaping @Sendable () -> Date = { Date() },
+                 isolation: MacIsolationService? = nil) -> RunService {
         let builds = BuildService(runner: fake, provisioner: worktree.provisioner, now: now)
         return RunService(builds: builds, watcher: CrashWatcher(probe: probe, locator: CrashReportLocator(directory: crashDir),
                                                                 sleep: { _ in }),
+                          isolation: isolation ?? MacIsolationServiceTests.quiet(on: fake),
                           sleep: { _ in })
     }
 
@@ -49,6 +51,16 @@ import XcdevTestSupport
         try AppStateStore.save(AppState(builds: ["mac": BuildRecord(scheme: "App", configuration: nil,
                                                                      product: Self.macProduct, finishedAt: Date())]),
                                ctx.paths)
+    }
+
+    static let suffixConfig = RunServiceTests.config.replacingOccurrences(of: "mac: { platform: macOS }",
+                                                                          with: "mac: { platform: macOS, isolation: suffix }")
+
+    /// A recorded Mac build of `dev.x.Mac` in this worktree's DerivedData, and a service whose isolation copies it (the
+    /// real `ditto`, a stubbed `codesign`) and sees `apps` running.
+    func isolatedService(_ ctx: WorktreeContext, apps: FakeRunningApps = FakeRunningApps()) throws -> (RunService, AppProduct) {
+        let built = try MacIsolationServiceTests.recordBuild(ctx)
+        return (service(isolation: try MacIsolationServiceTests.copying(built.path, on: fake, apps: apps)), built)
     }
 
     @Test func runBuildsBootsInstallsLaunchesAndRecords() async throws {
@@ -331,6 +343,94 @@ import XcdevTestSupport
         #expect(error?.code == .subprocessFailed)
         #expect(error?.message == "Mac did not start within 5s")
         #expect(error?.next?.hasPrefix("read the app log: \(ctx.paths.logs)/") == true)
+    }
+
+    /// Under `isolation: suffix` the launch starts this worktree's copy, and the record of the launch names the copy's
+    /// id; the build record keeps the build. The copy is made in `begin`, after the own-copy
+    /// terminate has looked for a running copy and before the launch.
+    @Test func aSuffixLaunchStartsTheCopyAndNotesTheIsolation() async throws {
+        defer { worktree.remove() }
+        _ = try setUp()
+        var ctx = try context(Self.suffixConfig)
+        let (svc, built) = try isolatedService(ctx)
+        let copy = ctx.paths.macCopies + "/Mac.app"
+        let polls = Counter()
+        // Poll 1: stop a running copy (none). Poll 2: pids before `open`. Poll 3: the new process, from the copy.
+        fake.stub(["ps"]) { _ in ProcessOutput(stdout: polls.increment() > 2 ? "  77 \(copy)/Contents/MacOS/Mac\n" : "") }
+        fake.stub(["open"])
+        let report = try await svc.launch(device: "mac", options: LaunchOptions(), in: &ctx)
+        #expect(report.pid == 77 && report.bundleId == "dev.x.Mac.xcd-feat" && report.note == "isolation: dev.x.Mac.xcd-feat")
+        let open = try #require(fake.calls.first { $0.argv[0] == "open" })
+        #expect(open.arguments.contains(copy) && !open.arguments.contains(built.path))
+        // `ditto` runs for real and is not listed; `codesign` follows it, so it shows where the copy was made.
+        let order = fake.calls.map { $0.argv[0] }.filter { ["ps", "codesign", "open"].contains($0) }
+        #expect(order == ["ps", "codesign", "ps", "open", "ps"])
+        let state = try AppStateStore.load(ctx.paths)
+        #expect(state.lastLaunch?.bundleId == "dev.x.Mac.xcd-feat" && state.lastLaunch?.processName == "Mac")
+        #expect(state.builds["mac"]?.product == built)
+        #expect(FileManager.default.fileExists(atPath: copy + "/Contents/MacOS/Mac"))
+    }
+
+    /// Nothing is started when another worktree's copy of the app runs under `shared`: the guard comes after this
+    /// worktree's own copy is stopped (none runs here) and before the launch. `install` is no launch.
+    @Test func aSharedLaunchBlockedByAnotherWorktreeIsAppInUse() async throws {
+        defer { worktree.remove() }
+        _ = try setUp()
+        var ctx = try context()
+        let apps = FakeRunningApps()
+        apps.set([MacRunningCopy(pid: 300, executablePath: MacIsolationServiceTests.betaCopy)], for: "dev.x.Mac")
+        let (svc, _) = try isolatedService(ctx, apps: apps)
+        fake.stub(["ps"])                                   // this worktree's own copy is not running
+        let error = await #expect(throws: XcdError.self) { try await svc.launch(device: "mac", options: LaunchOptions(), in: &ctx) }
+        #expect(error?.code == .appInUse && error?.code.exitCode == 3)
+        #expect(error?.message.hasPrefix("dev.x.Mac is already running from the worktree at /Users/u/App.worktrees/beta (pid 300)") == true)
+        #expect(!fake.calls.contains { ["kill", "open"].contains($0.argv[0]) } && apps.queries == ["dev.x.Mac"])
+        #expect(try await svc.install(device: "mac", in: &ctx).action == "nothing to install")
+        #expect(apps.queries == ["dev.x.Mac"])
+    }
+
+    /// The user's copy from /Applications and Xcode's own DerivedData keep running, this worktree's own
+    /// copy is stopped and relaunched as today.
+    @Test func aSharedLaunchStopsItsOwnCopyAndIgnoresTheUsers() async throws {
+        defer { worktree.remove() }
+        _ = try setUp()
+        var ctx = try context()
+        let apps = FakeRunningApps()
+        let (svc, built) = try isolatedService(ctx, apps: apps)
+        let exe = built.executablePath
+        let xcode = NSHomeDirectory() + "/Library/Developer/Xcode/DerivedData/Mac-abc/Build/Products/Debug/Mac.app/Contents/MacOS/Mac"
+        apps.set([MacRunningCopy(pid: 40, executablePath: "/Applications/Mac.app/Contents/MacOS/Mac"),
+                  MacRunningCopy(pid: 45, executablePath: xcode), MacRunningCopy(pid: 50, executablePath: exe)], for: "dev.x.Mac")
+        let killed = Counter()
+        fake.stub(["kill"]) { _ in killed.increment(); return ProcessOutput() }
+        fake.stub(["ps"]) { _ in
+            // This worktree's copy (50) runs until it is sent SIGTERM; then `open` starts 77.
+            var out = killed.value == 0 ? "  50 \(exe)\n" : ""
+            if fake.calls.contains(where: { $0.argv[0] == "open" }) { out += "  77 \(exe)\n" }
+            return ProcessOutput(stdout: out)
+        }
+        fake.stub(["open"])
+        let report = try await svc.launch(device: "mac", options: LaunchOptions(), in: &ctx)
+        #expect(report.pid == 77 && report.note == RunReport.sharedData(of: "dev.x.Mac") && apps.queries == ["dev.x.Mac"])
+        #expect(fake.calls.filter { $0.argv[0] == "kill" }.map(\.arguments) == [["-TERM", "50"]])
+    }
+
+    /// `terminate` and `install` use the copy's identity, and neither makes the copy: only `begin` does.
+    @Test func terminateTargetsTheCopyAndInstallNeverCopiesUnderSuffix() async throws {
+        defer { worktree.remove() }
+        _ = try setUp()
+        var ctx = try context(Self.suffixConfig)
+        let (svc, _) = try isolatedService(ctx)
+        let copyExe = ctx.paths.macCopies + "/Mac.app/Contents/MacOS/Mac"
+        let killed = Counter()
+        fake.stub(["kill"]) { _ in killed.increment(); return ProcessOutput() }
+        fake.stub(["ps"]) { _ in ProcessOutput(stdout: killed.value == 0 ? "  60 \(copyExe)\n" : "") }
+        #expect(try await svc.terminate(device: "mac", in: &ctx).text == "terminated dev.x.Mac.xcd-feat  device=mac")
+        #expect(fake.calls.filter { $0.argv[0] == "kill" }.map(\.arguments) == [["-TERM", "60"]])
+        let install = try await svc.install(device: "mac", in: &ctx)
+        #expect(install.bundleId == "dev.x.Mac.xcd-feat" && install.action == "nothing to install")
+        #expect(install.note == "macOS apps run from this worktree (its DerivedData, or .xcdev/mac under isolation: suffix)")
+        #expect(!FileManager.default.fileExists(atPath: ctx.paths.macCopies) && !fake.calls.contains { $0.argv[0] == "codesign" })
     }
 
     /// `xcd open` starts the app through the same steps and puts its own step before the crash watch.

@@ -18,11 +18,13 @@ import XcdevTestSupport
 
     let arrival = FakeArrival()
 
-    func service(_ probe: FakeProbe = FakeProbe(), arrival: FakeArrival? = nil) -> RouteService {
+    func service(_ probe: FakeProbe = FakeProbe(), arrival: FakeArrival? = nil, isolation: MacIsolationService? = nil) -> RouteService {
         let builds = BuildService(runner: fake, provisioner: worktree.provisioner, now: { Date(timeIntervalSince1970: 1_790_040_000) })
         let watcher = CrashWatcher(probe: probe, locator: CrashReportLocator(directory: worktree.root + "/DiagnosticReports"),
                                    sleep: Instant.sleep)
-        return RouteService(apps: RunService(builds: builds, watcher: watcher, sleep: Instant.sleep), arrival: arrival ?? self.arrival)
+        let apps = RunService(builds: builds, watcher: watcher, isolation: isolation ?? MacIsolationServiceTests.quiet(on: fake),
+                              sleep: Instant.sleep)
+        return RouteService(apps: apps, arrival: arrival ?? self.arrival)
     }
 
     /// A look before the link that does not see the element, then one after it that does.
@@ -135,6 +137,50 @@ import XcdevTestSupport
         let log = try #require(report.app?.log)
         #expect(steps == [start(log: log) + ["-a", app, "SampleApp://direct"] + napOff()])
         #expect(report.app?.state == .startedByLink && report.route == nil)
+    }
+
+    static let suffixConfig = RouteServiceTests.config.replacingOccurrences(of: "mac: { platform: macOS }",
+                                                                            with: "mac: { platform: macOS, isolation: suffix }")
+
+    /// This build under `isolation: suffix`, with `pids` running from this worktree's copy as `ps` lists them: isolation
+    /// that would copy the build (the real `ditto`, a stubbed `codesign`) and sees `apps` running, and the copy's path.
+    func suffixed(_ ctx: WorktreeContext, pids: [Int32] = [],
+                  apps: FakeRunningApps = FakeRunningApps()) throws -> (MacIsolationService, String) {
+        try setUp(ctx, pids: pids)
+        let isolation = try MacIsolationServiceTests.copying(app, on: fake, apps: apps,
+                                                             extra: ["CFBundleURLTypes": [["CFBundleURLSchemes": ["sampleapp"]]]])
+        let copy = ctx.paths.macCopies + "/Mac.app"
+        fake.stub(["ps"]) { [running] _ in ProcessOutput(stdout: running.value.map { "  \($0) \(copy)/Contents/MacOS/Mac\n" }.joined()) }
+        return (isolation, copy)
+    }
+
+    /// Under `isolation: suffix` a cold link starts this worktree's copy with the link attached. The scheme check reads
+    /// the build's Info.plist, whose URL schemes the copy shares; `begin` makes the copy once the running one is
+    /// stopped.
+    @Test func openColdUnderSuffixLaunchesTheCopyWithTheLink() async throws {
+        defer { worktree.remove() }
+        var ctx = try worktree.context(Self.suffixConfig, container: "App.xcodeproj")
+        let (isolation, copy) = try suffixed(ctx)
+        let report = try await service(isolation: isolation).open(item, OpenOptions(device: "mac", cold: true), in: &ctx)
+        let log = try #require(report.app?.log)
+        #expect(steps == [start(log: log) + ["-a", copy, Self.link] + napOff()])
+        #expect(report.app?.state == .startedByLink && report.app?.bundleId == "dev.x.Mac.xcd-feat")
+        #expect(report.note == "isolation: dev.x.Mac.xcd-feat" && fake.calls.contains { $0.argv[0] == "codesign" })
+        #expect(try AppStateStore.load(ctx.paths).lastLaunch?.bundleId == "dev.x.Mac.xcd-feat")
+    }
+
+    /// A link to this worktree's running copy goes to it as it is: the copy (missing here, so stale) is not made under
+    /// the running process, and no other worktree's copy is looked for.
+    @Test func aLinkToTheRunningCopyNeitherRemakesNorGuards() async throws {
+        defer { worktree.remove() }
+        var ctx = try worktree.context(Self.suffixConfig, container: "App.xcodeproj")
+        let apps = FakeRunningApps()
+        let (isolation, copy) = try suffixed(ctx, pids: [500], apps: apps)
+        let report = try await service(isolation: isolation).open(item, OpenOptions(device: "mac"), in: &ctx)
+        #expect(steps == [["open", "-g", "-a", copy, Self.link]])
+        #expect(report.app == OpenReport.App(state: .running, pid: 500, bundleId: "dev.x.Mac.xcd-feat", log: nil))
+        #expect(!fake.calls.contains { $0.argv[0] == "codesign" } && !FileManager.default.fileExists(atPath: copy))
+        #expect(apps.queries.isEmpty && report.note == "isolation: dev.x.Mac.xcd-feat")
     }
 
     /// `open -a` would hand the app a link whose scheme it does not register, which no real link could do.

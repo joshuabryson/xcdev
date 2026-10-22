@@ -84,7 +84,8 @@ public struct Services: Sendable {
     public var builds: BuildService { BuildService(runner: runner, provisioner: provisioner, progress: progress, hooks: hooks) }
     public var tests: TestService { TestService(builds: builds, detached: detached) }
     public var apps: RunService {
-        RunService(builds: builds, watcher: CrashWatcher(probe: SystemProcessProbe(), locator: CrashReportLocator()))
+        RunService(builds: builds, watcher: CrashWatcher(probe: SystemProcessProbe(), locator: CrashReportLocator()),
+                   isolation: MacIsolationService(runner: runner))
     }
     public var routes: RouteService { RouteService(apps: apps, arrival: ui, output: output) }
     public var projectCommands: ProjectCommandRunner {
