@@ -73,8 +73,9 @@ public struct MacBundleFacts: Sendable, Equatable {
 }
 
 public enum MacBundle {
-    /// Folders whose every entry is a bundle that must share the app's identifier prefix.
-    static let nestingFolders = ["Contents/PlugIns", "Contents/XPCServices", "Contents/Library/LoginItems"]
+    /// Folders whose every entry is a bundle that must share the app's identifier prefix, except that in
+    /// `Contents/Extensions` (ExtensionKit) only `.appex` entries count: `.appextensionpoints` files are not bundles.
+    static let nestingFolders = ["Contents/PlugIns", "Contents/XPCServices", "Contents/Library/LoginItems", "Contents/Extensions"]
 
     public static func facts(of appPath: String, reader: any MacBundleReading) throws -> MacBundleFacts {
         let plist = infoPlist(of: appPath)
@@ -88,19 +89,25 @@ public enum MacBundle {
                               hasProfile: Disk.exists(appPath + "/Contents/embedded.provisionprofile"))
     }
 
-    /// Every entry of the nesting folders but Finder's dot files, and every `.app` under `Contents` at any depth.
+    /// Every entry of the nesting folders but Finder's dot files (in `Contents/Extensions`, only `.appex` entries), and
+    /// every `.app` under `Contents` at any depth, except one inside a `.framework`: a framework's own helper app has its
+    /// own identity, and frameworks are never a refusal.
     static func nestedBundles(in appPath: String) -> [String] {
         var found = Set(nestingFolders.flatMap { folder in
-            Disk.names(in: appPath + "/" + folder).filter { !$0.hasPrefix(".") }.map { folder + "/" + $0 }
+            Disk.names(in: appPath + "/" + folder).filter { isNested($0, in: folder) }.map { folder + "/" + $0 }
         })
         // `Disk.files` lists files only and does not follow links, so an embedded app is found through its files.
         for file in Disk.files(under: appPath + "/Contents") {
             let parts = file.split(separator: "/").map(String.init)
-            for end in parts.indices.dropLast() where parts[end].hasSuffix(".app") {
+            for end in parts.indices.dropLast() where parts[end].hasSuffix(".app") && !parts[..<end].contains(where: { $0.hasSuffix(".framework") }) {
                 found.insert("Contents/" + parts[...end].joined(separator: "/"))
             }
         }
         return found.sorted()
+    }
+
+    static func isNested(_ name: String, in folder: String) -> Bool {
+        !name.hasPrefix(".") && (folder != "Contents/Extensions" || name.hasSuffix(".appex"))
     }
 
     /// The bundle's Info.plist, binary or XML; nil when it is missing or is not a dictionary.

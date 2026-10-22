@@ -60,6 +60,20 @@ import XcdevTestSupport
         #expect(facts.bundleId == "dev.x.App" && facts.hasInfoPlist && facts.nestedBundles.isEmpty && !facts.hasProfile)
     }
 
+    @Test func anExtensionKitExtensionIsNested() throws {
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        try Self.makeBundle(at: app, plist: ["CFBundleIdentifier": "dev.x.App"],
+                            files: ["Contents/MacOS/App", "Contents/Extensions/Share.appex/Contents/MacOS/Share", "Contents/Extensions/Host.appextensionpoints"])
+        #expect(MacBundle.nestedBundles(in: app) == ["Contents/Extensions/Share.appex"])
+    }
+
+    @Test func anAppInsideAFrameworkIsNotNested() throws {
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        try Self.makeBundle(at: app, plist: ["CFBundleIdentifier": "dev.x.App"],
+                            files: ["Contents/MacOS/App", "Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app/Contents/MacOS/Updater"])
+        #expect(MacBundle.nestedBundles(in: app).isEmpty)
+    }
+
     @Test func anUnsignedBundleHasNoSigningAndAPlistlessOneIsNotAskedForIt() throws {
         defer { try? FileManager.default.removeItem(atPath: base) }
         let bare = base + "/Bare.app"
