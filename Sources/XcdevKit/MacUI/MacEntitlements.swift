@@ -19,8 +19,9 @@ public enum MacEntitlements {
         plist.flatMap(dictionary)?[sandbox] as? Bool == true
     }
 
-    /// The keys an ad-hoc signature cannot carry, sorted: every `com.apple.developer.*` key but the team identifier,
-    /// which is dropped with the team signature, and `keychain-access-groups`.
+    /// The keys an ad-hoc copy cannot carry, sorted: every `com.apple.developer.*` key but the team identifier, which
+    /// is dropped with the team signature, `keychain-access-groups`, and app groups (`com.apple.security.application-groups`:
+    /// an ad-hoc copy was found unable to write into the group container, so `groupsAreRefused`).
     public static func refused(_ keys: [String]) -> [String] {
         keys.filter { key in
             (key.hasPrefix("com.apple.developer.") && key != "com.apple.developer.team-identifier")
@@ -29,8 +30,9 @@ public enum MacEntitlements {
     }
 
     /// The `com.apple.security.*` entries with their values, as an XML plist: the sandbox, file and network access,
-    /// `get-task-allow`, temporary exceptions, and app groups. `com.apple.application-identifier` and
-    /// `com.apple.developer.team-identifier` are left out: they belong to the team signature the copy no longer has.
+    /// `get-task-allow`, and temporary exceptions. App groups are not kept: they are refused.
+    /// `com.apple.application-identifier` and `com.apple.developer.team-identifier` are left out: they belong to the
+    /// team signature the copy no longer has.
     public static func kept(_ plist: Data) throws -> Data {
         guard let entitlements = dictionary(plist) else {
             throw XcdError(.internalError, "the built app's entitlements are not a property list xcd can read",
