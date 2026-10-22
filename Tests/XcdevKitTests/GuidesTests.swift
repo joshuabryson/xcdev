@@ -60,6 +60,21 @@ import Testing
         }
     }
 
+    /// On a Mac: the two data modes and what refuses them, the container, and the grant commands only the user may ask for.
+    @Test func uiGuideCoversMacIsolationTheContainerAndTheGrants() throws {
+        let guide = try Guides.guide("ui")
+        for word in ["`isolation: shared`", "`isolation: suffix`", "`app_in_use`", "`.xcd-<worktree>`", "`config_invalid`",
+                     "`xcd sim container --device mac`", "`xcd doctor --grant-accessibility`", "`xcd doctor --grant-screen-recording`",
+                     "| `app_in_use` |"] {
+            #expect(guide.markdown.contains(word), "the ui guide doesn't mention \(word)")
+        }
+        // What an agent would otherwise get wrong: running a grant unasked, and expecting Screen Recording at once.
+        for advice in ["only when the user says to", "quit and reopened", "never blocks a launch", "keychain"] {
+            #expect(guide.markdown.contains(advice), "the ui guide doesn't say: \(advice)")
+        }
+        #expect(try Guides.guide("start").markdown.contains("a sandboxed Mac app's container"))
+    }
+
     /// The guide names each kind of route, every key and flag, the script's variables, and every error `xcd open` gives.
     @Test func deeplinksGuideCoversRoutesFlagsAndErrors() throws {
         let guide = try Guides.guide("deeplinks")

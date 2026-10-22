@@ -37,7 +37,7 @@ command, the project's own commands (from `.xcdev.yml`), and installed plugins.
 | Screenshot or video | `xcd ui screenshot`, `xcd ui record start` … `xcd ui record stop` (each prints the file's path; read it) |
 | Read and drive the UI (iPhone/iPad simulators, Mac apps) | Launch the app first (`xcd run` or `xcd launch`; not needed with `--system`). `xcd ui tree` lists what is on screen with refs; `xcd ui tap <target>`; `xcd ui type <text> --into <target> [--clear] [--submit]`; `xcd ui swipe up\|down\|left\|right [--on <target>]`; `xcd ui long-press <target>`; `xcd ui wait <target> [--gone]`; `xcd ui button home`; `xcd ui rotate landscape-left`; on a Mac, `xcd ui menu "File > Save…"` presses a menu item and `xcd launch --show` shows the app to a person. A target is `id:<identifier>`, `"label:<text>"`, `"label~<part>"`, `ref:e<N>` (or just `e<N>`), or `@x,y` (tap and long-press only). Read `xcd guide ui` before the first time |
 | Go straight to a screen | `xcd open` lists the project's routes; `xcd open <route> [name=value …]` opens one (a link, launch arguments, or the project's script) and checks that it arrived; `xcd open '<url>'` sends any link the app handles; `--cold` lets the link start the app. Read `xcd guide deeplinks` before adding routes |
-| Device state | `xcd sim open-url <url>`, `xcd sim push --alert <text>`, `xcd sim privacy grant photos`, `xcd sim status-bar --time 9:41`, `xcd sim appearance dark`, `xcd sim text-size <size>` (Dynamic Type), `xcd sim location <lat>,<lon>`, `xcd sim pasteboard set --text <s>` (or `--image <file>`), `xcd sim addmedia <file>`; `xcd sim container` prints the folder of the app's data on this Mac |
+| Device state | `xcd sim open-url <url>`, `xcd sim push --alert <text>`, `xcd sim privacy grant photos`, `xcd sim status-bar --time 9:41`, `xcd sim appearance dark`, `xcd sim text-size <size>` (Dynamic Type), `xcd sim location <lat>,<lon>`, `xcd sim pasteboard set --text <s>` (or `--image <file>`), `xcd sim addmedia <file>`; `xcd sim container` prints the folder of the app's data on this Mac: a simulator's, or a sandboxed Mac app's container |
 | Format and lint what you changed | `xcd format` reformats the lines your change touched, with the project's own formatter (`xcd format --check` only lists them). Then `xcd lint` lists the findings your change introduced, with the project's own linter. `--files` widens either to the changed files, and `--all` to the project. Read `xcd guide quality` when one of them says it is not set up |
 | Context for scripts | `xcd context` (prints XCD_* variables) |
 | Explain a config key | `xcd config explain <key>` |
@@ -69,6 +69,8 @@ command, the project's own commands (from `.xcdev.yml`), and installed plugins.
   doctor exits 0: tell the user about them, and do not act on them.
 - `xcd doctor --restart-simulators` restarts CoreSimulator when it isn't answering, which shuts down every agent's
   simulators: ask the user first.
+- `xcd doctor --grant-accessibility` and `--grant-screen-recording` put macOS's permission prompt on the person's
+  screen: run one only when the user says to, as the `next:` of `permission_missing` says.
 
 ## Setting up a project
 

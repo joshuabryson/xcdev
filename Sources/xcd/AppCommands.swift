@@ -5,7 +5,7 @@ struct RunCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "run",
         abstract: "Build, install, and launch the app, then watch for a crash.",
-        discussion: "App launch arguments go after `--`: xcd run --preset onboarding -- -resetOnboarding YES")
+        discussion: "App launch arguments go after `--`: xcd run --preset onboarding -- -resetOnboarding YES. On a Mac device with `isolation: suffix`, the app runs as a re-signed copy with its own data; see `xcd config explain devices.<name>.isolation`.")
     @OptionGroup var target: TargetOptions
     @OptionGroup var scheme: SchemeOptions
     @Flag(name: .customLong("no-build"), help: "Launch the latest build without building first.") var noBuild = false
@@ -28,7 +28,7 @@ struct LaunchCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "launch",
         abstract: "Launch the installed app (no build or install), then watch for a crash.",
-        discussion: "App launch arguments go after `--`: xcd launch -- -resetOnboarding YES")
+        discussion: "App launch arguments go after `--`: xcd launch -- -resetOnboarding YES. On a Mac device with `isolation: suffix`, the app runs as a re-signed copy with its own data; see `xcd config explain devices.<name>.isolation`.")
     @OptionGroup var target: TargetOptions
     @OptionGroup var launch: LaunchFlags
     @OptionGroup var options: GlobalOptions
