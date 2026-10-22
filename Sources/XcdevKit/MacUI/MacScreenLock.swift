@@ -13,6 +13,10 @@ public enum MacScreenLock {
 
     public static func isLocked() -> Bool { isLocked(session: CGSessionCopyCurrentDictionary() as? [String: Any]) }
 
+    /// Whether this process has a login session with a window server, where a system prompt can show: none over ssh or
+    /// in a launchd job without one.
+    public static func hasWindowServerSession() -> Bool { CGSessionCopyCurrentDictionary() != nil }
+
     /// No session dictionary (no console session, as over ssh) is not a locked screen.
     static func isLocked(session: [String: Any]?) -> Bool {
         (session?[lockedKey] as? NSNumber)?.boolValue == true

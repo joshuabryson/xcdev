@@ -97,7 +97,7 @@ public struct Services: Sendable {
         return service
     }
     public var doctor: DoctorService { DoctorService(runner: runner, globalPaths: globalPaths, detached: detached,
-                                                      runnerClient: RunnerClient(transport: runnerTransport)) }
+                                                      runnerClient: RunnerClient(transport: runnerTransport), progress: progress) }
     /// What `xcd lint` and `xcd format` run with.
     public var quality: QualityHost {
         QualityHost(runner: runner, locator: ToolLocator(environment: environment), currentDirectory: currentDirectory,

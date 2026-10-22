@@ -12,13 +12,16 @@ public struct MacPermissions: Sendable, Equatable {
         MacPermissions(accessibility: api.isTrusted, screenRecording: api.screenCaptureAllowed, hostApp: hostApp)
     }
 
-    /// The one `next:` for a missing grant, shared with the doctor check.
+    /// The one `next:` for a missing grant, shared with the doctor check and the grant command's failure: the switch by
+    /// hand, or `xcd doctor --grant-…` at the user's word.
     public static func accessibilityNext(_ app: String) -> String {
-        "in System Settings > Privacy & Security > Accessibility, turn on \(app), then run the command again"
+        "in System Settings > Privacy & Security > Accessibility, turn on \(app); or run `xcd doctor --grant-accessibility` "
+            + "at the user's word. Then run the command again"
     }
     public static func screenRecordingNext(_ app: String) -> String {
-        "in System Settings > Privacy & Security > Screen & System Audio Recording, turn on \(app), "
-            + "quit and reopen it (macOS applies that grant at launch), then run the command again"
+        "in System Settings > Privacy & Security > Screen & System Audio Recording, turn on \(app); or run "
+            + "`xcd doctor --grant-screen-recording` at the user's word. Then quit and reopen \(app) (macOS applies that grant "
+            + "at launch) and run the command again"
     }
 
     public func require(screenRecording needed: Bool) throws {

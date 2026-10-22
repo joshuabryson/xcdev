@@ -31,6 +31,11 @@ public enum MacAXError: Error, Equatable {
 public protocol AccessibilityAPI: AnyObject {
     var isTrusted: Bool { get }
     var screenCaptureAllowed: Bool { get }
+    /// The system prompt for the Accessibility switch, shown only when it is off; answers whether it is on. Only
+    /// `xcd doctor --grant-accessibility` calls it; every other check reads `isTrusted`.
+    func requestTrust() -> Bool
+    /// The system prompt for Screen Recording. Only `xcd doctor --grant-screen-recording` calls it.
+    func requestScreenCapture() -> Bool
     func isRunning(pid: Int32) -> Bool
     func application(pid: Int32) -> AXElement
     func string(_ attribute: String, of element: AXElement) throws -> String?
@@ -62,6 +67,11 @@ public final class SystemAccessibility: AccessibilityAPI {
 
     public var isTrusted: Bool { AXIsProcessTrusted() }
     public var screenCaptureAllowed: Bool { CGPreflightScreenCaptureAccess() }
+    /// The prompt option by its value: the SDK's `kAXTrustedCheckOptionPrompt` is a mutable C global, which Swift 6 will
+    /// not read ("not concurrency-safe"), and this string is its value (both checked 2026-10-21).
+    static let promptOption = "AXTrustedCheckOptionPrompt"
+    public func requestTrust() -> Bool { AXIsProcessTrustedWithOptions([Self.promptOption: true] as CFDictionary) }
+    public func requestScreenCapture() -> Bool { CGRequestScreenCaptureAccess() }
     public func isRunning(pid: Int32) -> Bool { kill(pid, 0) == 0 }
     public func application(pid: Int32) -> AXElement { token(for: AXUIElementCreateApplication(pid)) }
 

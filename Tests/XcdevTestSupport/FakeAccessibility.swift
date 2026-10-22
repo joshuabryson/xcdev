@@ -81,6 +81,12 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
         var capture = true
         /// The app quits after the next action it performs, as one that crashes on a press would.
         var exitAfterPress = false
+        /// The prompts asked for, in order: "trust" (`requestTrust`) or "screen" (`requestScreenCapture`).
+        var requests: [String] = []
+        /// The read after a prompt at which both grants come on, as when the person turns the switch; nil never.
+        var grantAfterReads: Int?
+        /// Reads of a grant since the first prompt.
+        var readsAfterRequest = 0
 
         /// Lists the node under `parent` and returns its token; a link lists the element it names instead.
         @discardableResult
@@ -103,6 +109,16 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
             var token = parent
             for _ in 0..<levels { token = parents[token] ?? 0 }
             return token
+        }
+
+        /// One read of a grant. After a prompt it is counted, and from the `grantAfterReads`-th on both grants are on.
+        mutating func readGrant() {
+            guard !requests.isEmpty else { return }
+            readsAfterRequest += 1
+            if let after = grantAfterReads, readsAfterRequest >= after {
+                trusted = true
+                capture = true
+            }
         }
     }
     let state: Mutex<State>
@@ -142,6 +158,15 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
             state.capture = capture
         }
     }
+    /// The prompts shown, in order: "trust" for `requestTrust()`, "screen" for `requestScreenCapture()`.
+    public var requests: [String] { state.withLock { $0.requests } }
+    /// The read after a prompt at which both grants come on, as when the person turns the switch; nil never.
+    public var grantAfterReads: Int? {
+        get { state.withLock { $0.grantAfterReads } }
+        set { state.withLock { $0.grantAfterReads = newValue } }
+    }
+    /// How many times a grant was read after the first prompt.
+    public var reads: Int { state.withLock { $0.readsAfterRequest } }
     public func exitAfterNextPress() { state.withLock { $0.exitAfterPress = true } }
     /// Adds a node after the first window's other children, as a view that appears does; every token already given stays.
     public func addToFirstWindow(_ node: FakeNode) {
@@ -175,8 +200,30 @@ public final class FakeAccessibility: AccessibilityAPI, Sendable {
         }
     }
 
-    public var isTrusted: Bool { state.withLock { $0.trusted } }
-    public var screenCaptureAllowed: Bool { state.withLock { $0.capture } }
+    public var isTrusted: Bool {
+        state.withLock { state in
+            state.readGrant()
+            return state.trusted
+        }
+    }
+    public var screenCaptureAllowed: Bool {
+        state.withLock { state in
+            state.readGrant()
+            return state.capture
+        }
+    }
+    public func requestTrust() -> Bool {
+        state.withLock { state in
+            state.requests.append("trust")
+            return state.trusted
+        }
+    }
+    public func requestScreenCapture() -> Bool {
+        state.withLock { state in
+            state.requests.append("screen")
+            return state.capture
+        }
+    }
     public func isRunning(pid: Int32) -> Bool { state.withLock { $0.app.running } }
     public func application(pid: Int32) -> AXElement { AXElement(token: 0) }
 

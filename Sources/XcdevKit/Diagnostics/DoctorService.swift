@@ -130,6 +130,8 @@ public struct DoctorService: Sendable {
     let accessibility: @Sendable () -> any AccessibilityAPI
     let hostApp: @Sendable () -> String
     let sleep: @Sendable (Duration) async throws -> Void
+    /// One-line progress for a long step; the CLI writes it to stderr. The grant flow's wait uses it.
+    let progress: @Sendable (String) -> Void
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, discovery: XcodeDiscovery? = nil,
                 now: @escaping @Sendable () -> Date = { Date() },
@@ -137,7 +139,8 @@ public struct DoctorService: Sendable {
                 runnerClient: RunnerClient = RunnerClient(transport: URLSessionRunnerTransport()),
                 accessibility: @escaping @Sendable () -> any AccessibilityAPI = { SystemAccessibility() },
                 hostApp: @escaping @Sendable () -> String = { MacHostApp.live() },
-                sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
+                sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+                progress: @escaping @Sendable (String) -> Void = { _ in /* no progress unless the CLI gives one */ }) {
         self.runner = runner
         self.globalPaths = globalPaths
         self.discovery = discovery ?? XcodeDiscovery(runner: runner)
@@ -147,6 +150,7 @@ public struct DoctorService: Sendable {
         self.accessibility = accessibility
         self.hostApp = hostApp
         self.sleep = sleep
+        self.progress = progress
     }
 
     /// Every check, in the order fixes should happen: worktrees before the clones they leave behind. Scratch
