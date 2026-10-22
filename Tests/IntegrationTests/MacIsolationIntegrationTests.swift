@@ -45,11 +45,7 @@ struct MacIsolationIntegrationTests: HandsOffSuite {
             let made = clock.now - began
             let second = try await launched(&beta)
             for (checkout, report) in [(alpha, first), (beta, second)] {
-                let id = Self.bundleId + ".xcd-" + checkout.name
-                #expect(report.bundleId == id && report.note == "isolation: \(id)", "\(report.text)")
-                #expect(suffixedCopy(of: checkout).bundleId == id, "the copy in \(checkout.name): \(suffixedCopy(of: checkout))")
-                let copies = try? FileManager.default.contentsOfDirectory(atPath: checkout.ctx.paths.macCopies)
-                #expect(copies == ["MacProbeApp.app"], "\(checkout.ctx.paths.macCopies) holds \(String(describing: copies))")
+                ranItsOwnCopy(checkout, report)
                 let copyPath = checkout.ctx.paths.macCopies + "/MacProbeApp.app"
                 let verified = try await runner.run(Invocation("/usr/bin/codesign", ["--verify", "--strict", copyPath]))
                 #expect(verified.succeeded, "codesign --verify \(copyPath): \(verified.stderrString)")
@@ -167,14 +163,14 @@ struct MacIsolationIntegrationTests: HandsOffSuite {
         let report = try await step("xcd sim container in \(name)") {
             try await svc.deviceState.container(nil, bundle: nil, device: "mac", in: &checkout.ctx)
         }
-        let expected = NSHomeDirectory() + "/Library/Containers/\(Self.bundleId).xcd-\(name)/Data"
+        let expected = container(of: checkout)
         #expect(report.path == expected && report.udid == nil, "\(report.text)")
         let home = try await home(loggedIn: launch.appLog)
         #expect(home == expected, "the copy in \(name) logged home=\(String(describing: home))")
     }
 
     /// On the real copy: a relaunch with nothing rebuilt keeps it; once the build is newer, the next launch
-    /// makes it again.
+    /// makes it again, with the worktree's identity, alone in `.xcdev/mac`, and running in the worktree's container.
     func remakesTheCopyOnlyAfterARebuild(_ checkout: inout Checkout, firstLaunch: Duration) async throws {
         let before = try #require(suffixedCopy(of: checkout).written)
         let clock = ContinuousClock()
@@ -188,6 +184,9 @@ struct MacIsolationIntegrationTests: HandsOffSuite {
         let remade = clock.now - began
         #expect((suffixedCopy(of: checkout).written ?? .distantPast) > before, "the copy was not made again after the build changed")
         #expect(rebuilt.pid != fresh.pid)
+        ranItsOwnCopy(checkout, rebuilt)
+        let home = try await home(loggedIn: rebuilt.appLog)
+        #expect(home == container(of: checkout), "the remade copy in \(checkout.name) logged home=\(String(describing: home))")
         print("MacIsolation measured: a suffix launch that makes the copy took \(DurationText.format(firstLaunch)), one with the copy "
             + "fresh \(DurationText.format(kept)), one after a rebuild \(DurationText.format(remade)) (each with the 5 s crash watch)")
     }
@@ -289,6 +288,20 @@ struct MacIsolationIntegrationTests: HandsOffSuite {
 
     // MARK: Reading what came out
 
+    /// The worktree's suffixed bundle id, and the container a sandboxed copy under it gets.
+    func suffixedId(of checkout: Checkout) -> String { Self.bundleId + ".xcd-" + checkout.name }
+    func container(of checkout: Checkout) -> String { NSHomeDirectory() + "/Library/Containers/\(suffixedId(of: checkout))/Data" }
+
+    /// The launch ran the worktree's own copy: the report names the suffixed id and notes it, the copy's Info.plist has
+    /// it, and `.xcdev/mac` holds the copy alone (no `.partial`, no entitlements file).
+    func ranItsOwnCopy(_ checkout: Checkout, _ report: RunReport) {
+        let id = suffixedId(of: checkout)
+        #expect(report.bundleId == id && report.note == "isolation: \(id)", "\(report.text)")
+        #expect(suffixedCopy(of: checkout).bundleId == id, "the copy in \(checkout.name): \(suffixedCopy(of: checkout))")
+        let copies = try? FileManager.default.contentsOfDirectory(atPath: checkout.ctx.paths.macCopies)
+        #expect(copies == ["MacProbeApp.app"], "\(checkout.ctx.paths.macCopies) holds \(String(describing: copies))")
+    }
+
     /// The worktree's suffixed copy: its bundle id, and when its executable was last written (the copy's re-sign writes it).
     func suffixedCopy(of checkout: Checkout) -> (bundleId: String?, written: Date?) {
         let app = checkout.ctx.paths.macCopies + "/MacProbeApp.app"
@@ -297,13 +310,14 @@ struct MacIsolationIntegrationTests: HandsOffSuite {
         return (info?["CFBundleIdentifier"] as? String, attributes?[.modificationDate] as? Date)
     }
 
-    /// The `home=` the app logged at launch (`launched pid=… home=… hidden=…`): its container when sandboxed. The line is
-    /// there once the crash watch has passed; this looks for up to 5 s more.
+    /// The `home=` the app logged at launch (`launched pid=… home=… hidden=…`): its container when sandboxed. Each launch
+    /// writes its own log, and the last such line is read, so a log that held two launches would give the later one. The
+    /// line is there once the crash watch has passed; this looks for up to 5 s more.
     func home(loggedIn appLog: String?) async throws -> String? {
         let log = try #require(appLog, "the launch named no app log")
         for _ in 0..<20 {
             let text = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""
-            if let line = text.split(separator: "\n").first(where: { $0.hasPrefix("launched pid=") }),
+            if let line = text.split(separator: "\n").last(where: { $0.hasPrefix("launched pid=") }),
                let start = line.range(of: " home="), let end = line.range(of: " hidden=") {
                 return String(line[start.upperBound..<end.lowerBound])
             }
