@@ -238,7 +238,7 @@ public struct RunService: Sendable {
         try AppStateStore.save(state, ctx.paths)
         guard started.crashedAtLaunch == nil else { return }
         do {
-            try await builds.hooks?.run(.postLaunch, in: ctx, device: app.target.configDevice)
+            try await builds.hooks?.run(.postLaunch, in: ctx, device: app.target.configDevice, product: app.product)
         } catch var error as XcdError where error.code == .hookFailed || error.code == .timeout {
             error.details.append("the app is still running (pid \(started.pid)); stop it with `xcd terminate`")
             throw error

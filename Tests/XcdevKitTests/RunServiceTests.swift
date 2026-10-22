@@ -21,8 +21,8 @@ import XcdevTestSupport
     }
 
     func service(_ probe: FakeProbe = FakeProbe(), now: @escaping @Sendable () -> Date = { Date() },
-                 isolation: MacIsolationService? = nil) -> RunService {
-        let builds = BuildService(runner: fake, provisioner: worktree.provisioner, now: now)
+                 isolation: MacIsolationService? = nil, hooks: HookRunner? = nil) -> RunService {
+        let builds = BuildService(runner: fake, provisioner: worktree.provisioner, now: now, hooks: hooks)
         return RunService(builds: builds, watcher: CrashWatcher(probe: probe, locator: CrashReportLocator(directory: crashDir),
                                                                 sleep: { _ in }),
                           isolation: isolation ?? MacIsolationServiceTests.quiet(on: fake),
@@ -57,10 +57,11 @@ import XcdevTestSupport
                                                                           with: "mac: { platform: macOS, isolation: suffix }")
 
     /// A recorded Mac build of `dev.x.Mac` in this worktree's DerivedData, and a service whose isolation copies it (the
-    /// real `ditto`, a stubbed `codesign`) and sees `apps` running.
-    func isolatedService(_ ctx: WorktreeContext, apps: FakeRunningApps = FakeRunningApps()) throws -> (RunService, AppProduct) {
+    /// real `ditto`, a stubbed `codesign`) and sees `apps` running. `hooks` runs the configured hooks.
+    func isolatedService(_ ctx: WorktreeContext, apps: FakeRunningApps = FakeRunningApps(),
+                         hooks: HookRunner? = nil) throws -> (RunService, AppProduct) {
         let built = try MacIsolationServiceTests.recordBuild(ctx)
-        return (service(isolation: try MacIsolationServiceTests.copying(built.path, on: fake, apps: apps)), built)
+        return (service(isolation: try MacIsolationServiceTests.copying(built.path, on: fake, apps: apps), hooks: hooks), built)
     }
 
     @Test func runBuildsBootsInstallsLaunchesAndRecords() async throws {
@@ -431,6 +432,27 @@ import XcdevTestSupport
         #expect(install.bundleId == "dev.x.Mac.xcd-feat" && install.action == "nothing to install")
         #expect(install.note == "macOS apps run from this worktree (its DerivedData, or .xcdev/mac under isolation: suffix)")
         #expect(!FileManager.default.fileExists(atPath: ctx.paths.macCopies) && !fake.calls.contains { $0.argv[0] == "codesign" })
+    }
+
+    /// The post-launch hook acts on the app xcd just started: under `isolation: suffix` this worktree's copy, so a hook
+    /// that writes the app's defaults or opens it never reaches the build every shared launch runs; under `shared`, the
+    /// build itself.
+    @Test(arguments: ["suffix", "shared"])
+    func theHookSeesTheIdentityOfTheProductThatRuns(isolation: String) async throws {
+        defer { worktree.remove() }
+        _ = try setUp()
+        var ctx = try context((isolation == "suffix" ? Self.suffixConfig : Self.config) + "\nhooks:\n  post-launch: ./grant.sh")
+        let (svc, built) = try isolatedService(ctx, hooks: HookRunner(runner: fake))
+        let (id, path) = isolation == "suffix" ? ("dev.x.Mac.xcd-feat", ctx.paths.macCopies + "/Mac.app") : ("dev.x.Mac", built.path)
+        fake.stub(["ps"]) { _ in
+            ProcessOutput(stdout: fake.calls.contains { $0.argv[0] == "open" } ? "  77 \(path)/Contents/MacOS/Mac\n" : "")
+        }
+        fake.stub(["open"])
+        fake.stub(["sh"])                                                   // the hook
+        #expect(try await svc.launch(device: "mac", options: LaunchOptions(), in: &ctx).bundleId == id)
+        let hook = try #require(fake.calls.last { $0.argv[0] == "sh" })
+        #expect(hook.environment["XCD_HOOK"] == "post-launch")
+        #expect(hook.environment["XCD_BUNDLE_ID"] == id && hook.environment["XCD_APP_PATH"] == path)
     }
 
     /// `xcd open` starts the app through the same steps and puts its own step before the crash watch.

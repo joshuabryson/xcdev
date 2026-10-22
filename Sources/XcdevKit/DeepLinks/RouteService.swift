@@ -52,7 +52,8 @@ public struct RouteService: Sendable {
         report.scriptLog = try await script.run(plan.route, context: .build(ctx: ctx, device: device, output: output), logs: ctx.paths)
         report.deviceSummary = target.summary
         // The script may have built the app, so what xcd knows of it is read once the script is done.
-        report.app = OpenReport.App(state: .untouched, pid: nil, bundleId: ContextInfo.build(ctx: ctx, device: device).bundleId, log: nil)
+        let product = try? RunService.product(for: device, requested: nil, in: ctx)        // the copy under isolation: suffix
+        report.app = OpenReport.App(state: .untouched, pid: nil, bundleId: product?.bundleId, log: nil)
         report.arrived(await arrive(arrivalPlan(plan.route, on: device, in: ctx), after: plan.route, in: ctx))
         return report
     }

@@ -33,6 +33,14 @@ public struct ContextInfo: Reportable {
                            mediaDir: media(ctx.config, location: ctx.location, worktreeName: ctx.state.name, device: device))
     }
 
+    /// This context with `product` as its app: the product a launch started, which under `isolation: suffix` is a Mac
+    /// app's copy rather than the build `build(ctx:device:output:)` reads.
+    func with(product: AppProduct) -> ContextInfo {
+        ContextInfo(projectRoot: projectRoot, worktree: worktree, worktreeName: worktreeName, device: device, udid: udid,
+                    runtime: runtime, derivedData: derivedData, appPath: product.path, bundleId: product.bundleId,
+                    developerDir: developerDir, output: output, mediaDir: mediaDir)
+    }
+
     /// The context before a build resolves its project, simulator, and app (for `pre-build`): the requested device's
     /// name, but no UDID, runtime, or app, even when an earlier build already has them.
     public static func beforeBuild(ctx: WorktreeContext, device: String?, output: OutputFormat? = nil) -> ContextInfo {

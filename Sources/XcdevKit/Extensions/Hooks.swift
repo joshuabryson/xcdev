@@ -19,11 +19,14 @@ public struct HookRunner: Sendable {
         self.now = now
     }
 
-    /// Runs `hook` for this worktree, with the context of `device` (a config device name, or nil).
+    /// Runs `hook` for this worktree, with the context of `device` (a config device name, or nil). `product`, when
+    /// given, is the app the context names instead of the build: the product a launch started.
     /// Returns the hook's log, or nil when the hook isn't configured.
     @discardableResult
-    public func run(_ hook: HookName, in ctx: WorktreeContext, device: String?) async throws -> String? {
-        try await run(hook, config: ctx.config, context: .build(ctx: ctx, device: device, output: output), logs: ctx.paths)
+    public func run(_ hook: HookName, in ctx: WorktreeContext, device: String?, product: AppProduct? = nil) async throws -> String? {
+        var context = ContextInfo.build(ctx: ctx, device: device, output: output)
+        if let product { context = context.with(product: product) }
+        return try await run(hook, config: ctx.config, context: context, logs: ctx.paths)
     }
 
     /// Runs `hook` from `config` with `/bin/sh -c`, from `context.worktree`, with the context contract and
