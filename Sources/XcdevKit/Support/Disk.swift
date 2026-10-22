@@ -13,6 +13,11 @@ enum Disk {
         try? FileManager().removeItem(atPath: path)
     }
 
+    /// Renames the file or folder to `destination`, which must not exist.
+    static func move(_ path: String, to destination: String) throws {
+        try FileManager().moveItem(atPath: path, toPath: destination)
+    }
+
     /// The regular files under the folder, relative to it, in order. Empty when it is not a folder. Links are left out.
     static func files(under path: String) -> [String] {
         let below = (try? FileManager().subpathsOfDirectory(atPath: path)) ?? []

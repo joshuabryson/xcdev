@@ -22,18 +22,23 @@ public struct MacIsolatedCopy: Sendable {
     }
 
     /// Makes or refreshes `copy` from `source` when stale; returns true when it (re)made the copy. A refused source
-    /// leaves nothing behind, and neither does a copy that fails half-way: it would look fresh to the next launch.
+    /// leaves nothing behind. The new copy is built beside the old one at `<copy>.partial` (ditto, identifier, profile,
+    /// signature) and only a signed one replaces `copy`, so an interrupt or a failure never leaves a copy that looks fresh.
     public func refresh(source: AppProduct, copy: AppProduct, device: String) async throws -> Bool {
         guard Self.isStale(source: source, copy: copy) else { return false }
         let facts = try MacBundle.facts(of: source.path, reader: reader)
         try MacIsolationRefusal.check(facts, device: device)
+        let partial = copy.path + ".partial"
         do {
-            try await copyBundle(from: source.path, to: copy.path)
-            try Self.rewriteIdentifier(at: copy.path + "/Contents/Info.plist", to: copy.bundleId)
-            Disk.remove(copy.path + "/Contents/embedded.provisionprofile")
-            try await sign(copy, entitlements: facts.signing?.entitlements)
-        } catch {
+            try await copyBundle(from: source.path, to: partial)
+            try Self.rewriteIdentifier(at: partial + "/Contents/Info.plist", to: copy.bundleId)
+            Disk.remove(partial + "/Contents/embedded.provisionprofile")
+            let next = "check the build with `codesign --verify --deep --strict --verbose=2 \(Shell.quote(source.path))`, or set devices.\(device).isolation: shared in .xcdev.yml"
+            try await sign(copy, at: partial, entitlements: facts.signing?.entitlements, next: next)
             Disk.remove(copy.path)
+            try Disk.move(partial, to: copy.path)
+        } catch {
+            Disk.remove(partial)
             throw error
         }
         return true
@@ -63,7 +68,7 @@ public struct MacIsolatedCopy: Sendable {
     /// cdhash, and the requirement its container stored must still hold. The kept entitlements go in a file beside the
     /// copy, removed whatever happens. The copy runs without the hardened runtime (no `--preserve-metadata=flags`): a
     /// copy that kept the flag cannot load its own embedded framework (different Team IDs).
-    func sign(_ copy: AppProduct, entitlements: Data?) async throws {
+    func sign(_ copy: AppProduct, at path: String, entitlements: Data?, next: String) async throws {
         let file = (copy.path as NSString).deletingPathExtension + ".entitlements.plist"
         defer { Disk.remove(file) }
         var arguments = ["--force", "--sign", "-"]
@@ -71,12 +76,19 @@ public struct MacIsolatedCopy: Sendable {
             try MacEntitlements.kept(entitlements).write(to: URL(fileURLWithPath: file), options: .atomic)
             arguments += ["--entitlements", file]
         }
-        arguments += ["--requirements", "=designated => identifier \"\(copy.bundleId)\"", copy.path]
-        let output = try await runner.run(Invocation("/usr/bin/codesign", arguments))
+        arguments += ["--requirements", "=designated => identifier \"\(copy.bundleId)\"", path]
+        let invocation = Invocation("/usr/bin/codesign", arguments)
+        let output = try await runner.run(invocation)
         guard output.succeeded else {
-            let reason = output.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw XcdError(.subprocessFailed, "codesign could not re-sign \(copy.path): \(reason)",
-                           next: "run `codesign --force --sign - \(Shell.quote(copy.path))` by hand to see why; isolation: shared needs no re-sign")
+            let reason = Self.reason(from: output.stderrString, exit: output.exitCode)
+            throw XcdError.subprocess(invocation, output, message: "codesign could not re-sign \(copy.path): \(reason)", next: next)
         }
+    }
+
+    /// The failure on one line: stderr's lines trimmed, empty ones and the `replacing existing signature` notice dropped.
+    static func reason(from stderr: String, exit: Int32) -> String {
+        let lines = stderr.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasSuffix(": replacing existing signature") }
+        return lines.isEmpty ? "exit \(exit)" : lines.joined(separator: "; ")
     }
 }

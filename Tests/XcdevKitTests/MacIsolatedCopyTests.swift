@@ -60,7 +60,7 @@ import XcdevTestSupport
         #expect(copy.path == paths.macCopies + "/Mac.app" && copy.bundleId == "dev.x.Mac.xcd-feature-login")
         #expect(try String(contentsOfFile: copy.executablePath, encoding: .utf8) == "v1")
         #expect(fake.calls.map(\.argv) == [["codesign", "--force", "--sign", "-", "--entitlements", entitlementsFile,
-                                            "--requirements", Self.requirement, copy.path]])
+                                            "--requirements", Self.requirement, copy.path + ".partial"]])
         #expect(MacEntitlements.keys(try #require(signedWith.value)) == ["com.apple.security.app-sandbox", "com.apple.security.get-task-allow"])
     }
 
@@ -130,7 +130,7 @@ import XcdevTestSupport
         try build(entitlements: nil)
         stubCodesign()
         _ = try await refresh()
-        #expect(fake.calls.map(\.argv) == [["codesign", "--force", "--sign", "-", "--requirements", Self.requirement, copy.path]])
+        #expect(fake.calls.map(\.argv) == [["codesign", "--force", "--sign", "-", "--requirements", Self.requirement, copy.path + ".partial"]])
         #expect(signedWith.value == nil)
     }
 
@@ -150,9 +150,30 @@ import XcdevTestSupport
         stubCodesign(exitCode: 1, stderr: "Mac.app: invalid entitlements\n")
         let error = await #expect(throws: XcdError.self) { _ = try await refresh() }
         #expect(error?.code == .subprocessFailed && error?.message == "codesign could not re-sign \(copy.path): Mac.app: invalid entitlements")
-        #expect(error?.next == "run `codesign --force --sign - \(Shell.quote(copy.path))` by hand to see why; isolation: shared needs no re-sign")
-        #expect(!FileManager.default.fileExists(atPath: copy.path) && !FileManager.default.fileExists(atPath: entitlementsFile))
+        #expect(error?.next == "check the build with `codesign --verify --deep --strict --verbose=2 \(Shell.quote(source.path))`, or set devices.mac.isolation: shared in .xcdev.yml")
+        #expect(error?.details.contains("exit: 1") == true && error?.details.contains("Mac.app: invalid entitlements") == true)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: paths.macCopies) == [])
         #expect(MacIsolatedCopy.isStale(source: source, copy: copy))
+    }
+
+    @Test func aCodesignFailureNamesItsReasonOnOneLine() async throws {
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        try build()
+        stubCodesign(exitCode: 1, stderr: "Mac.app: replacing existing signature\nMac.app: bundle format unrecognized, invalid, or unsuitable\nIn subcomponent: \u{2026}/X.framework\n")
+        let error = await #expect(throws: XcdError.self) { _ = try await refresh() }
+        #expect(error?.message.hasSuffix("bundle format unrecognized, invalid, or unsuitable; In subcomponent: \u{2026}/X.framework") == true)
+        #expect(error?.message.contains("replacing existing signature") == false)
+    }
+
+    @Test func aLeftoverPartialCopyIsReplaced() async throws {
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        try build()
+        stubCodesign()
+        try FileManager.default.createDirectory(atPath: copy.path + ".partial", withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: URL(fileURLWithPath: copy.path + ".partial/stray"))
+        #expect(try await refresh())
+        #expect(try FileManager.default.contentsOfDirectory(atPath: paths.macCopies) == ["Mac.app"])
+        #expect(!FileManager.default.fileExists(atPath: copy.path + "/stray"))
     }
 
     @Test func anUnsignedSourceIsRefusedBeforeAnyCopy() async throws {
