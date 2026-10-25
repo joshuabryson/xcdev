@@ -1,3 +1,4 @@
+import Darwin
 import Testing
 import XcdevTestSupport
 @testable import XcdevKit
@@ -13,6 +14,15 @@ import XcdevTestSupport
 
     @Test func noAncestorNamesTheBinary() {
         #expect(MacHostApp.name(of: 50, parent: { $0 == 50 ? 1 : nil }, path: { Self.paths[$0] }) == "/usr/local/bin/xcd")
+    }
+
+    /// Terminal and iTerm2 run their shells under a root-owned `login`, and `proc_pidinfo` answers EPERM to a user process
+    /// about root's processes, so the walk stopped there and named xcd's own binary (found on 2026-10-22). launchd
+    /// is root's too, and its parent is the kernel, pid 0.
+    @Test func theParentOfAnotherUsersProcessIsRead() {
+        #expect(MacHostApp.parentPid(1) == 0)
+        #expect(MacHostApp.parentPid(getpid()) == getppid())
+        #expect(MacHostApp.parentPid(Int32.max) == nil)
     }
 
     @Test func aMissingGrantIsPermissionMissingNamingTheAppAndThePane() {

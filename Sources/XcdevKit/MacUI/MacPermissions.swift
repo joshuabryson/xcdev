@@ -56,11 +56,15 @@ public enum MacHostApp {
 
     public static func live() -> String { name(of: getpid(), parent: parentPid, path: executablePath) }
 
+    /// Through `sysctl`, as `ps` reads it: `proc_pidinfo` answers EPERM to a user process about root's processes, and
+    /// Terminal and iTerm2 run their shells under a root-owned `login`, so the walk used to stop there. Nil when no
+    /// process has the pid (`sysctl` then answers with no bytes).
     static func parentPid(_ pid: Int32) -> Int32? {
-        var info = proc_bsdinfo()
-        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
-        return Int32(info.pbi_ppid)
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        guard sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        return info.kp_eproc.e_ppid
     }
 
     static func executablePath(_ pid: Int32) -> String? {
