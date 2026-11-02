@@ -41,6 +41,7 @@ If the project has a `.swiftlint.yml` that would let SwiftLint search `.xcdev/`,
 | `deeplinks` | The links the app can open, by name (`routes`), and text they share (`vars`). `xcd open` lists and opens them (`xcd guide deeplinks`). | The app handles links or launch arguments that take an agent straight to a screen. |
 | `lint` | The project's linter (`tool`), or its own lint command (`run`). `xcd lint` runs it on the Swift files a change touched. | The project uses SwiftLint or has a lint script, or to say it has no linter (`tool: none`). |
 | `format` | The project's formatter (`tool`), or its own format command (`run`, with `check` for a run that only reports). `xcd format` runs it on the Swift code a change touched. | The project uses SwiftFormat or Apple's swift-format or has a format script, or to say it has no formatter (`tool: none`). |
+| `sim` | `idle`: how long a booted clone may go without an xcd command before it shuts itself down (default `10m`; `off` keeps it booted). `--idle` on `run`, `test`, and `sim boot` overrides it for one command. | The user wants simulators to stay booted longer, or shut down sooner, or never. |
 
 Per-machine overrides go in `.xcdev.local.yml`, which is merged over `.xcdev.yml`.
 """#

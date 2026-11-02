@@ -60,6 +60,7 @@ public enum ConfigLoader {
             issues += deviceIssues(name, spec, among: devices)
         }
         issues += settingIssues(config)
+        issues += simIssues(config)
         issues += commandIssues(config.commands ?? [:])
         issues += DeepLinksValidation.issues(config)
         issues += QualityValidation.issues(config)
@@ -115,6 +116,13 @@ public enum ConfigLoader {
                                       message: "'\(max)' is not a duration like \"30s\", \"10m\", or \"1h\""))
         }
         return issues
+    }
+
+    /// `sim:`.
+    static func simIssues(_ config: XcdevConfig) -> [ConfigIssue] {
+        guard let idle = config.sim?.idle, IdleThreshold.parse(idle) == nil else { return [] }
+        return [ConfigIssue(path: "sim.idle",
+                            message: "'\(idle)' is not a duration like \"30s\", \"5m\", or \"1h\", or off")]
     }
 
     static func commandIssues(_ commands: [String: ProjectCommandSpec]) -> [ConfigIssue] {

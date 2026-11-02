@@ -14,6 +14,7 @@ public struct XcdevConfig: Codable, Sendable, Equatable {
     public var deeplinks: DeepLinksConfig?
     public var lint: LintConfig?
     public var format: FormatConfig?
+    public var sim: SimSettings?
 
     public struct Schemes: Codable, Sendable, Equatable {
         public var app: String?
@@ -26,6 +27,10 @@ public struct XcdevConfig: Codable, Sendable, Equatable {
 
     public struct LogSettings: Codable, Sendable, Equatable {
         public var maxFollow: String?
+    }
+
+    public struct SimSettings: Codable, Sendable, Equatable {
+        public var idle: String?
     }
 
     /// `ui:`: screenshots, recordings, and (later) UI driving.
@@ -56,6 +61,9 @@ public struct XcdevConfig: Codable, Sendable, Equatable {
 
     /// Longest `xcd logs --follow --for` allowed, so an agent can never block for long. Default 5 minutes.
     public var maxLogFollow: Duration { logs?.maxFollow.flatMap(DurationText.parse) ?? .seconds(300) }
+
+    /// How long a clone may go without an xcd command before it shuts itself down, in seconds; 0 is never. Default 10m.
+    public var idleSeconds: Int { sim?.idle.flatMap(IdleThreshold.parse) ?? IdleThreshold.defaultSeconds }
 
     public var mediaDirTemplate: String { ui?.media?.dir ?? Self.defaultMediaDir }
 

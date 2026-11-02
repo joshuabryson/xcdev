@@ -122,6 +122,10 @@ public enum ConfigSchema {
         SchemaField("deeplinks", deeplinks, example: "deeplinks:\n  vars:\n    base: \"myapp://app\"\n  routes:\n    settings:\n      description: \"Open settings\"\n      url: \"{base}/settings\""),
         SchemaField("lint", lint, example: "lint:\n  tool: swiftlint\n  args: [\"--strict\"]"),
         SchemaField("format", format, example: "format:\n  tool: swiftformat"),
+        SchemaField("sim", .object("Simulator settings.", [
+            SchemaField("idle", .string("How long a clone may go without an xcd command before it shuts itself down, e.g. \"10m\", or \"off\" to keep it booted. `--idle` on run, test, and sim boot overrides it."),
+                        default: "10m", example: "sim:\n  idle: 30m"),
+        ]), example: "sim:\n  idle: 30m"),
     ])
 
     /// Top-level keys defined later. Present keys get a clear "not supported yet" error.

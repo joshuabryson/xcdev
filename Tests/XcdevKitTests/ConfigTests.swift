@@ -194,6 +194,22 @@ import Testing
         #expect(config.maxLogFollow == .seconds(90))
     }
 
+    static let minimal = "version: 1\nproject: A.xcodeproj\n"
+
+    @Test func simIdleDefaultsAndParses() throws {
+        let minimal = Self.minimal
+        #expect(try ConfigLoader.parse(main: minimal).idleSeconds == 600)
+        #expect(try ConfigLoader.parse(main: minimal + "sim:\n  idle: 30m\n").idleSeconds == 1800)
+        #expect(try ConfigLoader.parse(main: minimal + "sim:\n  idle: off\n").idleSeconds == 0)
+        #expect(try ConfigLoader.parse(main: minimal + "sim:\n  idle: 30m\n", local: "sim:\n  idle: 5m\n").idleSeconds == 300)
+    }
+
+    @Test func simIdleMustBeADurationOrOff() {
+        let error = #expect(throws: XcdError.self) { try ConfigLoader.parse(main: Self.minimal + "sim:\n  idle: soon\n") }
+        #expect(error?.code == .configInvalid)
+        #expect(error?.details == ["sim.idle: 'soon' is not a duration like \"30s\", \"5m\", or \"1h\", or off"])
+    }
+
     @Test func logsMaxFollowMustBeADuration() {
         let error = #expect(throws: XcdError.self) {
             try ConfigLoader.parse(main: "version: 1\nproject: A.xcodeproj\nlogs: { maxFollow: forever }")
