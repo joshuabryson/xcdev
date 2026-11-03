@@ -50,11 +50,7 @@ public struct DeviceWatchdog: Sendable {
 
     public mutating func poll() async -> WatchdogStep {
         guard let lease = leases.load(udid) else { return ended(code: 0) }
-        guard await listed() else {
-            log("\(udid) is no longer booted")
-            Disk.remove(files.lease)
-            return ended(code: 0)
-        }
+        guard await listed() else { return await notBooted() }
         guard isStale(lease), !FileLock.isHeld(at: files.lock) else { return .wait }
         return await shutDown(lease)
     }
@@ -65,8 +61,32 @@ public struct DeviceWatchdog: Sendable {
         do {
             return try await FileLock.withLockIfFree(at: files.lock) { try await shutDownHolding(seen) } ?? .wait
         } catch {
-            return failed(error)
+            return failed("shutdown failed: ", error)
         }
+    }
+
+    /// The list shows the clone not booted, or gone. A command holding the lease may be about to boot it (`xcd test`'s
+    /// xcodebuild does), so the session ends only under an exclusive try of `lease.lock` (taken: `.wait`).
+    private mutating func notBooted() async -> WatchdogStep {
+        do {
+            return try await FileLock.withLockIfFree(at: files.lock) { await endUnlessBooted() } ?? .wait
+        } catch {
+            return failed("could not take the lease's lock: ", error)
+        }
+    }
+
+    /// Inside the lock, the list is read again: a clone booted meanwhile keeps its session, as does a list that cannot
+    /// be read. Otherwise the lease and this watchdog's record go before the lock is let go.
+    private func endUnlessBooted() async -> WatchdogStep {
+        do {
+            if try await simctl.catalog().device(udid: udid)?.state == "Booted" { return .wait }
+        } catch {
+            logFailure("simctl list failed: ", error)
+            return .wait
+        }
+        log("\(udid) is no longer booted")
+        Disk.remove(files.lease)
+        return ended(code: 0)
     }
 
     /// Polls until the watchdog is done; returns its exit code.
@@ -123,9 +143,9 @@ public struct DeviceWatchdog: Sendable {
 
     /// After `attempts` failures the watchdog gives up, keeping the lease, so doctor shows a booted clone with no
     /// watchdog rather than a silent loop.
-    private mutating func failed(_ error: any Error) -> WatchdogStep {
+    private mutating func failed(_ prefix: String, _ error: any Error) -> WatchdogStep {
         failures += 1
-        logFailure("shutdown failed: ", error)
+        logFailure(prefix, error)
         guard failures >= Self.attempts else { return .retry }
         log("giving up")
         return ended(code: 1)

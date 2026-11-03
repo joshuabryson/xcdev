@@ -1,7 +1,7 @@
 import Foundation
 
 /// Begins or keeps a clone's idle session once a command has booted it, by any path: `DeviceProvisioner.boot`, the
-/// UI runner's own boot, or `xcd test` after its xcodebuild run.
+/// UI runner's own boot, or `xcd test` before its xcodebuild run boots it.
 public struct IdleSessions: Sendable {
     public let leases: DeviceLeases
     public let watchdogs: Watchdogs
@@ -15,7 +15,7 @@ public struct IdleSessions: Sendable {
         self.executable = executable
     }
 
-    /// The clone `name` is booted now. A session is new when there is no lease or its watchdog is not running; only a
+    /// The clone `name` is booted now, or is about to be (`xcd test`). A session is new when there is no lease or its watchdog is not running; only a
     /// new one reads `simctl list`, to sweep dead sessions, writes a lease, and starts a watchdog. Returns a note when
     /// the watchdog could not start (or the lease could not be written): that never fails the command.
     ///

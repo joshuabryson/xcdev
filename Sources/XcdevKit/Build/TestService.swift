@@ -54,27 +54,20 @@ public struct TestService: Sendable {
         return report
     }
 
-    /// Runs xcodebuild. It boots the clone itself, so the clone's idle session begins here when it is left booted,
-    /// whether the run returned or threw (a timeout comes after xcodebuild may have booted it).
+    /// Runs xcodebuild. It boots the clone itself, so the clone's idle session begins first: the lease is written and
+    /// held for the whole run, and the watchdog started, so a run that is interrupted, times out, or is killed still
+    /// leaves the clone watched. Until xcodebuild boots it, the watchdog waits while this command holds the lease.
     func runTests(_ plan: BuildPlan, _ options: TestOptions, in ctx: WorktreeContext) async throws -> BuildService.ResultBundleRun {
+        if let name = plan.target.configDevice, let device = plan.target.device {
+            await builds.provisioner.leased(name, device, in: ctx)
+        }
         let paths = ctx.paths
         let step = BuildStep(kind: "test", progress: "testing \(plan.scheme) on \(plan.target.summary)", timeout: options.timeout)
-        do {
-            let run = try await builds.runWithResultBundle(plan, step, paths: paths) { bundle in
-                XcodebuildRequest(actions: [.test], container: plan.container, scheme: plan.scheme,
-                                  destination: plan.target.destination, configuration: options.configuration,
-                                  paths: paths, resultBundle: bundle, onlyTesting: options.only, skipTesting: options.skip)
-            }
-            await leaseClone(of: plan, in: ctx)
-            return run
-        } catch {
-            await leaseClone(of: plan, in: ctx)
-            throw error
+        return try await builds.runWithResultBundle(plan, step, paths: paths) { bundle in
+            XcodebuildRequest(actions: [.test], container: plan.container, scheme: plan.scheme,
+                              destination: plan.target.destination, configuration: options.configuration,
+                              paths: paths, resultBundle: bundle, onlyTesting: options.only, skipTesting: options.skip)
         }
-    }
-
-    private func leaseClone(of plan: BuildPlan, in ctx: WorktreeContext) async {
-        if let device = plan.target.configDevice { await builds.provisioner.leaseIfBooted(device, in: ctx) }
     }
 
     /// Stops this device's UI runner when the run includes UI tests, or xcd can't tell: the project's UI tests and

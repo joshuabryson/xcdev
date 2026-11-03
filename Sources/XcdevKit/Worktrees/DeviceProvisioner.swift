@@ -118,20 +118,11 @@ public struct DeviceProvisioner: Sendable {
         return (device, retries)
     }
 
-    /// After a boot: begins or keeps the clone's idle session. A watchdog that could not start becomes a note, never a
-    /// failure; this command's `--idle`, when given, is noted too.
+    /// After a boot, or before `xcd test`'s xcodebuild boots the clone: begins or keeps the clone's idle session. A
+    /// watchdog that could not start becomes a note, never a failure; this command's `--idle`, when given, is noted too.
     public func leased(_ name: String, _ device: ProvisionedDevice, in ctx: WorktreeContext) async {
         guard let sessions else { return }
         if let note = await sessions.began(name, device, in: ctx, simctl: simctl(for: ctx)) { Notes.current?.add(note) }
         if let idle = ctx.idleOverride { Notes.current?.add("idle \(IdleThreshold.text(idle))") }
-    }
-
-    /// For `xcd test`, whose xcodebuild boots the clone itself: `leased` when the worktree's clone `name` is booted now.
-    /// A clone never made, or a `simctl list` that fails, leases nothing.
-    public func leaseIfBooted(_ name: String, in ctx: WorktreeContext) async {
-        guard sessions != nil, let device = ctx.state.devices[name],
-              let catalog = try? await simctl(for: ctx).catalog(), catalog.device(udid: device.udid)?.state == "Booted"
-        else { return }
-        await leased(name, device, in: ctx)
     }
 }

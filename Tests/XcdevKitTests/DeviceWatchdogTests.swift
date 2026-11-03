@@ -151,6 +151,48 @@ import XcdevTestSupport
         #expect(!fake.commandLines.contains { $0.contains("shutdown") })
     }
 
+    /// A command holding the lease of a clone that is not booted, such as `xcd test` before its xcodebuild boots it,
+    /// keeps the session: the watchdog waits.
+    @Test func aCloneNotBootedWhileTheLeaseIsHeldIsWaitedFor() async throws {
+        defer { cleanUp() }
+        try leases.save(stale)
+        try writeRecord(pid: 4242)
+        sims.setState("Shutdown", udid: "U1")
+        let fd = try await FileLock.hold(at: leases.files("U1").lock)
+        defer { FileLock.release(fd) }
+        var dog = watchdog()
+        #expect(await dog.poll() == .wait)
+        #expect(leases.load("U1") != nil)
+        #expect(record() != nil)
+    }
+
+    /// The minute's list said Shutdown, but the clone booted before the watchdog took the lock: the list read inside
+    /// the lock wins.
+    @Test func aCloneBootedAgainBeforeTheLockIsTakenIsKept() async throws {
+        defer { cleanUp() }
+        try leases.save(.sample(udid: "U1", renewedAt: t0, idle: 600, root: root))
+        try writeRecord(pid: 4242)
+        let lists = Counter(), shutDown = Self.catalog.replacingOccurrences(of: "Booted", with: "Shutdown")
+        fake.stub(["xcrun", "simctl", "list"]) { _ in ProcessOutput(stdout: lists.increment() == 1 ? shutDown : Self.catalog) }
+        var dog = watchdog()
+        #expect(await dog.poll() == .wait)
+        #expect(lists.value == 2)
+        #expect(leases.load("U1") != nil)
+        #expect(record() != nil)
+    }
+
+    @Test func aCloneGoneFromTheListEndsTheWatchdog() async throws {
+        defer { cleanUp() }
+        try leases.save(stale)
+        try writeRecord(pid: 4242)
+        sims.deleteExternally(udid: "U1")
+        var dog = watchdog()
+        #expect(await dog.poll() == .exit(0))
+        #expect(leases.load("U1") == nil)
+        #expect(record() == nil)
+        #expect(lines.value.contains("U1 is no longer booted"))
+    }
+
     @Test func aListThatFailsCountsAsBooted() async throws {
         defer { cleanUp() }
         try leases.save(.sample(udid: "U1", renewedAt: t0, idle: 600, root: root))

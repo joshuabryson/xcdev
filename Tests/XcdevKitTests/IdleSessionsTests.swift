@@ -222,16 +222,4 @@ import XcdevTestSupport
         #expect(notes.all == ["could not start the idle watchdog: xcd exited as soon as it started; the clone stays booted until xcd sim shutdown"])
         holds.release(booted.udid)
     }
-
-    @Test func leasingIfBootedLeasesOnlyABootedClone() async throws {
-        defer { cleanUp() }
-        simulators.setState("Shutdown", udid: device.udid)
-        await provisioner.leaseIfBooted("iphone", in: ctx)
-        #expect(leases.load(device.udid) == nil)
-        simulators.setState("Booted", udid: device.udid)
-        await provisioner.leaseIfBooted("iphone", in: ctx)
-        #expect(leases.load(device.udid) != nil)
-        await provisioner.leaseIfBooted("watch", in: ctx)                         // never cloned: nothing to lease
-        #expect(detached.starts.count == 1)
-    }
 }
