@@ -73,9 +73,9 @@ import XcdevTestSupport
         #expect(report.action == "shut down" && report.udid == phone.device.udid)
     }
 
-    /// Boots `iphone`, gives it a lease and a live watchdog, runs `action`, and checks the watchdog was stopped and the lease is gone.
-    func endsTheWatchdog(_ action: (WorktreeContext, FakeDetachedProcesses) async throws -> Void) async throws {
-        defer { try? FileManager.default.removeItem(atPath: dir) }
+    /// Boots `iphone` and gives it a lease and a live watchdog.
+    func bootWithWatchdog() async throws
+        -> (WorktreeContext, FakeDetachedProcesses, LeaseHolds, DeviceLeases, Watchdogs, String) {
         _ = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
         let detached = FakeDetachedProcesses()
         let holds = LeaseHolds()
@@ -83,7 +83,15 @@ import XcdevTestSupport
         let udid = try await provisioner.boot("iphone", in: &ctx).device.udid
         let leases = DeviceLeases(globalPaths: GlobalPaths(base: dir + "/home"), holds: holds)
         try leases.save(.sample(udid: udid))
-        try await Watchdogs(leases: leases, detached: detached).start(udid, developerDir: nil, log: "/l", executable: "/xcd")
+        let watchdogs = Watchdogs(leases: leases, detached: detached)
+        try await watchdogs.start(udid, developerDir: nil, log: "/l", executable: "/xcd")
+        return (ctx, detached, holds, leases, watchdogs, udid)
+    }
+
+    /// Boots `iphone`, gives it a lease and a live watchdog, runs `action`, and checks the watchdog was stopped and the lease is gone.
+    func endsTheWatchdog(_ action: (WorktreeContext, FakeDetachedProcesses) async throws -> Void) async throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let (ctx, detached, holds, leases, _, udid) = try await bootWithWatchdog()
         let pid = try #require(detached.starts.first).identity.pid
         try await action(ctx, detached)
         #expect(detached.stops.contains { $0.pid == pid && $0.signal == SIGTERM })
@@ -108,16 +116,8 @@ import XcdevTestSupport
     @Test(arguments: ["shutdown", "erase"])
     func aFailedShutdownLeavesTheWatchdogAndLease(_ command: String) async throws {
         defer { try? FileManager.default.removeItem(atPath: dir) }
-        _ = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
-        let detached = FakeDetachedProcesses()
-        let holds = LeaseHolds()
-        var ctx = try context()
-        let udid = try await provisioner.boot("iphone", in: &ctx).device.udid
-        let leases = DeviceLeases(globalPaths: GlobalPaths(base: dir + "/home"), holds: holds)
+        let (ctx, detached, holds, leases, watchdogs, udid) = try await bootWithWatchdog()
         defer { holds.release(udid); LeaseHolds.shared.release(udid) }
-        try leases.save(.sample(udid: udid))
-        let watchdogs = Watchdogs(leases: leases, detached: detached)
-        try await watchdogs.start(udid, developerDir: nil, log: "/l", executable: "/xcd")
         fake.stub(["xcrun", "simctl", "shutdown", udid], exitCode: 1, stderr: "boom")
         await #expect(throws: XcdError.self) {
             _ = command == "shutdown" ? try await provisioner.shutdownReport("iphone", in: ctx, detached: detached)

@@ -8,8 +8,6 @@ public final class LeaseHolds: Sendable {
 
     private let held = Mutex<[String: Int32]>([:])
 
-    public init() {}
-
     /// Takes a shared hold on `lockPath` for `udid`; nothing happens when this process already holds that clone.
     public func hold(_ udid: String, at lockPath: String) async throws {
         if isHolding(udid) { return }

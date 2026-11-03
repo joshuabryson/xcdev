@@ -15,6 +15,15 @@ import XcdevTestSupport
         return (project, svc, main, state)
     }
 
+    /// `state` with an `iphone` clone recorded and saved to the worktree's state file.
+    func withIphone(_ state: WorktreeState, udid: String = "4CEABB59-81A5-4060-9573-99D2BA1BA97B") throws -> WorktreeState {
+        var state = state
+        state.devices["iphone"] = ProvisionedDevice(udid: udid, deviceType: "iPhone 18 Pro", deviceTypeIdentifier: "t",
+                                                    runtime: "iOS 27.0", runtimeIdentifier: "r")
+        try WorktreeStateStore.save(state, WorktreePaths(root: state.path))
+        return state
+    }
+
     /// Removing a worktree stops its recordings, runners, and watchdogs: the setup's service does it through a fake.
     @Test func theSetupLaunchesThroughAFake() async throws {
         let (project, svc, _, _) = try await setup()
@@ -26,10 +35,7 @@ import XcdevTestSupport
         let (project, svc, main, created) = try await setup()
         defer { project.remove() }
         let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
-        var state = created
-        state.devices["iphone"] = ProvisionedDevice(udid: "4CEABB59-81A5-4060-9573-99D2BA1BA97B", deviceType: "iPhone 18 Pro",
-                                                    deviceTypeIdentifier: "t", runtime: "iOS 27.0", runtimeIdentifier: "r")
-        try WorktreeStateStore.save(state, WorktreePaths(root: state.path))
+        let state = try withIphone(created)
 
         let removal = try await svc.remove(name: "feat", in: main)
         #expect(removal.removedDevices == ["iphone"])
@@ -44,10 +50,7 @@ import XcdevTestSupport
         let (project, svc, main, created) = try await setup()
         defer { project.remove() }
         let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
-        var state = created
-        state.devices["iphone"] = ProvisionedDevice(udid: "4CEABB59-81A5-4060-9573-99D2BA1BA97B", deviceType: "iPhone 18 Pro",
-                                                    deviceTypeIdentifier: "t", runtime: "iOS 27.0", runtimeIdentifier: "r")
-        try WorktreeStateStore.save(state, WorktreePaths(root: state.path))
+        let state = try withIphone(created)
         fake.stub(["du"]) { inv in
             let lines = inv.arguments.dropFirst().map { path in
                 let kb = path.hasSuffix(".xcdev") ? 200 : 250
@@ -120,11 +123,8 @@ import XcdevTestSupport
         let (project, _, ctx, created) = try await setup()
         defer { project.remove() }
         _ = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
-        var state = created
         let udid = "4CEABB59-81A5-4060-9573-99D2BA1BA97B"
-        state.devices["iphone"] = ProvisionedDevice(udid: udid, deviceType: "iPhone 18 Pro", deviceTypeIdentifier: "t",
-                                                    runtime: "iOS 27.0", runtimeIdentifier: "r")
-        try WorktreeStateStore.save(state, WorktreePaths(root: state.path))
+        let state = try withIphone(created, udid: udid)
         let detached = FakeDetachedProcesses()
         let holds = LeaseHolds()
         let globalPaths = GlobalPaths(base: project.home)

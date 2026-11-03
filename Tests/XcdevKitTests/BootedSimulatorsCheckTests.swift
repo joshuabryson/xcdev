@@ -95,12 +95,19 @@ import XcdevTestSupport
         #expect(report.problems.isEmpty)
     }
 
-    @Test func aCloneWithoutAWatchdogIsThisProjectsProblem() async throws {
+    /// A booted clone leased 25m ago with no watchdog, and the doctor's report on it (no fix).
+    func reportOfAnUnwatchedClone(includeDisk: Bool = true) async throws -> (TempProject, DoctorReport) {
         var (project, sims, _, ctx) = try await setUp()
-        defer { project.remove() }
         let clone = try bootedClone(sims, in: &ctx)
         try lease(clone, quiet: 1500, root: ctx.paths.root, home: project.home)
-        let report = await doctor(project).run(fix: false, checks: [BootedSimulatorsCheck()], from: project.root)
+        let report = await doctor(project).run(fix: false, checks: [BootedSimulatorsCheck()], from: project.root,
+                                               includeDisk: includeDisk)
+        return (project, report)
+    }
+
+    @Test func aCloneWithoutAWatchdogIsThisProjectsProblem() async throws {
+        let (project, report) = try await reportOfAnUnwatchedClone()
+        defer { project.remove() }
         let problem = try #require(report.problems.first)
         #expect(problem.message == "Sample App/main iphone: booted 2h 10m, used 25m ago, no watchdog")
         #expect(problem.action == .startWatchdog)
@@ -318,11 +325,8 @@ import XcdevTestSupport
     }
 
     @Test func aSummaryLeadsItsChecksLinesAndReachesTheJSON() async throws {
-        var (project, sims, _, ctx) = try await setUp()
+        let (project, report) = try await reportOfAnUnwatchedClone(includeDisk: false)
         defer { project.remove() }
-        let clone = try bootedClone(sims, in: &ctx)
-        try lease(clone, quiet: 1500, root: ctx.paths.root, home: project.home)
-        let report = await doctor(project).run(fix: false, checks: [BootedSimulatorsCheck()], from: project.root, includeDisk: false)
         #expect(report.text == """
             doctor: 1 problem
             ok       booted-simulators  1 booted: Sample App/main iphone 2h 10m (no watchdog)
