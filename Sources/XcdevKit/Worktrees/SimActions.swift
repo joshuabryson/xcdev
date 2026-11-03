@@ -30,6 +30,15 @@ extension DeviceProvisioner {
         return going.report("erased", retries: retries, ctx)
     }
 
+    /// `xcd sim shutdown`: the one clone, or with --all every clone of the worktree.
+    public func shutdownResult(_ scope: ShutdownScope, in ctx: WorktreeContext,
+                               detached: (any DetachedProcessLaunching)? = nil) async throws -> ShutdownResult {
+        switch scope {
+        case .all: return .all(try await shutdownAllReport(in: ctx, detached: detached))
+        case .one(let device): return .one(try await shutdownReport(device, in: ctx, detached: detached))
+        }
+    }
+
     /// Shuts down every booted simulator clone of the worktree and ends each clone's session. Devices are listed sorted;
     /// a Mac has no simulator and is left out.
     public func shutdownAllReport(in ctx: WorktreeContext,

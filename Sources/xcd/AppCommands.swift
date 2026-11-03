@@ -14,9 +14,9 @@ struct RunCommand: AsyncParsableCommand {
     @OptionGroup var options: GlobalOptions
 
     func run() async throws {
-        let idle = try IdleThreshold.option(idle)
         try await Emit.run("run", options) { services in
-            var ctx = try await services.open(worktree: options.worktree, xcode: target.xcode, idle: idle)
+            let threshold = try IdleThreshold.option(idle)
+            var ctx = try await services.open(worktree: options.worktree, xcode: target.xcode, idle: threshold)
             await Recording.stopOverdue(services, ctx)
             let timeout = try DurationText.option(scheme.timeout, flag: "--timeout") ?? .seconds(1800)
             return try await services.apps.run(

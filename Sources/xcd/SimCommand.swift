@@ -21,9 +21,9 @@ struct SimCommand: AsyncParsableCommand {
         @OptionGroup var options: GlobalOptions
 
         func run() async throws {
-            let idle = try IdleThreshold.option(idle)
             try await Emit.run("sim boot", options) { services in
-                var ctx = try await services.open(worktree: options.worktree, idle: idle)
+                let threshold = try IdleThreshold.option(idle)
+                var ctx = try await services.open(worktree: options.worktree, idle: threshold)
                 await Recording.stopOverdue(services, ctx)
                 return try await services.provisioner.bootReport(target.device, in: &ctx)
             }
@@ -37,17 +37,10 @@ struct SimCommand: AsyncParsableCommand {
         @OptionGroup var options: GlobalOptions
 
         func run() async throws {
-            switch try ShutdownScope.parse(all: all, device: target.device) {
-            case .all:
-                try await Emit.run("sim shutdown", options) { services in
-                    let ctx = try await services.open(worktree: options.worktree, renewsLeases: false)
-                    return try await services.provisioner.shutdownAllReport(in: ctx, detached: services.detached)
-                }
-            case .one(let device):
-                try await Emit.run("sim shutdown", options) { services in
-                    let ctx = try await services.open(worktree: options.worktree, renewsLeases: false)
-                    return try await services.provisioner.shutdownReport(device, in: ctx, detached: services.detached)
-                }
+            try await Emit.run("sim shutdown", options) { services in
+                let scope = try ShutdownScope.parse(all: all, device: target.device)
+                let ctx = try await services.open(worktree: options.worktree, renewsLeases: false)
+                return try await services.provisioner.shutdownResult(scope, in: ctx, detached: services.detached)
             }
         }
     }

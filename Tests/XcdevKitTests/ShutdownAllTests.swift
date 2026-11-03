@@ -87,6 +87,27 @@ import XcdevTestSupport
             #""data":{"devices":[{"action":"not booted","device":"ipad","notes":[],"retries":0,"udid":"U2"}],"worktree":"main"}"#))
     }
 
+    /// `sim shutdown` has one result for both scopes; each prints and encodes exactly as the report it holds.
+    @Test func aShutdownResultPrintsAsTheReportItHolds() throws {
+        let one = SimReport(action: "shut down", device: "iphone", udid: "U1", retries: 1, worktree: "main", notes: ["n"])
+        let all = ShutdownAllReport(devices: [.init(device: "ipad", udid: "U2", action: "not booted", retries: 0, notes: [])],
+                                    worktree: "main")
+        for format in [OutputFormat.text, .json] {
+            #expect(Renderer.report(ShutdownResult.one(one), command: "sim shutdown", format: format, notes: [])
+                        == Renderer.report(one, command: "sim shutdown", format: format, notes: []))
+            #expect(Renderer.report(ShutdownResult.all(all), command: "sim shutdown", format: format, notes: [])
+                        == Renderer.report(all, command: "sim shutdown", format: format, notes: []))
+        }
+    }
+
+    @Test func theResultOfOneScopeShutsDownThatClone() async throws {
+        defer { cleanUp() }
+        let result = try await provisioner.shutdownResult(.one("iphone"), in: ctx, detached: detached)
+        #expect(result.text == "shut down iphone  udid=\(iphone)")
+        let every = try await provisioner.shutdownResult(.all, in: ctx, detached: detached)
+        #expect(every.text == "nothing booted in feat")
+    }
+
     @Test func allAndDeviceTogetherIsUsage() throws {
         #expect(try ShutdownScope.parse(all: true, device: nil) == .all)
         #expect(try ShutdownScope.parse(all: false, device: "ipad") == .one("ipad"))

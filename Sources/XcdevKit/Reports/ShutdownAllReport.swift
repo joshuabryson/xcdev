@@ -42,6 +42,26 @@ public struct ShutdownAllReport: Reportable {
     public var envelopeWorktree: String? { worktree }
 }
 
+/// What `xcd sim shutdown` did: one clone's report, or with --all every clone's. It prints and encodes as the report it
+/// holds, so the command has one result type for both.
+public enum ShutdownResult: Reportable {
+    case one(SimReport)
+    case all(ShutdownAllReport)
+
+    private var report: any Reportable {
+        switch self {
+        case .one(let report): return report
+        case .all(let report): return report
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws { try report.encode(to: encoder) }
+    public var text: String { report.text }
+    public var envelopeWorktree: String? { report.envelopeWorktree }
+    public var failure: XcdError? { report.failure }
+    public var textIsData: Bool { report.textIsData }
+}
+
 /// Which clones `xcd sim shutdown` acts on.
 public enum ShutdownScope: Equatable, Sendable {
     case one(String?), all
