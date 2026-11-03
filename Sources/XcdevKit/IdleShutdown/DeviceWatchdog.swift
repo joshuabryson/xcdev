@@ -32,6 +32,9 @@ public struct DeviceWatchdog: Sendable {
     public let now: @Sendable () -> Date
     public let log: @Sendable (String) -> Void
     private var lastList: Date?
+    /// The last poll that found `lease.lock` held: quiet time counts from it when it is later than the renewal.
+    private var lastHeld: Date?
+    /// Failed tries in a row: a poll that waits starts the count again.
     private var failures = 0
 
     public init(udid: String, leases: DeviceLeases, simctl: SimctlClient, detached: any DetachedProcessLaunching,
@@ -48,10 +51,18 @@ public struct DeviceWatchdog: Sendable {
 
     private var files: DeviceFiles { leases.files(udid) }
 
+    /// One turn of the loop. A poll that waits resets the failure count, so `attempts` counts failures in a row.
     public mutating func poll() async -> WatchdogStep {
+        let step = await nextStep()
+        if step == .wait { failures = 0 }
+        return step
+    }
+
+    private mutating func nextStep() async -> WatchdogStep {
         guard let lease = leases.load(udid) else { return ended(code: 0) }
         guard await listed() else { return await notBooted() }
-        guard isStale(lease), !FileLock.isHeld(at: files.lock) else { return .wait }
+        guard !FileLock.isHeld(at: files.lock) else { return held() }
+        guard isStale(lease) else { return .wait }
         return await shutDown(lease)
     }
 
@@ -59,7 +70,10 @@ public struct DeviceWatchdog: Sendable {
     /// the lease the poll judged stale; one renewed since, or no longer stale, is left alone.
     mutating func shutDown(_ seen: DeviceLease) async -> WatchdogStep {
         do {
-            return try await FileLock.withLockIfFree(at: files.lock) { try await shutDownHolding(seen) } ?? .wait
+            guard let step = try await FileLock.withLockIfFree(at: files.lock, { try await shutDownHolding(seen) }) else {
+                return held()
+            }
+            return step
         } catch {
             return failed("shutdown failed: ", error)
         }
@@ -69,10 +83,17 @@ public struct DeviceWatchdog: Sendable {
     /// xcodebuild does), so the session ends only under an exclusive try of `lease.lock` (taken: `.wait`).
     private mutating func notBooted() async -> WatchdogStep {
         do {
-            return try await FileLock.withLockIfFree(at: files.lock) { await endUnlessBooted() } ?? .wait
+            guard let step = try await FileLock.withLockIfFree(at: files.lock, { await endUnlessBooted() }) else { return held() }
+            return step
         } catch {
             return failed("could not take the lease's lock: ", error)
         }
+    }
+
+    /// A command holds the lease: the clone is in use now, so its quiet time starts again.
+    private mutating func held() -> WatchdogStep {
+        lastHeld = now()
+        return .wait
     }
 
     /// Inside the lock, the list is read again: a clone booted meanwhile keeps its session, as does a list that cannot
@@ -105,7 +126,7 @@ public struct DeviceWatchdog: Sendable {
     private func shutDownHolding(_ seen: DeviceLease) async throws -> WatchdogStep {
         guard let lease = leases.load(udid) else { return ended(code: 0) }
         guard lease.renewedAt == seen.renewedAt, isStale(lease) else { return .wait }
-        let quiet = lease.quietSeconds(now: now())
+        let quiet = judged(lease).quietSeconds(now: now())
         await stopUsers(of: lease)
         try await simctl.shutdown(udid: udid)
         Disk.remove(files.lease)
@@ -114,8 +135,17 @@ public struct DeviceWatchdog: Sendable {
         return step
     }
 
+    /// The lease as the watchdog judges it: quiet since its renewal, or since the last poll that saw it held when that
+    /// came later. Doctor's "used … ago" still counts from the renewal.
+    private func judged(_ lease: DeviceLease) -> DeviceLease {
+        guard let lastHeld, lastHeld > lease.renewedAt else { return lease }
+        var judged = lease
+        judged.renewedAt = lastHeld
+        return judged
+    }
+
     private func isStale(_ lease: DeviceLease) -> Bool {
-        lease.isStale(now: now(), rootExists: Disk.exists(lease.worktreeRoot))
+        judged(lease).isStale(now: now(), rootExists: Disk.exists(lease.worktreeRoot))
     }
 
     /// Whether the clone still counts as booted. `simctl list` is read on the first poll and then once per
@@ -133,11 +163,11 @@ public struct DeviceWatchdog: Sendable {
     }
 
     /// Stops what ran against the clone, as `sim shutdown` does: its recordings first, so the video is finished, then its
-    /// UI runner.
+    /// UI runner. A record of the same device name for another udid (the device was cloned again) is left alone.
     private func stopUsers(of lease: DeviceLease) async {
         let paths = WorktreePaths(root: lease.worktreeRoot)
-        let recordings = await Recordings.stopAll(in: paths, device: lease.device, detached: detached, now: now())
-        let runners = await Runners.stopAll(in: paths, device: lease.device, detached: detached)
+        let recordings = await Recordings.stopAll(in: paths, device: lease.device, udid: udid, detached: detached, now: now())
+        let runners = await Runners.stopAll(in: paths, device: lease.device, udid: udid, detached: detached)
         (recordings.map(\.note) + runners).forEach(log)
     }
 

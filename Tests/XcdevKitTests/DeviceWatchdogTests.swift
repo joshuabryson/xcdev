@@ -123,6 +123,68 @@ import XcdevTestSupport
         #expect(state("U1") == "Shutdown")
     }
 
+    /// The watchdog never touches another udid: a runner or recording recorded under the same device name for another
+    /// clone (the worktree's device was re-cloned) keeps running.
+    @Test func aRunnerAndRecordingOfAnotherUdidAreLeftRunning() async throws {
+        defer { cleanUp() }
+        try leases.save(stale)
+        let paths = WorktreePaths(root: root)
+        let runner = ProcessIdentity(pid: 7003, startTime: 1, arguments: ["xcodebuild", "test-without-building"])
+        let recorder = ProcessIdentity(pid: 7004, startTime: 1, arguments: ["xcrun", "simctl", "io", "U2", "recordVideo", "/v.mp4"])
+        detached.adopt(runner)
+        detached.adopt(recorder)
+        try Runners.save(RunnerRecord.sample(device: "iphone", udid: "U2", process: runner), to: paths.runnerFile(device: "iphone"))
+        try Recordings.save(RecordingRecord.sample(device: "iphone", udid: "U2", process: recorder),
+                            to: paths.recordingFile(device: "iphone"))
+        var dog = watchdog()
+        #expect(await dog.poll() == .exit(0))
+        #expect(state("U1") == "Shutdown")
+        #expect(detached.stops.isEmpty)
+        #expect(Runners.load(paths.runnerFile(device: "iphone")) != nil)
+        #expect(Recordings.load(paths.recordingFile(device: "iphone")) != nil)
+    }
+
+    /// Quiet time counts from the later of the renewal and the last poll that saw the lease held, so a command that ran
+    /// longer than the idle time does not leave a clone that shuts down the moment the command ends.
+    @Test func quietTimeCountsFromTheLastPollThatSawTheLeaseHeld() async throws {
+        defer { cleanUp() }
+        try leases.save(stale)                                                   // renewed 660 s before t0, idle 600
+        try writeRecord(pid: 4242)
+        var dog = watchdog()
+        let fd = try await FileLock.hold(at: leases.files("U1").lock)
+        #expect(await dog.poll() == .wait)                                       // held at t0
+        FileLock.release(fd)
+        clock.set(t0 + 5)
+        #expect(await dog.poll() == .wait)                                       // let go, but quiet for 5 s only
+        #expect(state("U1") == "Booted")
+        clock.set(t0 + 599)
+        #expect(await dog.poll() == .wait)
+        clock.set(t0 + 600)
+        #expect(await dog.poll() == .exit(0))
+        #expect(state("U1") == "Shutdown")
+        #expect(lines.value.contains("shut down U1 after 600 s idle"))
+        #expect(leases.load("U1") == nil)
+    }
+
+    /// "Three failures" are three in a row: a poll that waits in between starts the count again.
+    @Test func failuresCountOnlyInARow() async throws {
+        defer { cleanUp() }
+        try leases.save(stale)
+        try writeRecord(pid: 4242)
+        fake.stub(["xcrun", "simctl", "shutdown", "U1"], exitCode: 1, stderr: "boom")
+        var dog = watchdog()
+        #expect(await dog.poll() == .retry)
+        #expect(await dog.poll() == .retry)
+        let fd = try await FileLock.hold(at: leases.files("U1").lock)            // a command comes and goes
+        #expect(await dog.poll() == .wait)
+        FileLock.release(fd)
+        clock.set(t0 + 600)                                                      // quiet for the idle time again
+        #expect(await dog.poll() == .retry)
+        #expect(await dog.poll() == .retry)
+        #expect(await dog.poll() == .exit(1))
+        #expect(lines.value.filter { $0.hasPrefix("shutdown failed: ") }.count == 5)
+    }
+
     @Test func aGoneLeaseEndsTheWatchdog() async throws {
         defer { cleanUp() }
         try writeRecord(pid: 4242)

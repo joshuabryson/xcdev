@@ -86,11 +86,12 @@ public enum Recordings {
     }
 
     /// Stops the recordings in `paths`, only `device`'s when given: for `sim shutdown`, `sim erase`, and `wt remove`.
-    public static func stopAll(in paths: WorktreePaths, device: String? = nil, detached: any DetachedProcessLaunching,
-                               now: Date) async -> [RecordingStop] {
+    /// With `udid`, only a recording of that clone: the idle watchdog never touches another udid.
+    public static func stopAll(in paths: WorktreePaths, device: String? = nil, udid: String? = nil,
+                               detached: any DetachedProcessLaunching, now: Date) async -> [RecordingStop] {
         var stops: [RecordingStop] = []
         for file in paths.recordingFiles {
-            guard let record = load(file), device == nil || record.device == device else { continue }
+            guard let record = load(file), device == nil || record.device == device, udid == nil || record.udid == udid else { continue }
             stops.append(await stop(record, file: file, detached: detached, now: now))
         }
         return stops

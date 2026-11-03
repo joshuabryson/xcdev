@@ -103,11 +103,13 @@ public enum Runners {
         return outcome
     }
 
-    /// Stops the runners in `paths`, only `device`'s when given: for `sim shutdown`, `sim erase`, and `wt remove`.
-    public static func stopAll(in paths: WorktreePaths, device: String? = nil, detached: any DetachedProcessLaunching) async -> [String] {
+    /// Stops the runners in `paths`, only `device`'s when given: for `sim shutdown`, `sim erase`, and `wt remove`. With
+    /// `udid`, only a runner of that clone: the idle watchdog never touches another udid.
+    public static func stopAll(in paths: WorktreePaths, device: String? = nil, udid: String? = nil,
+                               detached: any DetachedProcessLaunching) async -> [String] {
         var notes: [String] = []
         for file in paths.runnerFiles {
-            guard let record = load(file), device == nil || record.device == device else { continue }
+            guard let record = load(file), device == nil || record.device == device, udid == nil || record.udid == udid else { continue }
             let outcome = await stop(record, file: file, detached: detached)
             notes.append(outcome == .notRunning ? "removed the stale \(record.device) UI runner record" : "stopped the \(record.device) UI runner")
         }
