@@ -18,6 +18,9 @@ public struct IdleSessions: Sendable {
     /// The clone `name` is booted now. A session is new when there is no lease or its watchdog is not running; only a
     /// new one reads `simctl list`, to sweep dead sessions, writes a lease, and starts a watchdog. Returns a note when
     /// the watchdog could not start (or the lease could not be written): that never fails the command.
+    ///
+    /// The lock is held before the lease is written: another command's sweep may work from a `simctl list` read before
+    /// this boot, and it never removes a folder whose lock is held.
     public func began(_ name: String, _ device: ProvisionedDevice, in ctx: WorktreeContext, simctl: SimctlClient) async -> String? {
         let udid = device.udid
         if let lease = leases.load(udid), watchdogs.isLive(udid) {
@@ -26,8 +29,8 @@ public struct IdleSessions: Sendable {
         }
         if let catalog = try? await simctl.catalog() { leases.sweep(catalog, isLive: watchdogs.isLive) }
         do {
-            try leases.save(newLease(name, udid: udid, in: ctx))
             try? await leases.hold(udid)
+            try leases.save(newLease(name, udid: udid, in: ctx))
             let log = ctx.paths.newArtifact(in: ctx.paths.logs, kind: "watchdog-\(name)", ext: "log", now: watchdogs.now())
             try await watchdogs.start(udid, developerDir: ctx.xcode?.developerDir, log: log, executable: executable)
             return nil

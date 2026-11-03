@@ -146,6 +146,31 @@ import XcdevTestSupport
         #expect(leases.load(device.udid) != nil)
     }
 
+    /// Another command's sweep may work from a `simctl list` read before this boot, and it skips only a held folder. So
+    /// a new session holds the lock before its lease exists: while an exclusive holder (as a watchdog shutting down)
+    /// has the lock, `began` waits with no lease written.
+    @Test func aNewSessionHoldsTheLockBeforeItWritesTheLease() async throws {
+        defer { cleanUp() }
+        let files = leases.files(device.udid)
+        try Disk.makeFolder(files.folder)
+        let exclusive = open(files.lock, O_CREAT | O_RDWR | O_CLOEXEC, 0o644)
+        #expect(exclusive >= 0 && flock(exclusive, LOCK_EX) == 0)
+        let began = Task { [sessions, device, ctx, simctl] in await sessions.began("iphone", device, in: ctx, simctl: simctl) }
+        while !worktree.runner.calls.contains(where: { $0.arguments.starts(with: ["simctl", "list"]) }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try await Task.sleep(for: .milliseconds(300))                            // past the sweep, to the hold
+        #expect(!Disk.exists(files.lease))
+        flock(exclusive, LOCK_UN)
+        close(exclusive)
+        #expect(await began.value == nil)
+        #expect(leases.load(device.udid) != nil && holds.isHolding(device.udid))
+        // With the hold in place, a sweep that sees the clone shut down with no live watchdog keeps its folder.
+        simulators.setState("Shutdown", udid: device.udid)
+        leases.sweep(try await simctl.catalog(), isLive: { _ in false })
+        #expect(Disk.exists(files.folder) && leases.load(device.udid) != nil)
+    }
+
     /// The fast path reads no `simctl list`: only a new session sweeps.
     @Test func aRunningSessionSweepsNothing() async throws {
         defer { cleanUp() }

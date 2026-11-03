@@ -54,17 +54,27 @@ public struct TestService: Sendable {
         return report
     }
 
-    /// Runs xcodebuild. It boots the clone itself, so the clone's idle session begins here when it is left booted.
+    /// Runs xcodebuild. It boots the clone itself, so the clone's idle session begins here when it is left booted,
+    /// whether the run returned or threw (a timeout comes after xcodebuild may have booted it).
     func runTests(_ plan: BuildPlan, _ options: TestOptions, in ctx: WorktreeContext) async throws -> BuildService.ResultBundleRun {
         let paths = ctx.paths
         let step = BuildStep(kind: "test", progress: "testing \(plan.scheme) on \(plan.target.summary)", timeout: options.timeout)
-        let run = try await builds.runWithResultBundle(plan, step, paths: paths) { bundle in
-            XcodebuildRequest(actions: [.test], container: plan.container, scheme: plan.scheme,
-                              destination: plan.target.destination, configuration: options.configuration,
-                              paths: paths, resultBundle: bundle, onlyTesting: options.only, skipTesting: options.skip)
+        do {
+            let run = try await builds.runWithResultBundle(plan, step, paths: paths) { bundle in
+                XcodebuildRequest(actions: [.test], container: plan.container, scheme: plan.scheme,
+                                  destination: plan.target.destination, configuration: options.configuration,
+                                  paths: paths, resultBundle: bundle, onlyTesting: options.only, skipTesting: options.skip)
+            }
+            await leaseClone(of: plan, in: ctx)
+            return run
+        } catch {
+            await leaseClone(of: plan, in: ctx)
+            throw error
         }
+    }
+
+    private func leaseClone(of plan: BuildPlan, in ctx: WorktreeContext) async {
         if let device = plan.target.configDevice { await builds.provisioner.leaseIfBooted(device, in: ctx) }
-        return run
     }
 
     /// Stops this device's UI runner when the run includes UI tests, or xcd can't tell: the project's UI tests and

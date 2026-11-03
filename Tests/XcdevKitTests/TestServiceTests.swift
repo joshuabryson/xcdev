@@ -162,15 +162,23 @@ import XcdevTestSupport
         #expect(!report.notes.contains { $0.contains("UI runner") } && !report.text.contains("UI runner"))
     }
 
+    /// What `runLeasing` saw: the clone, where its lease would be, and the error `xcd test` threw, if any.
+    struct LeasingRun {
+        let udid: String
+        let leases: DeviceLeases
+        let error: XcdError?
+    }
+
     /// Runs a passing `xcd test` through a provisioner with idle sessions. With `boots`, xcodebuild leaves the clone
-    /// booted, as a real one does. Returns the clone's udid and where its lease would be.
-    func runLeasing(boots: Bool) async throws -> (udid: String, leases: DeviceLeases) {
+    /// booted, as a real one does; with `timesOut` too, the run then throws as a timed-out xcodebuild does.
+    func runLeasing(boots: Bool, timesOut: Bool = false) async throws -> LeasingRun {
         let simulators = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
         FakeXcodebuild(runner: fake).onRun(.init(testSummary: Self.passingSummary))
         if boots {
             fake.stub(["xcrun", "xcodebuild", "test"]) { invocation in
                 let destination = invocation.arguments.first { $0.hasPrefix("id=") } ?? ""
                 simulators.setState("Booted", udid: String(destination.dropFirst(3)))
+                if timesOut { throw XcdError(.timeout, "xcodebuild did not finish within 1h") }
                 return ProcessOutput(stdout: "** TEST SUCCEEDED **\n")
             }
         }
@@ -179,23 +187,35 @@ import XcdevTestSupport
                                             sessions: IdleSessions(leases: leases, detached: FakeDetachedProcesses(), executable: "/xcd"))
         var ctx = try worktree.context(BuildServiceTests.config, container: "App.xcodeproj")
         let builds = BuildService(runner: fake, provisioner: provisioner, now: { Date(timeIntervalSince1970: 1_790_040_000) })
-        _ = try await TestService(builds: builds).test(TestOptions(), in: &ctx)
+        var thrown: XcdError?
+        do { _ = try await TestService(builds: builds).test(TestOptions(), in: &ctx) } catch let error as XcdError { thrown = error }
         let udid = try #require(ctx.state.devices["iphone"]?.udid)
         #expect(simulators.devices.first { $0.udid == udid }?.state == (boots ? "Booted" : "Shutdown"))
-        return (udid, leases)
+        return LeasingRun(udid: udid, leases: leases, error: thrown)
     }
 
     @Test func aTestRunLeasesTheCloneXcodebuildLeftBooted() async throws {
         defer { worktree.remove() }
-        let (udid, leases) = try await runLeasing(boots: true)
-        #expect(leases.load(udid)?.device == "iphone")
-        leases.holds.release(udid)
+        let run = try await runLeasing(boots: true)
+        #expect(run.error == nil)
+        #expect(run.leases.load(run.udid)?.device == "iphone")
+        run.leases.holds.release(run.udid)
     }
 
     @Test func aTestRunLeasesNothingWhenTheCloneIsShutDown() async throws {
         defer { worktree.remove() }
-        let (udid, leases) = try await runLeasing(boots: false)
-        #expect(leases.load(udid) == nil)
-        #expect(!Disk.exists(leases.globalPaths.devicesDirectory))
+        let run = try await runLeasing(boots: false)
+        #expect(run.error == nil)
+        #expect(run.leases.load(run.udid) == nil)
+        #expect(!Disk.exists(run.leases.globalPaths.devicesDirectory))
+    }
+
+    /// xcodebuild may have booted the clone before it timed out: the clone is leased, and the timeout is still thrown.
+    @Test func aTestRunThatThrowsStillLeasesTheCloneXcodebuildBooted() async throws {
+        defer { worktree.remove() }
+        let run = try await runLeasing(boots: true, timesOut: true)
+        #expect(run.error?.code == .timeout && run.error?.message == "xcodebuild did not finish within 1h")
+        #expect(run.leases.load(run.udid)?.device == "iphone")
+        run.leases.holds.release(run.udid)
     }
 }

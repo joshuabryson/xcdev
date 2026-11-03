@@ -11,6 +11,8 @@ import XcdevTestSupport
       fmt: { run: swift-format }
     """
     let fake = FakeProcessRunner()
+    /// A command that boots a clone starts its idle watchdog here, never as a real process.
+    let detached = FakeDetachedProcesses()
     let builtins = ["build", "test", "run", "worktree", "config"]
 
     /// A project, a PATH directory holding `xcd-<name>` plugins, and services that run git for real.
@@ -27,7 +29,7 @@ import XcdevTestSupport
 
     func services(_ project: TempProject, bin: String, in directory: String? = nil) -> Services {
         Services(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home),
-                 currentDirectory: directory ?? project.root, environment: ["PATH": bin], output: .text)
+                 currentDirectory: directory ?? project.root, environment: ["PATH": bin], output: .text, detached: detached)
     }
 
     @Test func routesHelpBuiltinsAndEverythingElse() {
@@ -48,6 +50,10 @@ import XcdevTestSupport
         #expect(code == 6)
         #expect(fake.calls.contains { $0.argv.first == "sh" && $0.arguments.last == "x" })
         #expect(!fake.calls.contains { $0.argv.first == "xcd-seed" })
+        // `needs: [device]` booted the clone, which began its idle session: the watchdog went to the fake launcher.
+        let udid = try #require(detached.starts.first?.invocation.arguments.dropFirst().first)
+        #expect(detached.starts.count == 1 && LeaseHolds.shared.isHolding(udid))
+        LeaseHolds.shared.release(udid)
     }
 
     @Test func aPluginRunsWithTheWorktreeContext() async throws {

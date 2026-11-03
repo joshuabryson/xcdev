@@ -47,12 +47,15 @@ public struct Watchdogs: Sendable {
 
     /// Starts the clone's watchdog unless one is live. Under `start.lock`, so two commands booting the clone at once
     /// start one. Its `XCDEV_HOME` is this command's, so it reads the same `devices/` folder whatever its parent's
-    /// environment says. The record is written at once; a watchdog whose record cannot be written is stopped again.
+    /// environment says. It runs in `/`: it reads only absolute paths, and a process living for hours in a worktree
+    /// would keep that worktree's volume busy. The record is written at once; a watchdog whose record cannot be
+    /// written is stopped again.
     public func start(_ udid: String, developerDir: String?, log: String, executable: String) async throws {
         try await FileLock.withLock(at: leases.files(udid).startLock) {
             guard !isLive(udid) else { return }
             let arguments = [Self.marker, udid] + (developerDir.map { ["--developer-dir", $0] } ?? [])
-            let invocation = Invocation(executable, arguments, environment: ["XCDEV_HOME": leases.globalPaths.base])
+            let invocation = Invocation(executable, arguments, environment: ["XCDEV_HOME": leases.globalPaths.base],
+                                        workingDirectory: "/")
             let process = try detached.start(invocation, log: log)
             do {
                 try save(WatchdogRecord(process: process, udid: udid, startedAt: now(), log: log))

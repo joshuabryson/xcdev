@@ -22,6 +22,7 @@ import XcdevTestSupport
         #expect(start.invocation.executable == "/usr/local/bin/xcd")
         #expect(start.invocation.arguments == ["_watch-device", "U1", "--developer-dir", "/X.app/Contents/Developer"])
         #expect(start.invocation.environment["XCDEV_HOME"] == home)
+        #expect(start.invocation.workingDirectory == "/")                         // never keeps a worktree's volume busy
         #expect(start.log == "/w/.xcdev/logs/w.log")
         #expect(watchdogs.record("U1")?.process == start.identity)
         #expect(watchdogs.record("U1")?.startedAt == t0 && watchdogs.record("U1")?.udid == "U1")
