@@ -16,6 +16,7 @@ extension DeviceProvisioner {
             return notCloned(try deviceName(requested, config: ctx.config), ctx)
         }
         let retries = try await simctl(for: ctx).shutdown(udid: going.device.udid)
+        await endSession(of: going.device.udid, detached)
         return going.report("shut down", retries: retries, ctx)
     }
 
@@ -26,8 +27,16 @@ extension DeviceProvisioner {
         }
         let client = simctl(for: ctx)
         let retries = try await client.shutdown(udid: going.device.udid)
+        await endSession(of: going.device.udid, detached)
         try await client.erase(udid: going.device.udid)
         return going.report("erased", retries: retries, ctx)
+    }
+
+    /// Ends the clone's idle session once simctl has shut it down, so a shutdown that fails leaves the clone booted
+    /// with its watchdog and lease. The command holds the lease meanwhile, so the watchdog cannot act on it.
+    private func endSession(of udid: String, _ detached: (any DetachedProcessLaunching)?) async {
+        guard let detached else { return }
+        await Watchdogs(leases: DeviceLeases(globalPaths: globalPaths), detached: detached).end(udid)
     }
 
     /// `xcd sim shutdown`: the one clone, or with --all every clone of the worktree.
@@ -58,9 +67,7 @@ extension DeviceProvisioner {
             return .init(device: name, udid: nil, action: "not cloned", retries: 0, notes: [])
         }
         guard states[device.udid] == "Booted" else {
-            if let detached {
-                await Watchdogs(leases: DeviceLeases(globalPaths: globalPaths), detached: detached).end(device.udid)
-            }
+            await endSession(of: device.udid, detached)
             return .init(device: name, udid: device.udid, action: "not booted", retries: 0, notes: [])
         }
         let report = try await shutdownReport(name, in: ctx, detached: detached)
@@ -79,7 +86,8 @@ extension DeviceProvisioner {
     }
 
     /// Nil when the device was never cloned. Otherwise a recording or UI runner of the clone is stopped first, so
-    /// simctl finishes the video and the runner's xcodebuild doesn't outlive its simulator.
+    /// simctl finishes the video and the runner's xcodebuild doesn't outlive its simulator. Its watchdog is ended
+    /// later, after the shutdown (`endSession`).
     private func goingAway(_ requested: String?, in ctx: WorktreeContext,
                            _ detached: (any DetachedProcessLaunching)?) async throws -> GoingAway? {
         let name = try deviceName(requested, config: ctx.config)
@@ -89,7 +97,6 @@ extension DeviceProvisioner {
         if let detached {
             notes += await Recordings.stopAll(in: ctx.paths, device: name, detached: detached, now: Date()).map(\.note)
             notes += await Runners.stopAll(in: ctx.paths, device: name, detached: detached)
-            await Watchdogs(leases: DeviceLeases(globalPaths: globalPaths), detached: detached).end(device.udid)
         }
         return GoingAway(name: name, device: device, notes: notes)
     }

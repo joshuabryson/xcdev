@@ -277,9 +277,25 @@ import XcdevTestSupport
         let problem = try #require(await BootedSimulatorsCheck().detect(env).first)
         ctx.state.devices = [:]                                                      // another xcd erased the clone meanwhile
         try WorktreeStateStore.save(ctx.state, ctx.paths)
-        try await BootedSimulatorsCheck().fix(problem, env)
+        let left = await #expect(throws: DoctorLeftAlone.self) { try await BootedSimulatorsCheck().fix(problem, env) }
+        #expect(left?.note == "Sample App/main no longer records its iphone clone \(mine); left alone")
         #expect(detached.starts.isEmpty)
         #expect(DeviceLeases(globalPaths: GlobalPaths(base: project.home)).load(mine) == nil)
+    }
+
+    /// A fix whose doctor no longer finds a worktree recording the clone has nothing to do: it says so instead of
+    /// reporting the problem fixed.
+    @Test func aFixForACloneNoWorktreeRecordsAnyMoreIsLeftAlone() async throws {
+        var (project, sims, _, ctx) = try await setUp()
+        defer { project.remove() }
+        let mine = try bootedClone(sims, in: &ctx)
+        let problem = try #require(await BootedSimulatorsCheck().detect(await doctor(project).environment(from: project.root, fixing: true)).first)
+        ctx.state.devices = [:]
+        try WorktreeStateStore.save(ctx.state, ctx.paths)
+        let env = await doctor(project).environment(from: project.root, fixing: true)
+        let left = await #expect(throws: DoctorLeftAlone.self) { try await BootedSimulatorsCheck().fix(problem, env) }
+        #expect(left?.note == "no worktree records \(mine) now; left alone")
+        #expect(detached.starts.isEmpty)
     }
 
     @Test func aCloneNoWorktreeRecordsIsNotAdopted() async throws {

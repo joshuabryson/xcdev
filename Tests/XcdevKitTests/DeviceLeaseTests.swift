@@ -70,6 +70,25 @@ extension DeviceLease {
         #expect(!FileLock.isHeld(at: leases.files("K1").lock))
     }
 
+    /// `keep` holds a lease before it renews it, so a renewal never brings back a lease a watchdog removed under its
+    /// exclusive lock: the hold waits the watchdog out, and the renewal then finds no lease.
+    @Test func keepingHoldsALeaseBeforeRenewingIt() async throws {
+        try leases.save(.sample(udid: "U1", renewedAt: t0, idle: 600))
+        let leases = leases, files = leases.files("U1"), state = state(["iphone": "U1"]), t0 = t0
+        let (seen, keeping) = try await FileLock.withLock(at: files.lock) {    // the watchdog's exclusive lock
+            let keeping = Task { try await leases.keep(state, renewing: true, now: t0 + 60) }
+            try await Task.sleep(for: .milliseconds(200))                      // time for a renewal made before the hold
+            let seen = leases.load("U1")?.renewedAt
+            Disk.remove(files.lease)                                           // the watchdog's shutdown ends the session
+            return (seen, keeping)
+        }
+        try await keeping.value
+        #expect(seen == t0)
+        #expect(leases.load("U1") == nil)
+        #expect(holds.isHolding("U1"))
+        holds.release("U1")
+    }
+
     /// Every worktree command holds the worktree's leases: one it cannot hold (a folder a `sudo xcd` left owned by root)
     /// fails the command with a `next:` naming the folder, never as a bug in xcd.
     @Test func aLeaseThatCannotBeHeldFailsWithANextNamingItsFolder() async throws {

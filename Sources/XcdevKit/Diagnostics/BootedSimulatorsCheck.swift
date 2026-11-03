@@ -44,9 +44,12 @@ public struct BootedSimulatorsCheck: DoctorCheck {
     }
 
     /// Starts the clone's watchdog under its worktree's lock, taken without waiting as the worktree fixes take it: a
-    /// held lock means a `wt create` or `wt remove` is running, and the clone is left to it.
+    /// held lock means a `wt create` or `wt remove` is running, and the clone is left to it. A clone no worktree
+    /// records now is left alone too.
     public func fix(_ problem: DoctorProblem, _ env: DoctorEnvironment) async throws {
-        guard let udid = problem.subject, let recorder = BootedSimulator.recorder(of: udid, env) else { return }
+        guard let udid = problem.subject, let recorder = BootedSimulator.recorder(of: udid, env) else {
+            throw DoctorLeftAlone(note: "no worktree records \(problem.subject ?? "the simulator") now; left alone")
+        }
         let entry = recorder.entry
         let worktrees = WorktreeService(runner: env.runner, globalPaths: env.globalPaths)
         let lock = worktrees.lockPath(projectRoot: entry.projectRoot, worktree: entry.name)
@@ -59,7 +62,10 @@ public struct BootedSimulatorsCheck: DoctorCheck {
     /// Xcode from its state, whatever an older lease names; with none pinned, simctl runs under xcode-select's.
     func startWatchdog(_ udid: String, _ recorder: BootedSimulator.Recorder, _ env: DoctorEnvironment) async throws {
         let paths = WorktreePaths(root: recorder.entry.path)
-        guard let state = try WorktreeStateStore.load(paths), state.devices[recorder.device]?.udid == udid else { return }
+        guard let state = try WorktreeStateStore.load(paths), state.devices[recorder.device]?.udid == udid else {
+            let entry = recorder.entry
+            throw DoctorLeftAlone(note: "\(entry.project)/\(entry.name) no longer records its \(recorder.device) clone \(udid); left alone")
+        }
         try await leaseIfMissing(udid, recorder, xcode: state.xcode, env)
         let log = paths.newArtifact(in: paths.logs, kind: "watchdog-\(recorder.device)", ext: "log", now: env.now)
         let now = env.now

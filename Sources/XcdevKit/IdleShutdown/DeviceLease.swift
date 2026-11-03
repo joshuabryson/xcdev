@@ -81,11 +81,13 @@ public struct DeviceLeases: Sendable {
         }
     }
 
-    /// Renews (when asked) and holds every lease of the worktree's devices.
+    /// Holds, then renews (when asked), every lease of the worktree's devices. The hold comes first: it waits out a
+    /// watchdog shutting the clone down under its exclusive lock, and the renewal then finds the lease gone, so it never
+    /// brings back a session that ended.
     public func keep(_ state: WorktreeState, renewing: Bool, now: Date) async throws {
         let leased = state.devices.values.map(\.udid).filter { load($0) != nil }
-        if renewing { renew(leased, now: now) }
         for udid in leased { try await hold(udid) }
+        if renewing { renew(leased, now: now) }
     }
 
     public func hold(_ udid: String) async throws {
