@@ -10,10 +10,13 @@ let repoRoot = URL(fileURLWithPath: #filePath)
 /// Simulators can't write app output under $TMPDIR, so these projects live here instead.
 let testsHome = NSHomeDirectory() + "/Library/Caches/xcdev-tests"
 
-/// Live services for `project`, with its own XCDEV_HOME so the real registry is never touched.
+/// Live services for `project`, with its own XCDEV_HOME so the real registry is never touched. Its xcd is the built one,
+/// not the test host, so a clone it boots gets a real idle watchdog (`xcd _watch-device`): run `swift build` first.
 func services(_ project: TempProject) -> Services {
-    Services(runner: SystemProcessRunner(), globalPaths: GlobalPaths(base: project.home), currentDirectory: project.root,
-             environment: [:])
+    var svc = Services(runner: SystemProcessRunner(), globalPaths: GlobalPaths(base: project.home), currentDirectory: project.root,
+                       environment: [:])
+    svc.xcdExecutable = repoRoot + "/.build/debug/xcd"
+    return svc
 }
 
 /// Runs `body`, then always (even when it throws) deletes every simulator clone of this project and the project.
