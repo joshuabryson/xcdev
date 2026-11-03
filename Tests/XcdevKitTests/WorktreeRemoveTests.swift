@@ -8,10 +8,18 @@ import XcdevTestSupport
 
     func setup() async throws -> (TempProject, WorktreeService, WorktreeContext, WorktreeState) {
         let project = try TempProject.make(config: WorktreeServiceTests.config)
-        let svc = WorktreeService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home))
+        let svc = WorktreeService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home),
+                                  detached: FakeDetachedProcesses())
         let main = try await svc.open(from: project.root)
         let (state, _) = try await svc.create(name: "feat", in: main)
         return (project, svc, main, state)
+    }
+
+    /// Removing a worktree stops its recordings, runners, and watchdogs: the setup's service does it through a fake.
+    @Test func theSetupLaunchesThroughAFake() async throws {
+        let (project, svc, _, _) = try await setup()
+        defer { project.remove() }
+        #expect(svc.detached is FakeDetachedProcesses)
     }
 
     @Test func removesCheckoutClonesAndRegistryButKeepsBranch() async throws {

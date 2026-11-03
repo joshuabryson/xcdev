@@ -39,12 +39,12 @@ struct IdleShutdownIntegrationTests {
         try await withCleanup(try await project()) { svc in
             var ctx = try await svc.open(worktree: nil)
             let udid = try #require(try await svc.provisioner.bootReport(nil, in: &ctx).udid)
+            defer { LeaseHolds.shared.release(udid) }
             #expect(try await watchdogProcesses(udid).count == 1, "\(watchdogLog(ctx))")
             let report = try await svc.provisioner.shutdownAllReport(in: ctx, detached: svc.detached)
             #expect(report.devices.first?.action == "shut down")
             #expect(try await state(udid) == "Shutdown")
             #expect(try await watchdogProcesses(udid).isEmpty)
-            LeaseHolds.shared.release(udid)
         }
     }
 
@@ -52,9 +52,10 @@ struct IdleShutdownIntegrationTests {
         try await withCleanup(try await project()) { svc in
             var ctx = try await svc.open(worktree: nil, idle: 5)
             let udid = try #require(try await svc.provisioner.bootReport(nil, in: &ctx).udid)
+            defer { LeaseHolds.shared.release(udid) }  // also when a step throws; releasing twice is harmless
             try await Task.sleep(for: .seconds(15))  // the lease is held by this process the whole time
             #expect(try await state(udid) == "Booted", "\(watchdogLog(ctx))")
-            LeaseHolds.shared.release(udid)
+            LeaseHolds.shared.release(udid)  // the command ends here: the watchdog may now act
             #expect(try await waitUntil(seconds: 60) { try await state(udid) == "Shutdown" }, "\(watchdogLog(ctx))")
         }
     }

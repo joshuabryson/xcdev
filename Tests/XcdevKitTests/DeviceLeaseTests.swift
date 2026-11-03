@@ -82,10 +82,12 @@ extension DeviceLease {
         #expect(!holds.isHolding("U1"))
     }
 
-    @Test func removingASessionKeepsItsLockFile() throws {
+    @Test func removingASessionKeepsItsLockFile() async throws {
         try leases.save(.sample(udid: "U1", renewedAt: t0, idle: 600))
+        FileLock.release(try await FileLock.hold(at: leases.files("U1").lock))
+        #expect(Disk.exists(leases.files("U1").lock))
         leases.remove("U1")
         #expect(leases.load("U1") == nil)
-        #expect(Disk.exists(leases.files("U1").folder))
+        #expect(Disk.exists(leases.files("U1").lock))                 // a holder may have it open
     }
 }

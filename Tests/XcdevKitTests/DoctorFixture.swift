@@ -15,15 +15,18 @@ extension DoctorFixture {
     func setup(config: String = WorktreeServiceTests.config) async throws -> (TempProject, FakeSimulators, WorktreeService, WorktreeContext) {
         let project = try TempProject.make(config: config)
         let sims = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
-        let worktrees = WorktreeService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home))
+        let worktrees = WorktreeService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home),
+                                        detached: FakeDetachedProcesses())
         return (project, sims, worktrees, try await worktrees.open(from: project.root))
     }
 
+    /// Doctor on the project, launching nothing real: a fix that starts a watchdog starts "/xcd" on a fake.
     func doctor(_ project: TempProject, discovery: XcodeDiscovery? = nil,
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { _ in /* doctor's pauses are skipped */ }) -> DoctorService {
         DoctorService(runner: RoutingRunner(fake: fake), globalPaths: GlobalPaths(base: project.home),
                       discovery: discovery ?? XcodeDiscovery(runner: fake, applicationsDirectories: []),
-                      accessibility: { FakeAccessibility(app: FakeApp(windows: [])) }, hostApp: { "TestHost" }, sleep: sleep)
+                      detached: FakeDetachedProcesses(), accessibility: { FakeAccessibility(app: FakeApp(windows: [])) },
+                      hostApp: { "TestHost" }, xcdExecutable: "/xcd", sleep: sleep)
     }
 
     /// Registers worktree `name` of the project at `root` (named after its folder) at `path`, as `xcd wt create` does.
@@ -98,5 +101,20 @@ extension DoctorProblem {
         problem.scope = .project
         problem.projectRoot = root
         return problem
+    }
+}
+
+/// The doctor fixture never launches a real process: a fix starts a clone's watchdog, and removing a worktree stops
+/// its recordings, runners, and watchdogs.
+@Suite struct DoctorFixtureTests: DoctorFixture {
+    let fake = FakeProcessRunner()
+
+    @Test func theFixtureLaunchesThroughAFake() async throws {
+        let (project, _, worktrees, _) = try await setup()
+        defer { project.remove() }
+        let service = doctor(project)
+        #expect(service.detached is FakeDetachedProcesses)
+        #expect(service.xcdExecutable == "/xcd")
+        #expect(worktrees.detached is FakeDetachedProcesses)
     }
 }

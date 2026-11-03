@@ -31,8 +31,10 @@ struct WorktreeSimulatorIntegrationTests {
         """, name: "xcd it \(UUID().uuidString.prefix(6))")
         defer { project.remove() }
 
-        let services = Services(runner: runner, globalPaths: GlobalPaths(base: project.home),
-                                currentDirectory: project.root, environment: [:])
+        var configured = Services(runner: runner, globalPaths: GlobalPaths(base: project.home),
+                                  currentDirectory: project.root, environment: [:])
+        configured.xcdExecutable = repoRoot + "/.build/debug/xcd"   // a clone it boots gets the real watchdog, not the test host
+        let services = configured
         let main = try await services.open(worktree: nil)
         let a = try await services.worktrees.create(name: "agent-a", in: main).state
         let b = try await services.worktrees.create(name: "agent-b", in: main).state
