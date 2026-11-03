@@ -13,10 +13,11 @@ struct Xcd: AsyncParsableCommand {
                       InstallCommand.self, UninstallCommand.self, LaunchCommand.self, TerminateCommand.self, OpenCommand.self,
                       XcodeCommand.self, WorktreeCommand.self, SimCommand.self, UICommand.self, ConfigCommand.self, ContextCommand.self, InitCommand.self,
                       GuideCommand.self, DoctorCommand.self, PruneCommand.self, LintCommand.self, FormatCommand.self,
-                      RecordWindowCommand.self]
+                      RecordWindowCommand.self, WatchDeviceCommand.self]
     )
 
-    /// Built-in commands as `xcd help` lists them, from the command tree; a hidden one (`_record-window`) is left out.
+    /// Built-in commands as `xcd help` lists them, from the command tree; the hidden ones (`_record-window`,
+    /// `_watch-device`) are left out.
     static var builtins: [BuiltinCommandInfo] {
         configuration.subcommands.filter { $0.configuration.shouldDisplay }.map {
             BuiltinCommandInfo(name: $0._commandName, aliases: $0.configuration.aliases, summary: $0.configuration.abstract)
@@ -29,12 +30,13 @@ struct Xcd: AsyncParsableCommand {
     }
 
     /// `xcd help …` and unknown command names are handled here; everything else goes to ArgumentParser.
-    /// Ctrl-C and SIGTERM are handled for every command from the start (see `Interrupts`), except in the window
-    /// recorder: on SIGINT it takes no more stills and finishes its MP4, which the handler would pre-empt (it exits 130 at once).
+    /// Ctrl-C and SIGTERM are handled for every command from the start (see `Interrupts`), except in the two detached
+    /// helpers: on SIGINT the window recorder takes no more stills and finishes its MP4, which the handler would pre-empt
+    /// (it exits 130 at once), and a SIGTERM ends the idle watchdog plainly.
     static func main() async {
         assert(builtinNames.isSubset(of: BuiltinCommands.reservedNames), "add new built-in names to BuiltinCommands.reservedNames")
         signal(SIGPIPE, SIG_IGN)    // a reader that went away is EPIPE, not death; children get SIGPIPE back
-        if CommandLine.arguments.dropFirst().first == MacWindowRecorder.marker {
+        if [MacWindowRecorder.marker, Watchdogs.marker].contains(CommandLine.arguments.dropFirst().first ?? "") {
             await runBuiltin()
             return
         }
