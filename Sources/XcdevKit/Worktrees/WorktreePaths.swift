@@ -14,6 +14,8 @@ public struct GlobalPaths: Sendable, Equatable {
     public var registryFile: String { base + "/registry.json" }
     public var cacheDirectory: String { base + "/cache" }
     public var locksDirectory: String { base + "/locks" }
+    /// One folder per simulator clone with a booted session: its lease, lock, and watchdog record.
+    public var devicesDirectory: String { base + "/devices" }
 }
 
 public struct WorktreePaths: Sendable, Equatable {

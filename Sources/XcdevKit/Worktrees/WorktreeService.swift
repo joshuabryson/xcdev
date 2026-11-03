@@ -8,6 +8,8 @@ public struct WorktreeContext: Sendable {
     public var xcodeOverride: XcodeInstall?
     /// The main checkout's `.xcdev.yml` when `config` is borrowed from it, since this checkout's branch has none.
     public var borrowedConfig: String?
+    /// `--idle` for this command only, in seconds (0 = off). Set by `Services.open`; never written to worktree.json.
+    public var idleOverride: Int?
 
     public init(location: ProjectLocation, config: XcdevConfig, state: WorktreeState, xcodeOverride: XcodeInstall? = nil,
                 borrowedConfig: String? = nil) {

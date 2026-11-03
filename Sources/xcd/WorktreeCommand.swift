@@ -63,7 +63,7 @@ struct WorktreeCommand: AsyncParsableCommand {
 
         func run() async throws {
             try await Emit.run("wt remove", options) { services in
-                let ctx = try await services.open(worktree: options.worktree, runsPendingHook: false)
+                let ctx = try await services.open(worktree: options.worktree, runsPendingHook: false, renewsLeases: false)
                 return try await services.worktrees.remove(name: name, force: force, in: ctx)
             }
         }

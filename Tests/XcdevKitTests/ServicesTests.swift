@@ -48,4 +48,39 @@ import XcdevTestSupport
         #expect(services.ui.supervisor.client.transport as? FakeRunnerTransport === transport)
         #expect(services.runnerBuilder.globalPaths == GlobalPaths(base: "/h"))
     }
+
+    /// A real checkout with one device in its state and a lease for it, saved at `t0`.
+    func leasedCheckout(udid: String, t0: Date) async throws -> (project: TempProject, services: Services, leases: DeviceLeases) {
+        let project = try TempProject.make(config: WorktreeServiceTests.config)
+        let services = Services(runner: RoutingRunner(fake: FakeProcessRunner()), globalPaths: GlobalPaths(base: project.home),
+                                currentDirectory: project.root, environment: [:])
+        var state = try await services.open(worktree: nil, renewsLeases: false).state
+        state.devices["iphone"] = ProvisionedDevice(udid: udid, deviceType: "t", deviceTypeIdentifier: "t", runtime: "r",
+                                                    runtimeIdentifier: "r")
+        try WorktreeStateStore.save(state, WorktreePaths(root: project.root))
+        let leases = DeviceLeases(globalPaths: services.globalPaths)
+        try leases.save(.sample(udid: udid, renewedAt: t0, idle: 600, root: project.root))
+        return (project, services, leases)
+    }
+
+    @Test func openRenewsAndHoldsTheWorktreesLeases() async throws {
+        let t0 = Date(timeIntervalSince1970: 1_791_100_000)
+        let (project, services, leases) = try await leasedCheckout(udid: "SVC-RENEW", t0: t0)
+        defer { project.remove() }
+        let ctx = try await services.open(worktree: nil, idle: 60)
+        #expect(ctx.idleOverride == 60)
+        #expect(try #require(leases.load("SVC-RENEW")).renewedAt > t0)
+        #expect(LeaseHolds.shared.isHolding("SVC-RENEW"))
+        LeaseHolds.shared.release("SVC-RENEW")
+    }
+
+    @Test func openWithoutRenewalHoldsOnly() async throws {
+        let t0 = Date(timeIntervalSince1970: 1_791_100_000)
+        let (project, services, leases) = try await leasedCheckout(udid: "SVC-HOLD", t0: t0)
+        defer { project.remove() }
+        _ = try await services.open(worktree: nil, renewsLeases: false)
+        #expect(try #require(leases.load("SVC-HOLD")).renewedAt == t0)
+        #expect(LeaseHolds.shared.isHolding("SVC-HOLD"))
+        LeaseHolds.shared.release("SVC-HOLD")
+    }
 }

@@ -33,6 +33,36 @@ public enum FileLock {
         return try await body()
     }
 
+    /// A shared lock held until `release`: many holders at once, and an exclusive try (`withLockIfFree`) finds the
+    /// file held while any one of them is. Waits while an exclusive holder has it.
+    public static func hold(at path: String) async throws -> Int32 {
+        try Disk.makeFolder((path as NSString).deletingLastPathComponent)
+        let fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0o644)
+        guard fd >= 0 else {
+            throw XcdError(.internalError, "cannot open lock file \(path) (errno \(errno))")
+        }
+        let lockErrno = await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
+            DispatchQueue.global().async {
+                var code: Int32 = 0
+                repeat {
+                    code = flock(fd, LOCK_SH) == 0 ? 0 : errno
+                } while code == EINTR
+                continuation.resume(returning: code)
+            }
+        }
+        guard lockErrno == 0 else {
+            close(fd)
+            throw XcdError(.internalError, "cannot lock \(path) (errno \(lockErrno): \(String(cString: strerror(lockErrno))))")
+        }
+        return fd
+    }
+
+    /// Lets go of a lock `hold` returned.
+    public static func release(_ descriptor: Int32) {
+        flock(descriptor, LOCK_UN)
+        close(descriptor)
+    }
+
     /// Like `withLock`, but never waits: returns nil without running `body` when someone else holds the lock.
     /// Doctor uses it for a worktree's lock, which a `wt create` or `wt remove` holds for up to 30 minutes.
     public static func withLockIfFree<T: Sendable>(at path: String, _ body: () async throws -> T) async throws -> T? {

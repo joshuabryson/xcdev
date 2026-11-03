@@ -110,11 +110,15 @@ public struct Services: Sendable {
     public var logs: LogService { LogService(runner: runner, provisioner: provisioner) }
 
     /// Opens the worktree; `xcode` is a one-off `--xcode` override that is never pinned. A command that only looks passes
-    /// `runsPendingHook: false`; inside a hook (`XCD_HOOK`), no pending hook runs either.
-    public func open(worktree: String?, xcode: String? = nil, runsPendingHook: Bool = true) async throws -> WorktreeContext {
+    /// `runsPendingHook: false`; inside a hook (`XCD_HOOK`), no pending hook runs either. Every lease of the worktree's
+    /// clones is held until the process exits, and renewed unless `renewsLeases` is false (commands that end a session).
+    public func open(worktree: String?, xcode: String? = nil, idle: Int? = nil, runsPendingHook: Bool = true,
+                     renewsLeases: Bool = true) async throws -> WorktreeContext {
         var ctx = try await worktrees.open(from: currentDirectory, worktreeName: worktree,
                                            runsPendingHook: runsPendingHook && environment["XCD_HOOK"] == nil)
         if let xcode { ctx.xcodeOverride = try await XcodeDiscovery(runner: runner).resolve(spec: xcode) }
+        ctx.idleOverride = idle
+        try await DeviceLeases(globalPaths: globalPaths).keep(ctx.state, renewing: renewsLeases, now: Date())
         return ctx
     }
 }
