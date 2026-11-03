@@ -70,6 +70,18 @@ extension DeviceLease {
         #expect(!FileLock.isHeld(at: leases.files("K1").lock))
     }
 
+    /// Every worktree command holds the worktree's leases: one it cannot hold (a folder a `sudo xcd` left owned by root)
+    /// fails the command with a `next:` naming the folder, never as a bug in xcd.
+    @Test func aLeaseThatCannotBeHeldFailsWithANextNamingItsFolder() async throws {
+        try leases.save(.sample(udid: "U1", renewedAt: t0, idle: 600))
+        let folder = leases.files("U1").folder
+        try FileLockHoldTests.readOnly(folder)
+        defer { FileLockHoldTests.cleanUp(home, readOnly: folder) }
+        let error = await #expect(throws: XcdError.self) { try await leases.keep(state(["iphone": "U1"]), renewing: false, now: t0) }
+        #expect(error?.next == FileLockHoldTests.next(folder))
+        #expect(!holds.isHolding("U1"))
+    }
+
     @Test func removingASessionKeepsItsLockFile() throws {
         try leases.save(.sample(udid: "U1", renewedAt: t0, idle: 600))
         leases.remove("U1")

@@ -34,13 +34,16 @@ public enum FileLock {
     }
 
     /// A shared lock held until `release`: many holders at once, and an exclusive try (`withLockIfFree`) finds the
-    /// file held while any one of them is. Waits while an exclusive holder has it.
+    /// file held while any one of them is. Waits while an exclusive holder has it. A lock file this user cannot make,
+    /// open, or lock fails with a `next:` naming its folder (`unusable`).
     public static func hold(at path: String) async throws -> Int32 {
-        try Disk.makeFolder((path as NSString).deletingLastPathComponent)
-        let fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0o644)
-        guard fd >= 0 else {
-            throw XcdError(.internalError, "cannot open lock file \(path) (errno \(errno))")
+        do {
+            try Disk.makeFolder((path as NSString).deletingLastPathComponent)
+        } catch {
+            throw unusable(path, "cannot make the folder of lock file \(path)", details: [error.localizedDescription])
         }
+        let fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0o644)
+        guard fd >= 0 else { throw unusable(path, "cannot open lock file \(path) (\(describe(errno)))") }
         let lockErrno = await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
             DispatchQueue.global().async {
                 var code: Int32 = 0
@@ -52,9 +55,24 @@ public enum FileLock {
         }
         guard lockErrno == 0 else {
             close(fd)
-            throw XcdError(.internalError, "cannot lock \(path) (errno \(lockErrno): \(String(cString: strerror(lockErrno))))")
+            throw unusable(path, "cannot lock \(path) (\(describe(lockErrno)))")
         }
         return fd
+    }
+
+    /// A lock file `hold` cannot use, most often because a `sudo xcd` left its folder owned by root. `next:` names the
+    /// nearest folder that exists: the lock's own, or the one above it that could not be written into.
+    static func unusable(_ path: String, _ message: String, details: [String] = []) -> XcdError {
+        var folder = (path as NSString).deletingLastPathComponent
+        while !Disk.exists(folder), folder.count > 1 { folder = (folder as NSString).deletingLastPathComponent }
+        return XcdError(.internalError, message,
+                        next: "check that \(folder) and its files belong to you and are writable (a `sudo xcd` can leave "
+                            + "them owned by root): `ls -l \(Shell.quote(folder))`",
+                        details: details)
+    }
+
+    private static func describe(_ code: Int32) -> String {
+        "errno \(code): \(String(cString: strerror(code)))"
     }
 
     /// Lets go of a lock `hold` returned.
