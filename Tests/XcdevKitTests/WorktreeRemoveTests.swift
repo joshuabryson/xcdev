@@ -108,6 +108,30 @@ import XcdevTestSupport
         #expect(removal.stoppedRunners.isEmpty)
     }
 
+    @Test func removingAWorktreeEndsItsClonesWatchdogs() async throws {
+        let (project, _, ctx, created) = try await setup()
+        defer { project.remove() }
+        _ = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        var state = created
+        let udid = "4CEABB59-81A5-4060-9573-99D2BA1BA97B"
+        state.devices["iphone"] = ProvisionedDevice(udid: udid, deviceType: "iPhone 18 Pro", deviceTypeIdentifier: "t",
+                                                    runtime: "iOS 27.0", runtimeIdentifier: "r")
+        try WorktreeStateStore.save(state, WorktreePaths(root: state.path))
+        let detached = FakeDetachedProcesses()
+        let holds = LeaseHolds()
+        let globalPaths = GlobalPaths(base: project.home)
+        let leases = DeviceLeases(globalPaths: globalPaths, holds: holds)
+        try leases.save(.sample(udid: udid))
+        try await Watchdogs(leases: leases, detached: detached).start(udid, developerDir: nil, log: "/l", executable: "/xcd")
+        let pid = try #require(detached.starts.first).identity.pid
+
+        let svc = WorktreeService(runner: RoutingRunner(fake: fake), globalPaths: globalPaths, detached: detached)
+        _ = try await svc.remove(name: state.name, force: true, in: ctx)
+        #expect(detached.stops.contains { $0.pid == pid && $0.signal == SIGTERM })
+        #expect(leases.load(udid) == nil)
+        holds.release(udid)
+    }
+
     @Test func removeStopsTheWorktreesUIRunner() async throws {
         let (project, _, ctx, state) = try await setup()
         defer { project.remove() }

@@ -396,6 +396,7 @@ extension WorktreeService {
         let state = exists ? try WorktreeStateStore.load(WorktreePaths(root: entry.path)) : nil
         let stopped = exists ? await Recordings.stopAll(in: WorktreePaths(root: entry.path), detached: detached, now: Date()) : []
         let runners = exists ? await Runners.stopAll(in: WorktreePaths(root: entry.path), detached: detached) : []
+        await endWatchdogs(of: state)
         let keepsCheckout = !isXcds(entry, in: ctx)
         let freed = await freedDisk(of: entry, state: state, keepsCheckout: keepsCheckout)
         let removedDevices = if let state { try await deleteClones(of: state) } else { [String]() }
@@ -411,6 +412,12 @@ extension WorktreeService {
                                stoppedRecordings: stopped.map(\.note), stoppedRunners: runners, warnings: warnings,
                                keptCheckout: keepsCheckout, checkoutGone: keepsCheckout && !exists,
                                checkoutBytes: freed.checkoutBytes, stateBytes: freed.stateBytes, cloneBytes: freed.cloneBytes)
+    }
+
+    /// Ends the idle watchdog and lease of every clone of `state`, so none outlives its simulator.
+    private func endWatchdogs(of state: WorktreeState?) async {
+        let watchdogs = Watchdogs(leases: DeviceLeases(globalPaths: globalPaths), detached: detached)
+        for device in state?.devices.values.sorted(by: { $0.udid < $1.udid }) ?? [] { await watchdogs.end(device.udid) }
     }
 
     /// Removes the git worktree of one of xcd's own worktrees, and whatever is left of its folder.

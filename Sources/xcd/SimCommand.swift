@@ -29,14 +29,23 @@ struct SimCommand: AsyncParsableCommand {
     }
 
     struct Shutdown: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Shut down the device's clone (no-op if never cloned).")
+        static let configuration = CommandConfiguration(abstract: "Shut down the device's clone, or every clone with --all (no-op if never cloned).")
         @OptionGroup var target: DeviceOption
+        @Flag(help: "Shut down every simulator clone of this worktree.") var all = false
         @OptionGroup var options: GlobalOptions
 
         func run() async throws {
-            try await Emit.run("sim shutdown", options) { services in
-                let ctx = try await services.open(worktree: options.worktree, renewsLeases: false)
-                return try await services.provisioner.shutdownReport(target.device, in: ctx, detached: services.detached)
+            switch try ShutdownScope.parse(all: all, device: target.device) {
+            case .all:
+                try await Emit.run("sim shutdown", options) { services in
+                    let ctx = try await services.open(worktree: options.worktree, renewsLeases: false)
+                    return try await services.provisioner.shutdownAllReport(in: ctx, detached: services.detached)
+                }
+            case .one(let device):
+                try await Emit.run("sim shutdown", options) { services in
+                    let ctx = try await services.open(worktree: options.worktree, renewsLeases: false)
+                    return try await services.provisioner.shutdownReport(device, in: ctx, detached: services.detached)
+                }
             }
         }
     }

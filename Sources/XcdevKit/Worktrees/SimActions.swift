@@ -28,6 +28,34 @@ extension DeviceProvisioner {
         return going.report("erased", retries: retries, ctx)
     }
 
+    /// Shuts down every booted simulator clone of the worktree and ends each clone's session. Devices are listed sorted;
+    /// a Mac has no simulator and is left out.
+    public func shutdownAllReport(in ctx: WorktreeContext,
+                                  detached: (any DetachedProcessLaunching)? = nil) async throws -> ShutdownAllReport {
+        let catalog = try await simctl(for: ctx).catalog()
+        let states = Dictionary(catalog.devices.map { ($0.udid, $0.state) }, uniquingKeysWith: { first, _ in first })
+        var devices: [ShutdownAllReport.Device] = []
+        for name in ctx.config.allDevices.filter({ !$0.value.isMac }).keys.sorted() {
+            devices.append(try await shutdownOne(name, states: states, in: ctx, detached))
+        }
+        return ShutdownAllReport(devices: devices, worktree: ctx.state.name)
+    }
+
+    private func shutdownOne(_ name: String, states: [String: String], in ctx: WorktreeContext,
+                             _ detached: (any DetachedProcessLaunching)?) async throws -> ShutdownAllReport.Device {
+        guard let device = ctx.state.devices[name] else {
+            return .init(device: name, udid: nil, action: "not cloned", retries: 0, notes: [])
+        }
+        guard states[device.udid] == "Booted" else {
+            if let detached {
+                await Watchdogs(leases: DeviceLeases(globalPaths: globalPaths), detached: detached).end(device.udid)
+            }
+            return .init(device: name, udid: device.udid, action: "not booted", retries: 0, notes: [])
+        }
+        let report = try await shutdownReport(name, in: ctx, detached: detached)
+        return .init(device: name, udid: device.udid, action: report.action, retries: report.retries, notes: report.notes)
+    }
+
     /// A clone about to be shut down or erased, with the notes from stopping what ran against it.
     private struct GoingAway {
         let name: String
@@ -50,6 +78,7 @@ extension DeviceProvisioner {
         if let detached {
             notes += await Recordings.stopAll(in: ctx.paths, device: name, detached: detached, now: Date()).map(\.note)
             notes += await Runners.stopAll(in: ctx.paths, device: name, detached: detached)
+            await Watchdogs(leases: DeviceLeases(globalPaths: globalPaths), detached: detached).end(device.udid)
         }
         return GoingAway(name: name, device: device, notes: notes)
     }

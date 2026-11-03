@@ -73,6 +73,36 @@ import XcdevTestSupport
         #expect(report.action == "shut down" && report.udid == phone.device.udid)
     }
 
+    /// Boots `iphone`, gives it a lease and a live watchdog, runs `action`, and checks the watchdog was stopped and the lease is gone.
+    func endsTheWatchdog(_ action: (WorktreeContext, FakeDetachedProcesses) async throws -> Void) async throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        _ = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        let detached = FakeDetachedProcesses()
+        let holds = LeaseHolds()
+        var ctx = try context()
+        let udid = try await provisioner.boot("iphone", in: &ctx).device.udid
+        let leases = DeviceLeases(globalPaths: GlobalPaths(base: dir + "/home"), holds: holds)
+        try leases.save(.sample(udid: udid))
+        try await Watchdogs(leases: leases, detached: detached).start(udid, developerDir: nil, log: "/l", executable: "/xcd")
+        let pid = try #require(detached.starts.first).identity.pid
+        try await action(ctx, detached)
+        #expect(detached.stops.contains { $0.pid == pid && $0.signal == SIGTERM })
+        #expect(leases.load(udid) == nil)
+        holds.release(udid)
+    }
+
+    @Test func shuttingDownOneDeviceEndsItsWatchdog() async throws {
+        try await endsTheWatchdog { ctx, detached in
+            _ = try await provisioner.shutdownReport("iphone", in: ctx, detached: detached)
+        }
+    }
+
+    @Test func erasingEndsTheWatchdog() async throws {
+        try await endsTheWatchdog { ctx, detached in
+            _ = try await provisioner.eraseReport("iphone", in: ctx, detached: detached)
+        }
+    }
+
     /// Xcode 27 has no Simulator.app. Its Device Hub is told which simulator to show by a URL, and the report says
     /// what quitting it does: every other worktree's clone goes down with it.
     @Test func openBootsThenShowsTheCloneInDeviceHub() async throws {
