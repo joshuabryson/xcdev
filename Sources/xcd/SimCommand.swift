@@ -17,11 +17,13 @@ struct SimCommand: AsyncParsableCommand {
     struct Boot: AsyncParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Boot the device's clone, cloning it first if needed.")
         @OptionGroup var target: DeviceOption
+        @Option(help: "Shut the clone down after this long with no xcd command, e.g. 5m, or off (default: sim.idle, else 10m).") var idle: String?
         @OptionGroup var options: GlobalOptions
 
         func run() async throws {
+            let idle = try IdleThreshold.option(idle)
             try await Emit.run("sim boot", options) { services in
-                var ctx = try await services.open(worktree: options.worktree)
+                var ctx = try await services.open(worktree: options.worktree, idle: idle)
                 await Recording.stopOverdue(services, ctx)
                 return try await services.provisioner.bootReport(target.device, in: &ctx)
             }

@@ -10,11 +10,13 @@ struct RunCommand: AsyncParsableCommand {
     @OptionGroup var scheme: SchemeOptions
     @Flag(name: .customLong("no-build"), help: "Launch the latest build without building first.") var noBuild = false
     @OptionGroup var launch: LaunchFlags
+    @Option(help: "Shut the clone down after this long with no xcd command, e.g. 5m, or off (default: sim.idle, else 10m).") var idle: String?
     @OptionGroup var options: GlobalOptions
 
     func run() async throws {
+        let idle = try IdleThreshold.option(idle)
         try await Emit.run("run", options) { services in
-            var ctx = try await services.open(worktree: options.worktree, xcode: target.xcode)
+            var ctx = try await services.open(worktree: options.worktree, xcode: target.xcode, idle: idle)
             await Recording.stopOverdue(services, ctx)
             let timeout = try DurationText.option(scheme.timeout, flag: "--timeout") ?? .seconds(1800)
             return try await services.apps.run(

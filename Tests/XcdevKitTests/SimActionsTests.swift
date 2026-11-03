@@ -140,6 +140,22 @@ import XcdevTestSupport
         #expect(report.action == "booted" && report.device == "iphone" && report.worktree == "feat")
     }
 
+    @Test func bootReportCarriesTheIdleThreshold() async throws {
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        _ = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        let holds = LeaseHolds()
+        let home = GlobalPaths(base: dir + "/home")
+        let sessions = IdleSessions(leases: DeviceLeases(globalPaths: home, holds: holds), detached: FakeDetachedProcesses(),
+                                    executable: "/xcd", now: { Date() })
+        let provisioner = DeviceProvisioner(runner: fake, globalPaths: home, sessions: sessions)
+        var ctx = try context()
+        let first = try await provisioner.bootReport(nil, in: &ctx)
+        defer { if let udid = first.udid { holds.release(udid) } }
+        #expect(first.idle == 600)
+        ctx.idleOverride = 0
+        #expect(try await provisioner.bootReport(nil, in: &ctx).idle == 0)
+    }
+
     @Test func contextDeviceFallback() throws {
         let ctx = try context()
         let error = #expect(throws: XcdError.self) {

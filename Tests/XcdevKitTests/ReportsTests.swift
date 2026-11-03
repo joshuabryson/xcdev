@@ -122,6 +122,13 @@ import Testing
         #expect(json == #"{"command":"sim boot","data":{"action":"booted","device":"iphone","notes":[],"retries":0,"udid":"U1","worktree":"feat"},"ok":true,"worktree":"feat"}"#)
     }
 
+    @Test func simReportJSONCarriesIdleOnlyWhenSet() {
+        var report = SimReport(action: "booted", device: "iphone", udid: "U1", retries: 0, worktree: "feat")
+        #expect(!Renderer.report(report, command: "sim boot", format: .json, notes: []).contains("idle"))
+        report.idle = 600
+        #expect(Renderer.report(report, command: "sim boot", format: .json, notes: []).contains(#""idle":600"#))
+    }
+
     @Test func configShowIsYAMLWithPins() throws {
         let config = try ConfigLoader.parse(main: "version: 1\nproject: App.xcodeproj\n")
         let text = ConfigReport(config: config, worktree: state).text

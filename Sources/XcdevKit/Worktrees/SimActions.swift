@@ -5,7 +5,9 @@ extension DeviceProvisioner {
     public func bootReport(_ requested: String?, in ctx: inout WorktreeContext) async throws -> SimReport {
         let name = try deviceName(requested, config: ctx.config)
         let (device, retries) = try await boot(name, in: &ctx)
-        return SimReport(action: "booted", device: name, udid: device.udid, retries: retries, worktree: ctx.state.name)
+        var report = SimReport(action: "booted", device: name, udid: device.udid, retries: retries, worktree: ctx.state.name)
+        report.idle = sessions?.leases.load(device.udid)?.idle
+        return report
     }
 
     public func shutdownReport(_ requested: String?, in ctx: WorktreeContext,

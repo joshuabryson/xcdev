@@ -33,11 +33,13 @@ struct TestCommand: AsyncParsableCommand {
     var only: [String] = []
     @Option(help: "Skip this test, class, or target. Repeatable.") var skip: [String] = []
     @Flag(help: "List every warning, not only those in the files you changed.") var warnings = false
+    @Option(help: "Shut the clone down after this long with no xcd command, e.g. 5m, or off (default: sim.idle, else 10m).") var idle: String?
     @OptionGroup var options: GlobalOptions
 
     func run() async throws {
+        let idle = try IdleThreshold.option(idle)
         try await Emit.run("test", options) { services in
-            var ctx = try await services.open(worktree: options.worktree, xcode: target.xcode)
+            var ctx = try await services.open(worktree: options.worktree, xcode: target.xcode, idle: idle)
             await Recording.stopOverdue(services, ctx)
             let timeout = try DurationText.option(scheme.timeout, flag: "--timeout") ?? .seconds(3600)
             return try await services.tests.test(

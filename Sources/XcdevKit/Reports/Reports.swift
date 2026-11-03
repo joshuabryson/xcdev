@@ -124,6 +124,8 @@ public struct SimReport: Reportable {
     public let retries: Int
     public let worktree: String
     public var notes: [String] = []
+    /// Seconds of silence before the clone shuts itself down; 0 is never. Set by `sim boot`.
+    public var idle: Int?
 
     public init(action: String, device: String, udid: String?, retries: Int, worktree: String, notes: [String] = []) {
         self.notes = notes
