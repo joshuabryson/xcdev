@@ -161,4 +161,41 @@ import XcdevTestSupport
         let (report, _) = try await run(.init(testSummary: Self.passingSummary))
         #expect(!report.notes.contains { $0.contains("UI runner") } && !report.text.contains("UI runner"))
     }
+
+    /// Runs a passing `xcd test` through a provisioner with idle sessions. With `boots`, xcodebuild leaves the clone
+    /// booted, as a real one does. Returns the clone's udid and where its lease would be.
+    func runLeasing(boots: Bool) async throws -> (udid: String, leases: DeviceLeases) {
+        let simulators = try FakeSimulators(runner: fake, catalogJSON: Fixture.string("simctl-list.json"))
+        FakeXcodebuild(runner: fake).onRun(.init(testSummary: Self.passingSummary))
+        if boots {
+            fake.stub(["xcrun", "xcodebuild", "test"]) { invocation in
+                let destination = invocation.arguments.first { $0.hasPrefix("id=") } ?? ""
+                simulators.setState("Booted", udid: String(destination.dropFirst(3)))
+                return ProcessOutput(stdout: "** TEST SUCCEEDED **\n")
+            }
+        }
+        let leases = DeviceLeases(globalPaths: GlobalPaths(base: worktree.root + "/home"), holds: LeaseHolds())
+        let provisioner = DeviceProvisioner(runner: fake, globalPaths: leases.globalPaths,
+                                            sessions: IdleSessions(leases: leases, detached: FakeDetachedProcesses(), executable: "/xcd"))
+        var ctx = try worktree.context(BuildServiceTests.config, container: "App.xcodeproj")
+        let builds = BuildService(runner: fake, provisioner: provisioner, now: { Date(timeIntervalSince1970: 1_790_040_000) })
+        _ = try await TestService(builds: builds).test(TestOptions(), in: &ctx)
+        let udid = try #require(ctx.state.devices["iphone"]?.udid)
+        #expect(simulators.devices.first { $0.udid == udid }?.state == (boots ? "Booted" : "Shutdown"))
+        return (udid, leases)
+    }
+
+    @Test func aTestRunLeasesTheCloneXcodebuildLeftBooted() async throws {
+        defer { worktree.remove() }
+        let (udid, leases) = try await runLeasing(boots: true)
+        #expect(leases.load(udid)?.device == "iphone")
+        leases.holds.release(udid)
+    }
+
+    @Test func aTestRunLeasesNothingWhenTheCloneIsShutDown() async throws {
+        defer { worktree.remove() }
+        let (udid, leases) = try await runLeasing(boots: false)
+        #expect(leases.load(udid) == nil)
+        #expect(!Disk.exists(leases.globalPaths.devicesDirectory))
+    }
 }

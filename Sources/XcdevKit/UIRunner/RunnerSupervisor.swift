@@ -60,6 +60,7 @@ public struct RunnerSupervisor: Sendable {
         let device = try await provisioner.ensure(name, in: &ctx)
         try Runners.requireIOS(device, name: name)
         _ = try await provisioner.simctl(for: ctx).boot(udid: device.udid)
+        await provisioner.leased(name, device, in: ctx)
         let xcode = try await provisioner.ensureXcode(&ctx)
         let target = Target(name: name, udid: device.udid, key: builder.key(for: xcode), developerDir: xcode.developerDir,
                             paths: ctx.paths, timeout: Self.startTimeout(warm: warm))

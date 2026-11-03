@@ -98,4 +98,15 @@ public struct DeviceLeases: Sendable {
         Disk.remove(files.lease)
         Disk.remove(files.watchdog)
     }
+
+    /// Housekeeping when a session begins: removes the whole folder of a clone that is gone from `catalog`, or shut
+    /// down with no live watchdog. A folder whose lock is held stays, since a command may be using it.
+    public func sweep(_ catalog: SimCatalog, isLive: (String) -> Bool) {
+        for udid in Disk.names(in: globalPaths.devicesDirectory) {
+            let state = catalog.device(udid: udid)?.state
+            guard state == nil || (state == "Shutdown" && !isLive(udid)) else { continue }
+            let files = files(udid)
+            if !FileLock.isHeld(at: files.lock) { Disk.remove(files.folder) }
+        }
+    }
 }

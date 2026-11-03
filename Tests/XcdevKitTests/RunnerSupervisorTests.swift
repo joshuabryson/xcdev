@@ -24,7 +24,8 @@ import XcdevTestSupport
 
     func setup(detached: FakeDetachedProcesses = FakeDetachedProcesses(onStart: writesReady),
                transport: FakeRunnerTransport = FakeRunnerTransport(), now: Date = now,
-               sleep: @escaping @Sendable (Duration) async throws -> Void = { duration in _ = duration }) throws -> (RunnerSupervisor, WorktreeContext) {
+               sleep: @escaping @Sendable (Duration) async throws -> Void = { duration in _ = duration },
+               sessions: IdleSessions? = nil) throws -> (RunnerSupervisor, WorktreeContext) {
         _ = try FakeSimulators(runner: worktree.runner, catalogJSON: Fixture.string("simctl-list.json"), devicesDirectory: worktree.root + "/sims")
         worktree.runner.stub(["xcrun", "xcodebuild", "build-for-testing"]) { invocation in
             let derived = invocation.arguments[invocation.arguments.firstIndex(of: "-derivedDataPath")! + 1]
@@ -35,7 +36,8 @@ import XcdevTestSupport
             return ProcessOutput()
         }
         let paths = GlobalPaths(base: worktree.root + "/home")
-        let supervisor = RunnerSupervisor(provisioner: worktree.provisioner, builder: RunnerBuilder(runner: worktree.runner, globalPaths: paths),
+        let provisioner = DeviceProvisioner(runner: worktree.runner, globalPaths: paths, sessions: sessions)
+        let supervisor = RunnerSupervisor(provisioner: provisioner, builder: RunnerBuilder(runner: worktree.runner, globalPaths: paths),
                                           detached: detached, client: RunnerClient(transport: transport), globalPaths: paths,
                                           now: { now }, sleep: sleep)
         return (supervisor, try worktree.context(Self.yaml))
@@ -78,6 +80,19 @@ import XcdevTestSupport
         #expect(record.port == 51234 && record.process == start.identity && record.udid == session.udid && !record.failed)
         #expect(record.runnerKey == "27A266a-" + RunnerSource.hash && record.readyFile == ready)
         #expect(try FileManager.default.contentsOfDirectory(atPath: ctx.paths.stateDirectory).filter { $0.contains("ready") }.isEmpty)
+    }
+
+    /// The runner boots the clone itself, so its idle session begins here too.
+    @Test func theUIRunnerLeasesTheCloneItBoots() async throws {
+        defer { worktree.remove() }
+        let holds = LeaseHolds()
+        let leases = DeviceLeases(globalPaths: GlobalPaths(base: worktree.root + "/home"), holds: holds)
+        let watchdogs = FakeDetachedProcesses()
+        var (supervisor, ctx) = try setup(sessions: IdleSessions(leases: leases, detached: watchdogs, executable: "/xcd"))
+        let session = try await supervisor.session(device: nil, in: &ctx)
+        #expect(leases.load(session.udid) != nil)
+        #expect(watchdogs.starts.map(\.invocation.arguments) == [["_watch-device", session.udid, "--developer-dir", "/Applications/Xcode.app/Contents/Developer"]])
+        holds.release(session.udid)
     }
 
     /// The record holds the bearer token.

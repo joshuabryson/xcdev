@@ -14,6 +14,19 @@ import XcdevTestSupport
         #expect(services.media.currentDirectory == "/cwd")
     }
 
+    /// Every clone a command boots starts its watchdog as this xcd, on the shared launcher, under this home.
+    @Test func theProvisionerStartsIdleSessions() throws {
+        let detached = FakeDetachedProcesses()
+        var services = Services(runner: FakeProcessRunner(), globalPaths: GlobalPaths(base: "/h"), currentDirectory: "/cwd",
+                                environment: [:], detached: detached)
+        services.xcdExecutable = "/built/xcd"
+        let sessions = try #require(services.provisioner.sessions)
+        #expect(sessions.watchdogs.detached as? FakeDetachedProcesses === detached)
+        #expect(sessions.executable == "/built/xcd")
+        #expect(sessions.leases.globalPaths == GlobalPaths(base: "/h") && sessions.leases.holds === LeaseHolds.shared)
+        #expect(services.runners.provisioner.sessions != nil && services.builds.provisioner.sessions != nil)
+    }
+
     /// `xcd lint` reads paths from where it is run, and looks for the linter in this process's PATH first. Its
     /// scratch folders are registered with the handler Ctrl-C fires, or they would be left behind.
     @Test func lintGetsTheCurrentDirectoryThePathAndTheOutputFormat() {

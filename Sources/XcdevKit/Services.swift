@@ -67,7 +67,12 @@ public struct Services: Sendable {
         service.notes = notes
         return service
     }
-    public var provisioner: DeviceProvisioner { DeviceProvisioner(runner: runner, globalPaths: globalPaths) }
+    /// Every clone it boots begins an idle session, whose watchdog runs as this xcd.
+    public var provisioner: DeviceProvisioner {
+        DeviceProvisioner(runner: runner, globalPaths: globalPaths,
+                          sessions: IdleSessions(leases: DeviceLeases(globalPaths: globalPaths), detached: detached,
+                                                 executable: xcdExecutable))
+    }
     public var xcodeOpener: XcodeOpener { XcodeOpener(runner: runner, provisioner: provisioner) }
     public var media: MediaService {
         MediaService(provisioner: provisioner, detached: detached, currentDirectory: currentDirectory, xcdExecutable: xcdExecutable)

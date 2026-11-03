@@ -3,12 +3,16 @@ public struct DeviceProvisioner: Sendable {
     public let globalPaths: GlobalPaths
     public let discovery: XcodeDiscovery
     public let sdks: SDKStore
+    /// Begins the idle session of each clone this provisioner boots. Nil leases nothing.
+    public let sessions: IdleSessions?
 
-    public init(runner: any ProcessRunning, globalPaths: GlobalPaths, discovery: XcodeDiscovery? = nil) {
+    public init(runner: any ProcessRunning, globalPaths: GlobalPaths, discovery: XcodeDiscovery? = nil,
+                sessions: IdleSessions? = nil) {
         self.runner = runner
         self.globalPaths = globalPaths
         self.discovery = discovery ?? XcodeDiscovery(runner: runner)
         self.sdks = SDKStore(runner: runner, cacheDirectory: globalPaths.cacheDirectory)
+        self.sessions = sessions
     }
 
     /// `--device` value, else `defaultDevice`, else the only configured device.
@@ -110,6 +114,24 @@ public struct DeviceProvisioner: Sendable {
     public func boot(_ name: String, in ctx: inout WorktreeContext) async throws -> (device: ProvisionedDevice, retries: Int) {
         let device = try await ensure(name, in: &ctx)
         let retries = try await simctl(for: ctx).boot(udid: device.udid)
+        await leased(name, device, in: ctx)
         return (device, retries)
+    }
+
+    /// After a boot: begins or keeps the clone's idle session. A watchdog that could not start becomes a note, never a
+    /// failure; this command's `--idle`, when given, is noted too.
+    public func leased(_ name: String, _ device: ProvisionedDevice, in ctx: WorktreeContext) async {
+        guard let sessions else { return }
+        if let note = await sessions.began(name, device, in: ctx, simctl: simctl(for: ctx)) { Notes.current?.add(note) }
+        if let idle = ctx.idleOverride { Notes.current?.add("idle \(IdleThreshold.text(idle))") }
+    }
+
+    /// For `xcd test`, whose xcodebuild boots the clone itself: `leased` when the worktree's clone `name` is booted now.
+    /// A clone never made, or a `simctl list` that fails, leases nothing.
+    public func leaseIfBooted(_ name: String, in ctx: WorktreeContext) async {
+        guard sessions != nil, let device = ctx.state.devices[name],
+              let catalog = try? await simctl(for: ctx).catalog(), catalog.device(udid: device.udid)?.state == "Booted"
+        else { return }
+        await leased(name, device, in: ctx)
     }
 }
