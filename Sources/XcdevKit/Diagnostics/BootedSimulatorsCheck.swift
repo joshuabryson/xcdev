@@ -12,7 +12,9 @@ public struct BootedSimulatorsCheck: DoctorCheck {
     public let dayLimit: TimeInterval
     public init(dayLimit: TimeInterval = 86_400) { self.dayLimit = dayLimit }
 
+    /// Nil while `simctl list` fails: nothing is known about what is booted, and `coresimulator` reports the failure.
     public func summary(_ env: DoctorEnvironment) async -> String? {
+        guard env.catalog != nil else { return nil }
         let booted = await Self.listing(env)
         guard !booted.isEmpty else { return "none booted" }
         return "\(booted.count) booted: " + booted.map { $0.clause(now: env.now) }.joined(separator: "; ")
@@ -53,31 +55,30 @@ public struct BootedSimulatorsCheck: DoctorCheck {
     }
 
     /// With the lock held, the worktree's state is read again: a clone it no longer records is left as it is. A clone
-    /// with no lease gets one first, with the threshold of its checkout's config.
+    /// with no lease gets one first, with the threshold of its checkout's config. The watchdog runs with the worktree's
+    /// Xcode from its state, whatever an older lease names; with none pinned, simctl runs under xcode-select's.
     func startWatchdog(_ udid: String, _ recorder: BootedSimulator.Recorder, _ env: DoctorEnvironment) async throws {
         let paths = WorktreePaths(root: recorder.entry.path)
         guard let state = try WorktreeStateStore.load(paths), state.devices[recorder.device]?.udid == udid else { return }
-        let lease = try await lease(of: udid, recorder, xcode: state.xcode, env)
+        try await leaseIfMissing(udid, recorder, xcode: state.xcode, env)
         let log = paths.newArtifact(in: paths.logs, kind: "watchdog-\(recorder.device)", ext: "log", now: env.now)
         let now = env.now
         try await Watchdogs(leases: DeviceLeases(globalPaths: env.globalPaths), detached: env.detached, now: { now })
-            .start(udid, developerDir: lease.developerDir, log: log, executable: env.xcdExecutable)
+            .start(udid, developerDir: state.xcode?.developerDir, log: log, executable: env.xcdExecutable)
     }
 
-    /// The clone's lease. One is written for a clone that has none: booted when its `launchd_sim` started (else now),
-    /// renewed now, with its checkout's threshold and its worktree's Xcode.
-    func lease(of udid: String, _ recorder: BootedSimulator.Recorder, xcode: XcodeInstall?,
-               _ env: DoctorEnvironment) async throws -> DeviceLease {
+    /// Writes the lease of a clone that has none: booted when its `launchd_sim` started (else now), renewed now, with
+    /// its checkout's threshold and its worktree's Xcode. A lease that exists is kept as it is.
+    func leaseIfMissing(_ udid: String, _ recorder: BootedSimulator.Recorder, xcode: XcodeInstall?,
+                        _ env: DoctorEnvironment) async throws {
         let leases = DeviceLeases(globalPaths: env.globalPaths)
-        if let lease = leases.load(udid) { return lease }
+        guard leases.load(udid) == nil else { return }
         let entry = recorder.entry
         let config = try? ConfigLoader.checkout(worktreeRoot: entry.path, projectRoot: entry.projectRoot).config
         let bootedAt = await BootedSimulator.bootTimes([udid], env)[udid] ?? env.now
-        let lease = DeviceLease(udid: udid, device: recorder.device, worktree: entry.name, worktreeRoot: entry.path,
-                                project: entry.project, developerDir: xcode?.developerDir, bootedAt: bootedAt, renewedAt: env.now,
-                                idle: config?.idleSeconds ?? IdleThreshold.defaultSeconds)
-        try leases.save(lease)
-        return lease
+        try leases.save(DeviceLease(udid: udid, device: recorder.device, worktree: entry.name, worktreeRoot: entry.path,
+                                    project: entry.project, developerDir: xcode?.developerDir, bootedAt: bootedAt, renewedAt: env.now,
+                                    idle: config?.idleSeconds ?? IdleThreshold.defaultSeconds))
     }
 
     /// Every booted simulator, as the check's problems and summary see it.

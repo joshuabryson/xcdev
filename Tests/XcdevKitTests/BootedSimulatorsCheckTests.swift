@@ -72,6 +72,18 @@ import XcdevTestSupport
         #expect(!fake.calls.contains { $0.argv.first == "ps" })                      // nothing booted: no process listing
     }
 
+    @Test func anUnknownCatalogClaimsNothing() async throws {
+        var (project, sims, _, ctx) = try await setUp()
+        defer { project.remove() }
+        _ = try bootedClone(sims, in: &ctx)
+        fake.stub(["xcrun", "simctl", "list", "-j"], exitCode: 1, stderr: "Failed to initialize simulator device set.")
+        let report = await doctor(project).run(fix: false, checks: [BootedSimulatorsCheck()], from: project.root)
+        #expect(report.checks[0].summary == nil)
+        #expect(!report.text.contains("none booted"))
+        #expect(report.text.contains("ok       booted-simulators\n") || report.text.hasSuffix("ok       booted-simulators"))
+        #expect(report.problems.isEmpty)
+    }
+
     @Test func aWatchedCloneIsListedOk() async throws {
         var (project, sims, _, ctx) = try await setUp()
         defer { project.remove() }
@@ -201,6 +213,32 @@ import XcdevTestSupport
         #expect(kept.renewedAt == t0 - 1500 && kept.idle == 1200 && kept.bootedAt == t0 - 7800)
         #expect(detached.starts.count == 1)
         #expect(report.text.contains("fixed    booted-simulators  Sample App/main iphone: booted 2h 10m, used 25m ago, no watchdog  (watchdog started)"))
+    }
+
+    /// Saves a lease of `udid` that names an Xcode of its own.
+    func lease(_ udid: String, developerDir: String, root: String, home: String) throws {
+        let lease = DeviceLease(udid: udid, device: "iphone", worktree: "main", worktreeRoot: root, project: "Sample App",
+                                developerDir: developerDir, bootedAt: t0 - 7800, renewedAt: t0 - 1500, idle: 600)
+        try DeviceLeases(globalPaths: GlobalPaths(base: home)).save(lease)
+    }
+
+    @Test func fixStartsTheWatchdogWithTheWorktreesXcodeNotTheLeases() async throws {
+        var (project, sims, _, ctx) = try await setUp()
+        defer { project.remove() }
+        ctx.state.xcode = XcodeInstall(path: "/Applications/Xcode-27.app", version: "27.0", build: "27A1")
+        let mine = try bootedClone(sims, in: &ctx)
+        try lease(mine, developerDir: "/Applications/Xcode-26.app/Contents/Developer", root: ctx.paths.root, home: project.home)
+        _ = await doctor(project).run(fix: true, checks: [BootedSimulatorsCheck()], from: project.root)
+        #expect(detached.starts.map(\.invocation.arguments) == [["_watch-device", mine, "--developer-dir", Self.developerDir]])
+    }
+
+    @Test func fixStartsTheWatchdogOfAnUnpinnedWorktreeWithNoXcode() async throws {
+        var (project, sims, _, ctx) = try await setUp()
+        defer { project.remove() }
+        let mine = try bootedClone(sims, in: &ctx)
+        try lease(mine, developerDir: "/Applications/Xcode-26.app/Contents/Developer", root: ctx.paths.root, home: project.home)
+        _ = await doctor(project).run(fix: true, checks: [BootedSimulatorsCheck()], from: project.root)
+        #expect(detached.starts.map(\.invocation.arguments) == [["_watch-device", mine]])  // simctl runs under xcode-select's Xcode
     }
 
     @Test func aLaunchdSimStartOutranksTheLease() async throws {
