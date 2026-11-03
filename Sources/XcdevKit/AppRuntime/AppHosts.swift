@@ -35,22 +35,34 @@ struct ProcessLookup: Sendable {
 
     /// Pids whose executable is one of `paths`, by the path as given, from one listing; a path with none has no entry.
     /// `ps -o comm` prints the full executable path on macOS. Paths are compared in canonical form, so a link or a
-    /// `/private` prefix in either one does not hide a match. `ps` answers in a twentieth of a second, but on a
-    /// saturated Mac it has taken over ten, so it gets thirty.
+    /// `/private` prefix in either one does not hide a match.
     func pids(of paths: [String]) async throws -> [String: Set<Int32>] {
-        let out = try await runner.runChecked(Invocation("/bin/ps", ["-axo", "pid=,comm="], timeout: .seconds(30)))
         let wanted = Dictionary(paths.map { (Paths.canonical($0), $0) }) { first, _ in first }
         let names = Set(paths.map { ($0 as NSString).lastPathComponent })
         var pids: [String: Set<Int32>] = [:]
-        for line in out.stdoutString.split(separator: "\n") {
-            let trimmed = line.drop { $0 == " " }
-            guard let space = trimmed.firstIndex(of: " "), let pid = Int32(trimmed[..<space]) else { continue }
-            let command = String(trimmed[trimmed.index(after: space)...])
+        for process in try await listing() {
             // Most processes are something else: compare names before resolving a path.
-            guard names.contains(where: { command.hasSuffix($0) }), let path = wanted[Paths.canonical(command)] else { continue }
-            pids[path, default: []].insert(pid)
+            guard names.contains(where: { process.command.hasSuffix($0) }), let path = wanted[Paths.canonical(process.command)] else { continue }
+            pids[path, default: []].insert(process.pid)
         }
         return pids
+    }
+
+    /// Pids whose executable's file name is exactly `name` (every `launchd_sim`, wherever its runtime is), from the
+    /// same listing.
+    func pids(named name: String) async throws -> Set<Int32> {
+        Set(try await listing().filter { ($0.command as NSString).lastPathComponent == name }.map(\.pid))
+    }
+
+    /// Every process `ps` lists, with the path of its executable. `ps` answers in a twentieth of a second, but on a
+    /// saturated Mac it has taken over ten, so it gets thirty.
+    private func listing() async throws -> [(pid: Int32, command: String)] {
+        let out = try await runner.runChecked(Invocation("/bin/ps", ["-axo", "pid=,comm="], timeout: .seconds(30)))
+        return out.stdoutString.split(separator: "\n").compactMap { line in
+            let trimmed = line.drop { $0 == " " }
+            guard let space = trimmed.firstIndex(of: " "), let pid = Int32(trimmed[..<space]) else { return nil }
+            return (pid, String(trimmed[trimmed.index(after: space)...]))
+        }
     }
 }
 

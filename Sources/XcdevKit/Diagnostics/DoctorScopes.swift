@@ -14,6 +14,7 @@ public enum DoctorReach: Sendable {
 
 extension ProjectLocationCheck { public var reach: DoctorReach { .thisProject } }
 extension CoreSimulatorCheck { public var reach: DoctorReach { .mac } }
+extension BootedSimulatorsCheck { public var reach: DoctorReach { .entries } }
 extension TemplatesCheck { public var reach: DoctorReach { .xcd } }
 extension InitScratchCheck { public var reach: DoctorReach { .xcd } }
 extension PackageCacheCheck { public var reach: DoctorReach { .xcd } }

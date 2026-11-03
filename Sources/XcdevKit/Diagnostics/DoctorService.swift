@@ -33,6 +33,8 @@ public struct DoctorReport: Reportable {
         public let problems: [DoctorProblem]
         /// Things another xcd is working on (`DoctorCheck.inProgress`); they don't count as problems.
         public var inProgress: [String] = []
+        /// What the check's `ok` line says after its id (`DoctorCheck.summary`); left out of JSON when nil.
+        public var summary: String?
     }
 
     public let fixMode: Bool
@@ -59,7 +61,11 @@ public struct DoctorReport: Reportable {
         var lines = [header]
         for check in checks {
             let mine = check.problems.filter { !isElsewhere($0) }
-            if mine.isEmpty && check.inProgress.isEmpty { lines.append("ok       \(check.id)") }
+            if let summary = check.summary {
+                lines.append("ok       \(check.id)  \(summary)")
+            } else if mine.isEmpty && check.inProgress.isEmpty {
+                lines.append("ok       \(check.id)")
+            }
             for note in check.inProgress { lines.append("busy     \(check.id)  \(note)") }
             lines += mine.map(line(for:))
         }
@@ -129,6 +135,8 @@ public struct DoctorService: Sendable {
     public let runnerClient: RunnerClient
     let accessibility: @Sendable () -> any AccessibilityAPI
     let hostApp: @Sendable () -> String
+    /// The xcd a fix starts a clone's idle watchdog as: this binary, unless a test names another.
+    let xcdExecutable: String
     let sleep: @Sendable (Duration) async throws -> Void
     /// One-line progress for a long step; the CLI writes it to stderr. The grant flow's wait uses it.
     let progress: @Sendable (String) -> Void
@@ -139,6 +147,7 @@ public struct DoctorService: Sendable {
                 runnerClient: RunnerClient = RunnerClient(transport: URLSessionRunnerTransport()),
                 accessibility: @escaping @Sendable () -> any AccessibilityAPI = { SystemAccessibility() },
                 hostApp: @escaping @Sendable () -> String = { MacHostApp.live() },
+                xcdExecutable: String = Bundle.main.executablePath ?? CommandLine.arguments[0],
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
                 progress: @escaping @Sendable (String) -> Void = { _ in /* no progress unless the CLI gives one */ }) {
         self.runner = runner
@@ -149,6 +158,7 @@ public struct DoctorService: Sendable {
         self.runnerClient = runnerClient
         self.accessibility = accessibility
         self.hostApp = hostApp
+        self.xcdExecutable = xcdExecutable
         self.sleep = sleep
         self.progress = progress
     }
@@ -157,8 +167,8 @@ public struct DoctorService: Sendable {
     /// folders and package caches depend on nothing else, so they come after the simulators, before the project's
     /// `lint:` section, its own setup, and its SwiftLint config.
     public static var allChecks: [any DoctorCheck] {
-        [ProjectLocationCheck(), CoreSimulatorCheck(), MissingWorktreesCheck(), IncompleteWorktreesCheck(), OrphanedClonesCheck(),
-         StuckClonesCheck(), TemplatesCheck(), RecordingsCheck(), StaleUIRunnersCheck(), MacPermissionsCheck(),
+        [ProjectLocationCheck(), CoreSimulatorCheck(), BootedSimulatorsCheck(), MissingWorktreesCheck(), IncompleteWorktreesCheck(),
+         OrphanedClonesCheck(), StuckClonesCheck(), TemplatesCheck(), RecordingsCheck(), StaleUIRunnersCheck(), MacPermissionsCheck(),
          InitScratchCheck(), PackageCacheCheck(),
          QualitySetupCheck(), QualityToolsCheck(), ProjectCheck(), SwiftLintCheck(), AgentDocsCheck()]
     }
@@ -185,7 +195,7 @@ public struct DoctorService: Sendable {
                 env = await environment(from: directory, fixing: fix)
                 env.formerEntries = Self.formerEntries(before, now: env.registry)
             }
-            results.append(.init(id: check.id, problems: problems, inProgress: inProgress))
+            results.append(.init(id: check.id, problems: problems, inProgress: inProgress, summary: await check.summary(env)))
         }
         return DoctorReport(fixMode: fix, checks: results, disk: includeDisk ? await disk(env) : nil,
                             restartSimulators: restartSimulators, located: fixes.located)
@@ -244,6 +254,7 @@ public struct DoctorService: Sendable {
         env.useProcesses(detached: detached, runnerClient: runnerClient)
         env.accessibility = accessibility
         env.hostApp = hostApp
+        env.xcdExecutable = xcdExecutable
         return env
     }
 

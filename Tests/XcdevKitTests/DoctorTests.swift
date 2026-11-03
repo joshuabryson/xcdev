@@ -12,7 +12,7 @@ import XcdevTestSupport
         defer { project.remove() }
         let report = await doctor(project).run(fix: false, from: nil)
         #expect(report.problems.isEmpty && report.failure == nil)
-        #expect(report.checks.map(\.id) == ["coresimulator", "missing-worktrees", "incomplete-worktrees", "orphaned-clones",
+        #expect(report.checks.map(\.id) == ["coresimulator", "booted-simulators", "missing-worktrees", "incomplete-worktrees", "orphaned-clones",
                                             "stuck-clones", "templates", "recordings", "ui-runners", "init-scratch", "package-caches"])   // no project check outside a project
         #expect(report.text.hasPrefix("doctor: 0 problems\nok       coresimulator\n"))
     }

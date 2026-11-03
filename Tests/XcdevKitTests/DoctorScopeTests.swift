@@ -73,9 +73,9 @@ import XcdevTestSupport
         let own = scopes.assign([some], reach: .thisProject)
         #expect(own.map(\.scope) == [.project] && own.map(\.projectRoot) == [project.root])
         let reaches = DoctorService.allChecks.map { "\($0.id)=\($0.reach)" }
-        #expect(reaches == ["project=thisProject", "coresimulator=mac", "missing-worktrees=entries", "incomplete-worktrees=entries", "orphaned-clones=entries",
-                            "stuck-clones=entries", "templates=xcd", "recordings=entries", "ui-runners=entries", "mac-permissions=mac", "init-scratch=xcd",
-                            "package-caches=xcd", "quality-setup=thisProject", "quality-tools=thisProject", "project=thisProject",
+        #expect(reaches == ["project=thisProject", "coresimulator=mac", "booted-simulators=entries", "missing-worktrees=entries", "incomplete-worktrees=entries",
+                            "orphaned-clones=entries", "stuck-clones=entries", "templates=xcd", "recordings=entries", "ui-runners=entries",
+                            "mac-permissions=mac", "init-scratch=xcd", "package-caches=xcd", "quality-setup=thisProject", "quality-tools=thisProject", "project=thisProject",
                             "swiftlint=thisProject", "agent-docs=thisProject"])
     }
 

@@ -20,6 +20,7 @@ public struct DoctorProblem: Codable, Sendable, Equatable {
         case addLintSection = "add_lint_section"
         case addFormatSection = "add_format_section"
         case rewriteAgentBlock = "rewrite_agent_block"
+        case startWatchdog = "start_watchdog"
     }
 
     /// Whose problem it is, which decides where `--fix` may repair it.
@@ -84,11 +85,14 @@ public protocol DoctorCheck: Sendable {
     /// Repairs `problem`. Throws `DoctorLeftAlone` when, on a closer look, it turns out to be another xcd's work
     /// in progress or no longer a problem.
     func fix(_ problem: DoctorProblem, _ env: DoctorEnvironment) async throws
+    /// What the check's `ok` line says after its id, when it has more to say than "ok"; nil for most checks.
+    func summary(_ env: DoctorEnvironment) async -> String?
 }
 
 extension DoctorCheck {
     public func applies(_ env: DoctorEnvironment) -> Bool { true }
     public func inProgress(_ env: DoctorEnvironment) -> [String] { [] }
+    public func summary(_ env: DoctorEnvironment) -> String? { nil }
 }
 
 /// Thrown by a fix that found, once it held the locks or looked again, that it must not act: another xcd is
@@ -145,6 +149,8 @@ public struct DoctorEnvironment: Sendable {
     /// What answers whether the app that runs xcd holds the Mac grants, and which app that is (`mac-permissions`).
     public var accessibility: @Sendable () -> any AccessibilityAPI = { SystemAccessibility() }
     public var hostApp: @Sendable () -> String = { MacHostApp.live() }
+    /// The xcd a fix starts a clone's idle watchdog as.
+    public var xcdExecutable = Bundle.main.executablePath ?? CommandLine.arguments[0]
 
     /// Sets how recorded processes and UI runners are inspected, stopped, and asked for health.
     mutating func useProcesses(detached: any DetachedProcessLaunching, runnerClient: RunnerClient) {
