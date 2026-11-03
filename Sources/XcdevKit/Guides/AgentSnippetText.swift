@@ -14,5 +14,6 @@ each checkout its own simulators and build folder, so agents working at once nev
 - Every failure ends with `next:`. Do it first; when it says to ask the user, ask.
 - `xcd doctor --restart-simulators` shuts down every agent's simulators: ask the user first.
 - If xcd says the project has no `.xcdev.yml`, follow `xcd guide setup`.
+- When your work on the device is finished (the change is done, committed, or the investigation is over), run `xcd sim shutdown --all`. A clone nobody has used for 10 minutes shuts itself down; the next command boots it again in about 15 seconds, with the app still installed.
 <!-- xcd:end -->
 """#

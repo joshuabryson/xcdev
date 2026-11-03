@@ -143,6 +143,17 @@ import Testing
         #expect(try Guides.guide("setup").markdown.contains("`format.tool`"))
     }
 
+    @Test func theGuidesSayWhenToShutTheCloneDown() throws {
+        let rule = "When your work on the device is finished (the change is done, committed, or the investigation is over), run `xcd sim shutdown --all`."
+        let failsafe = "A clone nobody has used for 10 minutes shuts itself down; the next command boots it again in about 15 seconds, with the app still installed."
+        for topic in ["start", "ui"] {
+            let guide = try Guides.guide(topic)
+            #expect(guide.markdown.contains(rule) && guide.markdown.contains(failsafe), "\(topic)")
+        }
+        #expect(agentSnippet.contains(rule) && agentSnippet.contains(failsafe))
+        #expect(try Guides.guide("ui").markdown.contains("`xcd run --idle 1m` for a run that knows its end; `--idle off` while a person is using the clone by hand."))
+    }
+
     @Test func listingAndUnknownTopic() throws {
         #expect(try GuideReport(topic: nil).text == """
         start      Start here: Apple-platform work with xcd
