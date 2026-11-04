@@ -116,13 +116,19 @@ import XcdevTestSupport
 
     // MARK: Doctor
 
-    @Test func doctorReportsAnXcodeUpdatedInPlaceAndUnpinsIt() async throws {
-        defer { try? FileManager.default.removeItem(atPath: apps) }
+    /// A registered project whose main worktree pinned `old` before the Xcode at its path was updated to 27.2.
+    func projectPinnedBeforeTheUpdate() async throws -> (TempProject, WorktreeContext) {
         try install(["Xcode.app": ("27.2", "27B52")], selected: "Xcode.app")
         var (project, _, _, main) = try await setup()
-        defer { project.remove() }
         main.state.xcode = old
         try WorktreeStateStore.save(main.state, main.paths)
+        return (project, main)
+    }
+
+    @Test func doctorReportsAnXcodeUpdatedInPlaceAndUnpinsIt() async throws {
+        defer { try? FileManager.default.removeItem(atPath: apps) }
+        let (project, main) = try await projectPinnedBeforeTheUpdate()
+        defer { project.remove() }
 
         let report = await doctor(project, discovery: discovery).run(fix: false, checks: [ProjectCheck()], from: project.root)
         let pinned = try #require(report.problems.first { $0.action == .unpinXcode })
@@ -137,11 +143,8 @@ import XcdevTestSupport
     /// Re-pinned between detect and fix (another command ran), the worktree keeps its new pin.
     @Test func aWorktreeRepinnedMeanwhileKeepsItsNewPin() async throws {
         defer { try? FileManager.default.removeItem(atPath: apps) }
-        try install(["Xcode.app": ("27.2", "27B52")], selected: "Xcode.app")
-        var (project, _, _, main) = try await setup()
+        var (project, main) = try await projectPinnedBeforeTheUpdate()
         defer { project.remove() }
-        main.state.xcode = old
-        try WorktreeStateStore.save(main.state, main.paths)
         let env = await doctor(project, discovery: discovery).environment(from: project.root, fixing: true)
         let problem = try #require(await ProjectCheck().detect(env).first { $0.action == .unpinXcode })
 

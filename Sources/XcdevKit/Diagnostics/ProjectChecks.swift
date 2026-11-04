@@ -14,6 +14,15 @@ public struct ProjectCheck: DoctorCheck {
         guard let config = project.config else {
             return project.configError.map { [problem($0)] } ?? []
         }
+        let (xcode, problems) = await xcodeProblems(config, project, env)
+        guard let catalog = env.catalog else { return problems }
+        let compatibility = await compatibility(with: xcode, env)
+        return problems + deviceProblems(config, project, catalog: catalog, compatibility: compatibility)
+    }
+
+    /// The Xcode the devices are checked against (the pin while it stands, else what `xcode:` resolves to), and what is
+    /// wrong with either.
+    func xcodeProblems(_ config: XcdevConfig, _ project: DoctorProject, _ env: DoctorEnvironment) async -> (XcodeInstall?, [DoctorProblem]) {
         var problems: [DoctorProblem] = []
         var xcode: XcodeInstall?
         do {
@@ -22,36 +31,49 @@ public struct ProjectCheck: DoctorCheck {
             problems.append(problem(error))
         } catch {}
         if let pinned = project.state?.xcode {
-            let worktree = "worktree '\(project.state?.name ?? "?")' is pinned to \(pinned.summary)"
-            if !FileManager.default.fileExists(atPath: pinned.path) {
-                problems.append(unpin(worktree + ", which is no longer installed", project))
-            } else if let why = await env.discovery.staleness(of: pinned, spec: config.xcode) {
-                problems.append(unpin(worktree + ", but " + why, project))
+            if let wrong = await Self.whyWrong(pinned, spec: config.xcode, env) {
+                problems.append(DoctorProblem(
+                    check: id, message: "worktree '\(project.state?.name ?? "?")' is pinned to \(pinned.summary)" + wrong,
+                    action: .unpinXcode, fix: "unpin it, so the next command resolves `xcode:` again",
+                    subject: project.location.worktreeRoot))
             } else {
                 xcode = pinned
             }
         }
-        guard let catalog = env.catalog else { return problems }
-        var compatibility: RuntimeCompatibility?
-        // The one thing a plain `doctor` may write: SDKStore caches `-showsdks` under <home>/cache.
-        if let xcode, let sdks = try? await SDKStore(runner: env.runner, cacheDirectory: env.globalPaths.cacheDirectory).sdks(for: xcode) {
-            compatibility = RuntimeCompatibility(xcode: xcode, sdks: sdks)
-        }
-        for (name, spec) in config.allDevices.sorted(by: { $0.key < $1.key }) where !spec.isMac {
+        return (xcode, problems)
+    }
+
+    /// ", which is no longer installed" or ", but <why>" once `pinned` no longer stands for `spec`
+    /// (`XcodeDiscovery.staleness`); nil while it does.
+    static func whyWrong(_ pinned: XcodeInstall, spec: String?, _ env: DoctorEnvironment) async -> String? {
+        guard Disk.exists(pinned.path) else { return ", which is no longer installed" }
+        return await env.discovery.staleness(of: pinned, spec: spec).map { ", but " + $0 }
+    }
+
+    /// What `xcode`'s simulator SDKs allow; nil without an Xcode or when its SDKs can't be read. The one thing a plain
+    /// `doctor` may write: SDKStore caches `-showsdks` under <home>/cache.
+    func compatibility(with xcode: XcodeInstall?, _ env: DoctorEnvironment) async -> RuntimeCompatibility? {
+        guard let xcode,
+              let sdks = try? await SDKStore(runner: env.runner, cacheDirectory: env.globalPaths.cacheDirectory).sdks(for: xcode)
+        else { return nil }
+        return RuntimeCompatibility(xcode: xcode, sdks: sdks)
+    }
+
+    /// Each simulator device that does not resolve to an installed type and runtime, its clone's runtime kept.
+    func deviceProblems(_ config: XcdevConfig, _ project: DoctorProject, catalog: SimCatalog,
+                        compatibility: RuntimeCompatibility?) -> [DoctorProblem] {
+        config.allDevices.sorted(by: { $0.key < $1.key }).filter { !$0.value.isMac }.compactMap { name, spec in
             var effective = spec
             if let pinned = project.state?.devices[name] { effective.runtime = pinned.runtimeIdentifier }
             do {
                 _ = try DeviceResolver.resolve(name: name, spec: effective, catalog: catalog, compatibility: compatibility)
+                return nil
             } catch let error as XcdError {
-                problems.append(problem(error))
-            } catch {}
+                return problem(error)
+            } catch {
+                return nil
+            }
         }
-        return problems
-    }
-
-    func unpin(_ message: String, _ project: DoctorProject) -> DoctorProblem {
-        DoctorProblem(check: id, message: message, action: .unpinXcode, fix: "unpin it, so the next command resolves `xcode:` again",
-                      subject: project.location.worktreeRoot)
     }
 
     /// Unpins only the Xcode `detect` saw, and only while it is still missing or stale: the worktree may have been
@@ -59,10 +81,7 @@ public struct ProjectCheck: DoctorCheck {
     public func fix(_ problem: DoctorProblem, _ env: DoctorEnvironment) async throws {
         guard problem.action == .unpinXcode, let root = problem.subject,
               var state = try WorktreeStateStore.load(WorktreePaths(root: root)), let pinned = state.xcode else { return }
-        let stillWrong = if !FileManager.default.fileExists(atPath: pinned.path) { true } else {
-            await env.discovery.staleness(of: pinned, spec: env.project?.config?.xcode) != nil
-        }
-        guard pinned == env.project?.state?.xcode, stillWrong else {
+        guard pinned == env.project?.state?.xcode, await Self.whyWrong(pinned, spec: env.project?.config?.xcode, env) != nil else {
             throw DoctorLeftAlone(note: "worktree '\(state.name)' is now pinned to \(pinned.summary); left alone")
         }
         state.xcode = nil
