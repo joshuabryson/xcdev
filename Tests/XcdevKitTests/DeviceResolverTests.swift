@@ -25,6 +25,40 @@ import Testing
         }
     }
 
+    /// Xcode 27.2 installs two runtimes named "iOS 27.2", one of them only for the iPhone Duo. A runtime named by name
+    /// or version is the one of them that supports the device's type, whichever simctl lists first.
+    @Test(arguments: [("iPhone Duo", "com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4"),
+                      ("iPhone 18 Pro", "com.apple.CoreSimulator.SimRuntime.iOS-27-2")])
+    func aRuntimeNamedByVersionSupportsTheType(type: String, expected: String) throws {
+        for duoOnlyFirst in [false, true] {
+            let catalog = try Self.twoRuntimesNamedTheSame(duoOnlyFirst: duoOnlyFirst)
+            for query in ["iOS 27.2", "27.2"] {
+                let r = try DeviceResolver.resolve(name: "d", spec: DeviceSpec(type: type, runtime: query), catalog: catalog)
+                #expect(r.runtime.identifier == expected, "\(query), the Duo's runtime listed \(duoOnlyFirst ? "first" : "second")")
+            }
+        }
+    }
+
+    static func twoRuntimesNamedTheSame(duoOnlyFirst: Bool) throws -> SimCatalog {
+        let general = """
+        { "name" : "iOS 27.2", "identifier" : "com.apple.CoreSimulator.SimRuntime.iOS-27-2", "version" : "27.2",
+          "platform" : "iOS", "isAvailable" : true,
+          "supportedDeviceTypes" : [ { "identifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro" } ] }
+        """
+        let duoOnly = """
+        { "name" : "iOS 27.2", "identifier" : "com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4", "version" : "27.2",
+          "platform" : "iOS", "isAvailable" : true,
+          "supportedDeviceTypes" : [ { "identifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo" } ] }
+        """
+        return try SimCatalog.decode(Data("""
+        { "devicetypes" : [
+            { "name" : "iPhone 18 Pro", "identifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro", "productFamily" : "iPhone" },
+            { "name" : "iPhone Duo", "identifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo", "productFamily" : "iPhone" } ],
+          "runtimes" : [ \(duoOnlyFirst ? duoOnly : general), \(duoOnlyFirst ? general : duoOnly) ],
+          "devices" : {} }
+        """.utf8))
+    }
+
     @Test func visionOSMapsToXrOSRuntimes() throws {
         let r = try DeviceResolver.resolve(name: "vision", spec: DeviceSpec(type: "Apple Vision Pro"), catalog: catalog)
         #expect(r.runtime.name == "visionOS 27.0")

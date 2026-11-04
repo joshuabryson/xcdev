@@ -52,16 +52,19 @@ public enum DeviceResolver {
         return type
     }
 
-    /// The runtime `query` names ("latest" is the newest that supports the type and the installed SDK), or nil.
+    /// The runtime `query` names ("latest" is the newest that supports the type and the installed SDK), or nil. Several
+    /// runtimes can share a name (Xcode 27.2 has a second "iOS 27.2" for the iPhone Duo only), so a named one is one
+    /// of them that supports the type, if any does.
     private static func pick(_ query: String, from candidates: [SimRuntime], for type: SimDeviceType,
                              compatibility: RuntimeCompatibility?) -> SimRuntime? {
         if query.lowercased() == "latest" {
             let supported = candidates.filter { $0.supports(type) }
             return (compatibility.map { c in supported.filter { c.sdks.supports($0) } } ?? supported).max(by: older)
         }
-        return candidates.first {
+        let named = candidates.filter {
             $0.name.caseInsensitiveCompare(query) == .orderedSame || $0.version == query || $0.identifier == query
         }
+        return named.first { $0.supports(type) } ?? named.first
     }
 
     /// The newest runtime that supports the type, whether or not the installed SDK can use it.
