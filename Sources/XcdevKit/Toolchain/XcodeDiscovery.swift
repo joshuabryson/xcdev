@@ -49,6 +49,32 @@ public struct XcodeDiscovery: Sendable {
         return try XcodeResolver.resolve(spec: resolveSpec, installs: all, selectedDeveloperDir: await selectedDeveloperDir())
     }
 
+    /// Why `pinned` no longer stands for the `xcode:` spec it was resolved from, or nil while it does or when xcd can't
+    /// tell: the Xcode at its path was updated in place, or, with no `xcode:` (or "system"), xcode-select points to
+    /// another Xcode. Command Line Tools selected say nothing: "system" resolved to the newest stable Xcode then.
+    public func staleness(of pinned: XcodeInstall, spec: String?) async -> String? {
+        if let now = await installNow(at: pinned.path), now.build != pinned.build {
+            return "\(pinned.path) is now Xcode \(now.version) (\(now.build))"
+        }
+        let followsSelect = spec.map { $0.trimmingCharacters(in: .whitespaces).lowercased() == "system" } ?? true
+        let developer = "/Contents/Developer"
+        guard followsSelect, let selected = await selectedDeveloperDir(), selected.hasSuffix(".app" + developer),
+              selected != pinned.path, !selected.hasPrefix(pinned.path + "/") else { return nil }
+        return "xcode-select points to \(selected.dropLast(developer.count))"
+    }
+
+    /// The Xcode at `path` as it is now, from its version.plist; nil when that can't be read. Through the runner, not
+    /// read directly as `readInstall` does, so that tests say what is installed at a pinned path.
+    func installNow(at path: String) async -> XcodeInstall? {
+        let plist = path + "/Contents/version.plist"
+        guard let out = try? await runner.run(Invocation("/usr/bin/plutil", ["-convert", "json", "-o", "-", plist], timeout: .seconds(10))),
+              out.succeeded,
+              let info = (try? JSONSerialization.jsonObject(with: out.stdout)) as? [String: Any],
+              let version = info["CFBundleShortVersionString"] as? String,
+              let build = info["ProductBuildVersion"] as? String else { return nil }
+        return XcodeInstall(path: path, version: version, build: build)
+    }
+
     public static let bundleIdentifier = "com.apple.dt.Xcode"
 
     /// Nil unless `path` is an Xcode: the /Applications scan also matches apps such as Xcodes.app, a version manager.

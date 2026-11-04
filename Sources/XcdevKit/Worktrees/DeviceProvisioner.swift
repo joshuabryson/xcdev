@@ -33,12 +33,21 @@ public struct DeviceProvisioner: Sendable {
                                            : "pass --device <\(names.joined(separator: "|"))> or set defaultDevice")
     }
 
-    /// Resolves the configured Xcode once per worktree and pins it in worktree.json.
+    /// Resolves the configured Xcode and pins it in worktree.json. Once per command the pin is checked against
+    /// `xcode:` and resolved again if it no longer stands for it (`XcodeDiscovery.staleness`): the Xcode at its path
+    /// was updated in place, or, with no `xcode:`, xcode-select points to another Xcode.
     public func ensureXcode(_ ctx: inout WorktreeContext) async throws -> XcodeInstall {
         if let override = ctx.xcodeOverride { return override }
-        if let pinned = ctx.state.xcode { return pinned }
+        if let pinned = ctx.state.xcode {
+            if ctx.xcodePinChecked { return pinned }
+            if await discovery.staleness(of: pinned, spec: ctx.config.xcode) == nil {
+                ctx.xcodePinChecked = true
+                return pinned
+            }
+        }
         let xcode = try await discovery.resolve(spec: ctx.config.xcode)
         ctx.state.xcode = xcode
+        ctx.xcodePinChecked = true
         try WorktreeStateStore.save(ctx.state, ctx.paths)
         return xcode
     }

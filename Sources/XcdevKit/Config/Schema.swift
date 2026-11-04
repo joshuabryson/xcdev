@@ -51,7 +51,7 @@ public enum ConfigSchema {
         SchemaField("version", .integer("Config format version. Must be 1."), required: true, example: "version: 1"),
         SchemaField("project", .string("Path to the .xcworkspace, .xcodeproj, or Package.swift, relative to the project root."),
                     required: true, example: "project: App.xcworkspace"),
-        SchemaField("xcode", .string("Which Xcode to use: a version (\"27.0\", \"27\"), \"latest\", \"beta\", \"system\", or an absolute path to an Xcode .app. Pinned per worktree on first use; `--xcode` overrides it for one command."),
+        SchemaField("xcode", .string("Which Xcode to use: a version (\"27.0\", \"27\"), \"latest\", \"beta\", \"system\", or an absolute path to an Xcode .app. Pinned per worktree on first use, and pinned again when the Xcode at that path is updated in place or, with no `xcode:` (or \"system\"), when xcode-select points to another Xcode; `--xcode` overrides it for one command."),
                     default: "system (the Xcode xcode-select points to)", example: "xcode: \"27.0\""),
         SchemaField("schemes", .object("Default schemes.", [
             SchemaField("app", .string("Scheme used by build and run."),

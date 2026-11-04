@@ -18,7 +18,8 @@ import XcdevTestSupport
         defer { worktree.remove() }
         var ctx = try context(project: "App.xcworkspace")
         let report = try await opener.open(in: &ctx)
-        #expect(fake.calls.map(\.executable) == ["/usr/bin/open"])
+        // The pin is checked first (`ensureXcode`); neither check is stubbed, so the pin stands.
+        #expect(fake.calls.map(\.executable) == ["/usr/bin/plutil", "/usr/bin/xcode-select", "/usr/bin/open"])
         #expect(fake.calls.last?.arguments == ["-a", "/Applications/Xcode.app", worktree.root + "/App.xcworkspace"])
         #expect(report.text == "opened App.xcworkspace in Xcode 27.0 (27A266a) /Applications/Xcode.app")
         #expect(report.envelopeWorktree == "feat")

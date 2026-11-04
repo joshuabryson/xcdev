@@ -108,6 +108,7 @@ import XcdevTestSupport
         try FileManager.default.createDirectory(atPath: path + "/Contents", withIntermediateDirectories: true)
         (["CFBundleShortVersionString": version, "CFBundleIdentifier": bundleIdentifier] as NSDictionary)
             .write(toFile: path + "/Contents/Info.plist", atomically: true)
-        (["ProductBuildVersion": build] as NSDictionary).write(toFile: path + "/Contents/version.plist", atomically: true)
+        (["CFBundleShortVersionString": version, "ProductBuildVersion": build] as NSDictionary)
+            .write(toFile: path + "/Contents/version.plist", atomically: true)
     }
 }

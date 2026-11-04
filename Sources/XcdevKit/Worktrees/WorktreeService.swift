@@ -10,6 +10,8 @@ public struct WorktreeContext: Sendable {
     public var borrowedConfig: String?
     /// `--idle` for this command only, in seconds (0 = off). Set by `Services.open`; never written to worktree.json.
     public var idleOverride: Int?
+    /// Whether this command has checked the pinned Xcode against `xcode:` (`DeviceProvisioner.ensureXcode`).
+    public var xcodePinChecked = false
 
     public init(location: ProjectLocation, config: XcdevConfig, state: WorktreeState, xcodeOverride: XcodeInstall? = nil,
                 borrowedConfig: String? = nil) {
