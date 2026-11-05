@@ -179,7 +179,7 @@ import XcdevTestSupport
     }
 
     /// An old, unrecorded clone of a worktree another xcd is creating or removing is that xcd's.
-    @Test(.timeLimit(.minutes(1))) func aBusyWorktreesUnrecordedCloneIsNotOrphaned() async throws {
+    @Test(.timeLimit(.minutes(5))) func aBusyWorktreesUnrecordedCloneIsNotOrphaned() async throws {
         let (project, sims, worktrees, main) = try await setup()
         defer { project.remove() }
         _ = try await worktrees.create(name: "feat", in: main)

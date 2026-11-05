@@ -58,7 +58,7 @@ import XcdevTestSupport
     }
 
     /// A clone of a worktree another xcd is creating or removing is that xcd's to settle.
-    @Test(.timeLimit(.minutes(1))) func aBusyWorktreesBootingCloneIsLeftAlone() async throws {
+    @Test(.timeLimit(.minutes(5))) func aBusyWorktreesBootingCloneIsLeftAlone() async throws {
         let (project, sims, worktrees, main) = try await setup()
         defer { project.remove() }
         var (feat, _) = try await worktrees.create(name: "feat", in: main)

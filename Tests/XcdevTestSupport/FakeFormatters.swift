@@ -49,18 +49,18 @@ public final class FakeFormatters: Sendable {
 
     /// Answers every `swift-format` and `swiftformat` invocation on `runner`.
     public func install(on runner: FakeProcessRunner) {
-        runner.stub(["swift-format"]) { [self] invocation in
+        runner.stub(["swift-format"], suspending: { [self] invocation in
             let file = invocation.arguments.last ?? ""
             let text = (try? String(contentsOfFile: file, encoding: .utf8)) ?? ""
             let ranges = Self.lines(touchedBy: Self.values(after: "--offsets", in: invocation.arguments, separator: ":"), in: text)
-            return answer(Run(tool: "swift-format", file: file, ranges: ranges, text: text, inputFile: nil), in: invocation.workingDirectory ?? "")
-        }
-        runner.stub(["swiftformat"]) { [self] invocation in
+            return await answer(Run(tool: "swift-format", file: file, ranges: ranges, text: text, inputFile: nil), in: invocation.workingDirectory ?? "")
+        })
+        runner.stub(["swiftformat"], suspending: { [self] invocation in
             let file = Self.values(after: "--stdin-path", in: invocation.arguments).first ?? ""
             let text = (try? String(contentsOfFile: invocation.inputFile ?? "", encoding: .utf8)) ?? ""
             let ranges = Self.values(after: "--line-range", in: invocation.arguments, separator: ",")
-            return answer(Run(tool: "swiftformat", file: file, ranges: ranges, text: text, inputFile: invocation.inputFile), in: "")
-        }
+            return await answer(Run(tool: "swiftformat", file: file, ranges: ranges, text: text, inputFile: invocation.inputFile), in: "")
+        })
     }
 
     /// The arguments that follow each `flag`, each split at `separator` into whole numbers.
@@ -80,12 +80,12 @@ public final class FakeFormatters: Sendable {
         arguments.indices.dropLast().filter { arguments[$0] == flag }.map { arguments[$0 + 1] }
     }
 
-    func answer(_ run: Run, in worktree: String) -> ProcessOutput {
+    func answer(_ run: Run, in worktree: String) async -> ProcessOutput {
         seen.change { $0.append(run) }
         let now = running.increment()
         most.change { $0 = max($0, now) }
         defer { running.decrement() }
-        waitForCompany()
+        await waitForCompany()
         let lines = run.text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         if let bad = lines.firstIndex(where: { $0.hasPrefix("<<<<<<<") }) { return Self.unreadable(run, line: bad + 1) }
         if run.tool == "swift-format", Self.ignores(run.file, in: worktree) { return ProcessOutput(exitCode: 0, stdout: "", stderr: stderr) }
@@ -98,16 +98,16 @@ public final class FakeFormatters: Sendable {
     }
 
     /// With `together` above 1: waits until that many runs are under way at once, for up to five seconds, and then
-    /// stays a moment longer, so that a run started beyond a limit would be counted too.
-    func waitForCompany() {
+    /// stays a moment longer, so that a run started beyond a limit would be counted too. It suspends while it waits,
+    /// so the runs overlap however few threads the tests have.
+    func waitForCompany() async {
         guard together > 1 else { return }
-        var waited = 0
-        while most.value < together, waited < 5_000, !gaveUp.value {
-            usleep(1_000)
-            waited += 1
+        let deadline = ContinuousClock.now + .seconds(5)
+        while most.value < together, ContinuousClock.now < deadline, !gaveUp.value {
+            try? await Task.sleep(for: .milliseconds(1))
         }
         if most.value < together { gaveUp.set(true) }
-        usleep(20_000)
+        try? await Task.sleep(for: .milliseconds(20))
     }
 
     /// A line without the blanks at its end, and with four spaces for each tab at its start.

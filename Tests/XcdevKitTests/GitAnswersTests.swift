@@ -5,14 +5,21 @@ import XcdevTestSupport
 
 /// Runs everything for real, and has git act as if another user owned every repository, as git does for a
 /// repository on a shared or external disk. The switch is git's own test variable,
-/// set on each git command only. `calls` records every command's argv.
+/// set on each git command only. An empty `safe.directory`, given last, empties git's list of safe repositories, so
+/// a global `safe.directory = *` (GitHub's macOS runners set one) cannot make the repository safe again.
+/// `calls` records every command's argv.
 struct OwnedByAnotherUser: ProcessRunning {
     let real = SystemProcessRunner()
     let calls = Shared<[[String]]>([])
 
     func run(_ invocation: Invocation) async throws -> ProcessOutput {
         var invocation = invocation
-        if invocation.argv.first == "git" { invocation.environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1" }
+        if invocation.argv.first == "git" {
+            invocation.environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
+            invocation.environment["GIT_CONFIG_COUNT"] = "1"
+            invocation.environment["GIT_CONFIG_KEY_0"] = "safe.directory"
+            invocation.environment["GIT_CONFIG_VALUE_0"] = ""
+        }
         calls.change { $0.append(invocation.argv) }
         return try await real.run(invocation)
     }

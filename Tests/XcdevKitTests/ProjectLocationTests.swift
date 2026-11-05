@@ -61,7 +61,8 @@ struct MountPointGit: ProcessRunning {
         #expect(error?.next == "fix what git says above, then run the command again")
     }
 
-    /// git says only `not a git repository: (null)`; the checkout's `.git` file names where its repository was.
+    /// git names no place it looked (Apple's git says `not a git repository: (null)`); the checkout's `.git` file
+    /// names where its repository was.
     @Test func aWorktreeWhoseMainCheckoutWasMovedSaysToAskWhereItIs() async throws {
         let project = try TempProject.make(config: "version: 1\nproject: App.xcodeproj\n")
         defer { project.remove() }
@@ -74,7 +75,7 @@ struct MountPointGit: ProcessRunning {
         #expect(error?.message == "this checkout is a git worktree, and its repository is no longer at \(gitdir)")
         #expect(error?.next == "ask the user where the main checkout is now; `git worktree repair` run there reconnects this checkout. "
                     + "If it was deleted, this checkout cannot be repaired")
-        #expect(error?.details.contains("fatal: not a git repository: (null)") == true)
+        #expect(error?.details.contains { $0.hasPrefix("fatal: not a git repository") } == true)
     }
 
     @Test func aRepositoryAnotherUserOwnsIsGitFailed() async throws {

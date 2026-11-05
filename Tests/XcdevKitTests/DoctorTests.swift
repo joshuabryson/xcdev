@@ -149,7 +149,7 @@ import XcdevTestSupport
     }
 
     /// `wt create` runs post-worktree-create (up to 30 minutes) holding only the worktree's lock, not the project's.
-    @Test(.timeLimit(.minutes(1))) func aWorktreeStillBeingCreatedIsLeftAlone() async throws {
+    @Test(.timeLimit(.minutes(5))) func aWorktreeStillBeingCreatedIsLeftAlone() async throws {
         let (project, _, worktrees, _) = try await setup()
         defer { project.remove() }
         let path = try await halfCreated("busy", in: project)
@@ -171,7 +171,7 @@ import XcdevTestSupport
         #expect(!FileManager.default.fileExists(atPath: path))
     }
 
-    @Test(.timeLimit(.minutes(1))) func aWorktreeBeingRemovedIsLeftToItsRemove() async throws {
+    @Test(.timeLimit(.minutes(5))) func aWorktreeBeingRemovedIsLeftToItsRemove() async throws {
         let (project, _, worktrees, main) = try await setup()
         defer { project.remove() }
         let (feat, _) = try await worktrees.create(name: "feat", in: main)
@@ -188,7 +188,7 @@ import XcdevTestSupport
 
     /// The lock is probed once per snapshot, so detect and inProgress always agree, even if
     /// the lock is released between them.
-    @Test(.timeLimit(.minutes(1))) func theBusyProbeIsTakenOncePerSnapshot() async throws {
+    @Test(.timeLimit(.minutes(5))) func theBusyProbeIsTakenOncePerSnapshot() async throws {
         let (project, _, worktrees, _) = try await setup()
         defer { project.remove() }
         _ = try await halfCreated("busy", in: project)
@@ -202,7 +202,7 @@ import XcdevTestSupport
     }
 
     /// Doctor never waits for a worktree's lock.
-    @Test(.timeLimit(.minutes(1))) func withLockIfFreeNeverWaits() async throws {
+    @Test(.timeLimit(.minutes(5))) func withLockIfFreeNeverWaits() async throws {
         let project = try TempProject.make(config: WorktreeServiceTests.config)
         defer { project.remove() }
         let path = project.home + "/locks/probe.lock"

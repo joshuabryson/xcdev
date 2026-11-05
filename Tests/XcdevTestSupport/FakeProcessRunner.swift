@@ -5,10 +5,13 @@ import XcdevKit
 /// Replays canned output for invocations matched by argv prefix. Later stubs win.
 public final class FakeProcessRunner: ProcessRunning {
     public typealias Responder = @Sendable (Invocation) throws -> ProcessOutput
+    /// A responder that waits by suspending, as a real process does, rather than by blocking one of the few threads
+    /// every test shares.
+    public typealias SuspendingResponder = @Sendable (Invocation) async throws -> ProcessOutput
 
     private struct Stub: Sendable {
         let prefix: [String]
-        let respond: Responder
+        let respond: SuspendingResponder
     }
 
     private let state = Mutex<(stubs: [Stub], calls: [Invocation])>(([], []))
@@ -20,6 +23,10 @@ public final class FakeProcessRunner: ProcessRunning {
     }
 
     public func stub(_ prefix: [String], respond: @escaping Responder) {
+        stub(prefix, suspending: { try respond($0) })
+    }
+
+    public func stub(_ prefix: [String], suspending respond: @escaping SuspendingResponder) {
         state.withLock { $0.stubs.append(Stub(prefix: prefix, respond: respond)) }
     }
 
@@ -34,7 +41,7 @@ public final class FakeProcessRunner: ProcessRunning {
         guard let stub else {
             throw XcdError(.internalError, "unstubbed command: \(invocation.commandLine)")
         }
-        let output = try stub.respond(invocation)
+        let output = try await stub.respond(invocation)
         guard let file = invocation.outputFile, !invocation.passthrough else { return output }
         let handle = try SystemProcessRunner.appendHandle(for: file)
         defer { try? handle.close() }
