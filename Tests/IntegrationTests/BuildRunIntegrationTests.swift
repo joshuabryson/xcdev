@@ -70,7 +70,8 @@ struct BuildRunIntegrationTests {
             #expect(all.counts == TestCounts(total: 4, passed: 2, failed: 1, skipped: 1, expectedFailures: 0))
             let failure = try #require(all.failures.first)
             #expect(failure.test == "SampleAppTests/failsOnPurpose()")
-            #expect(failure.file?.hasSuffix("SampleAppTests/SampleAppTests.swift") == true && failure.line == 9)
+            #expect(failure.file?.hasSuffix("SampleAppTests/SampleAppTests.swift") == true && failure.line == 9,
+                    "\(failure.file ?? "no file"):\(failure.line.map(String.init) ?? "no line")")
 
             let only = try await svc.tests.test(TestOptions(only: ["SampleAppTests/passes()"]), in: &ctx)
             #expect(only.outcome == .passed && only.counts.passed == 1, "\(only.text)")

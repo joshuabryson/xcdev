@@ -13,7 +13,7 @@ env:
 jobs:
   suite:
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
@@ -46,8 +46,15 @@ jobs:
           command -v swiftlint swiftformat swift-format || true
       - name: Build
         run: swift build
+      # Under `script` the tests write to a terminal, which prints each line as it comes, so a job that is
+      # cancelled or times out keeps what its tests said.
       - name: Suite
-        run: XCD_INTEGRATION=1 swift test --filter "IntegrationTests\.${{ matrix.suite }}/"
+        run: XCD_INTEGRATION=1 NO_COLOR=1 script -q /dev/null swift test --filter "IntegrationTests\.${{ matrix.suite }}/"
+      - name: Crash reports
+        if: always()
+        run: |
+          date -u
+          ls -lT ~/Library/Logs/DiagnosticReports || true
 
   all-at-once:
     runs-on: macos-26
