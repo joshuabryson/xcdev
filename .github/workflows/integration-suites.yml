@@ -1,0 +1,62 @@
+name: Integration suites
+
+# Each integration suite on a runner of its own, beside one job that runs them all at once as the release does,
+# so a failure can be told apart from one caused by suites competing for the same runner.
+on:
+  push:
+    branches: [ci-integration-suites]
+  workflow_dispatch:
+
+env:
+  XCODE_APP: /Applications/Xcode_26.2.app
+
+jobs:
+  suite:
+    runs-on: macos-26
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - AgentCheckoutIntegrationTests
+          - BuildRunIntegrationTests
+          - DeepLinksIntegrationTests
+          - DeviceStateIntegrationTests
+          - FormatIntegrationTests
+          - IdleShutdownIntegrationTests
+          - LintIntegrationTests
+          - MacIsolationIntegrationTests
+          - MacUIIntegrationTests
+          - PostureIntegrationTests
+          - ProjectFilesParityTests
+          - SetupDoctorIntegrationTests
+          - UIRunnerIntegrationTests
+          - WarningsIntegrationTests
+          - WorktreeSimulatorIntegrationTests
+    name: ${{ matrix.suite }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: scripts/select-xcode.sh "$XCODE_APP"
+      - name: Runner
+        run: |
+          xcodebuild -version
+          sysctl -n hw.ncpu hw.memsize
+          xcrun simctl list runtimes
+          command -v swiftlint swiftformat swift-format || true
+      - name: Build
+        run: swift build
+      - name: Suite
+        run: XCD_INTEGRATION=1 swift test --filter "IntegrationTests\.${{ matrix.suite }}/"
+
+  all-at-once:
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: scripts/select-xcode.sh "$XCODE_APP"
+      - name: Build
+        run: swift build
+      - name: Every suite at once
+        run: XCD_INTEGRATION=1 swift test
