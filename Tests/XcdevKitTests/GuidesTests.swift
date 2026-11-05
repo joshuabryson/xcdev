@@ -10,7 +10,8 @@ import Testing
     /// The embedded guides are generated from docs/agents/guides; this fails until `scripts/embed-guides.sh` is re-run.
     @Test func embeddedGuidesMatchTheMarkdownInTheRepo() throws {
         let files = try FileManager.default.contentsOfDirectory(atPath: Self.guidesDirectory).filter { $0.hasSuffix(".md") }.sorted()
-        #expect(Guides.all.map(\.topic) == ["start"] + files.map { String($0.dropLast(3)) }.filter { $0 != "start" })
+        let expectedTopics: [String] = ["start"] + files.map { String($0.dropLast(3)) }.filter { $0 != "start" }
+        #expect(Guides.all.map(\.topic) == expectedTopics)
         for file in files {
             let markdown = try String(contentsOfFile: Self.guidesDirectory + "/" + file, encoding: .utf8)
             let guide = try Guides.guide(String(file.dropLast(3)))
