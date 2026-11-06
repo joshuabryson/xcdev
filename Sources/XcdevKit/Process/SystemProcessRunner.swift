@@ -16,33 +16,45 @@ public struct SystemProcessRunner: ProcessRunning {
     /// A passthrough child runs in xcd's process group, so it can read the terminal and gets its Ctrl-C; every other
     /// child leads a group of its own, out of the terminal's reach, which `Interrupts` stops on SIGINT or SIGTERM.
     public func run(_ invocation: Invocation) async throws -> ProcessOutput {
-        let environment = ContextInfo.childEnvironment(inherited: inheritedEnvironment, overrides: invocation.environment)
-        let pipes: (out: Pipe, err: Pipe)?
-        let logHandle: FileHandle?
-        let stdio: ChildProcess.Stdio
-        if invocation.passthrough {
-            pipes = nil
-            logHandle = nil
-            stdio = .shared
-        } else if let file = invocation.outputFile {
-            let handle = try Self.appendHandle(for: file)
-            logHandle = handle
-            pipes = nil
-            stdio = .redirected(output: handle.fileDescriptor, error: handle.fileDescriptor,
-                                input: invocation.inputFile)
-        } else {
-            let captured = (out: Pipe(), err: Pipe())
-            pipes = captured
-            logHandle = nil
-            stdio = .redirected(output: captured.out.fileHandleForWriting.fileDescriptor,
-                                error: captured.err.fileHandleForWriting.fileDescriptor,
-                                input: invocation.inputFile)
-        }
-        defer { try? logHandle?.close() }
+        let streams = try Streams(for: invocation)
+        defer { try? streams.logHandle?.close() }
+        let child = try launch(invocation, stdio: streams.stdio)
+        // Only the child writes to the pipes now, so reading them ends when it (and whatever it started) is done.
+        try? streams.pipes?.out.fileHandleForWriting.close()
+        try? streams.pipes?.err.fileHandleForWriting.close()
+        let interrupts = interrupts
+        child.watch(keepZombie: { interrupts.fired })
 
-        let child: ChildProcess
+        async let outData = Self.readToEnd(streams.pipes?.out)
+        async let errData = Self.readToEnd(streams.pipes?.err)
+
+        // The deadline is a Dispatch timer, as is the SIGKILL that `terminate` sends after it, so that it fires on time
+        // however long the threads that run Swift tasks are kept busy.
+        let timedOut = Flag()
+        let deadline = DispatchWorkItem {
+            if child.terminate() { timedOut.set() }
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + DurationText.seconds(invocation.timeout), execute: deadline)
+        let status = await withTaskCancellationHandler {
+            await child.wait()
+        } onCancel: {
+            child.terminate()
+        }
+        interrupts.finished(child)
+        deadline.cancel()
+        let (out, err) = await (outData, errData)
+        let output = ProcessOutput(exitCode: status, stdoutData: out, stderrData: err)
+
+        if timedOut.isSet { return try Self.stoppedAtDeadline(invocation, output) }
+        if Task.isCancelled { throw CancellationError() }
+        return output
+    }
+
+    /// Starts the child, saying when a missing working directory is why it could not start.
+    private func launch(_ invocation: Invocation, stdio: ChildProcess.Stdio) throws -> ChildProcess {
+        let environment = ContextInfo.childEnvironment(inherited: inheritedEnvironment, overrides: invocation.environment)
         do {
-            child = try interrupts.launch(invocation.argv, foreground: invocation.passthrough) {
+            return try interrupts.launch(invocation.argv, foreground: invocation.passthrough) {
                 try ChildProcess.spawn(invocation.executable, arguments: invocation.arguments, environment: environment,
                                        workingDirectory: invocation.workingDirectory, stdio: stdio,
                                        leadsGroup: !invocation.passthrough)
@@ -58,44 +70,20 @@ public struct SystemProcessRunner: ProcessRunning {
             throw XcdError(.subprocessFailed, "could not launch \(invocation.executable): \(reason)",
                            details: ["command: \(invocation.commandLine)"])
         }
-        // Only the child writes to the pipes now, so reading them ends when it (and whatever it started) is done.
-        try? pipes?.out.fileHandleForWriting.close()
-        try? pipes?.err.fileHandleForWriting.close()
-        let interrupts = interrupts
-        child.watch(keepZombie: { interrupts.fired })
+    }
 
-        async let outData = Self.readToEnd(pipes?.out)
-        async let errData = Self.readToEnd(pipes?.err)
-
-        let timedOut = Flag()
-        let timer = Task {
-            try? await Task.sleep(for: invocation.timeout)
-            guard !Task.isCancelled else { return }
-            if child.terminate() { timedOut.set() }
-        }
-        let status = await withTaskCancellationHandler {
-            await child.wait()
-        } onCancel: {
-            child.terminate()
-        }
-        interrupts.finished(child)
-        timer.cancel()
-        let (out, err) = await (outData, errData)
-
-        if timedOut.isSet {
-            var output = ProcessOutput(exitCode: status, stdoutData: out, stderrData: err)
-            if invocation.stopAtTimeout {
-                output.stoppedAtDeadline = true
-                return output
-            }
+    /// A child its deadline stopped: what it wrote, when the invocation asks for that, or else a `timeout` error.
+    private static func stoppedAtDeadline(_ invocation: Invocation, _ output: ProcessOutput) throws -> ProcessOutput {
+        guard invocation.stopAtTimeout else {
             var error = XcdError.subprocess(invocation, output, code: .timeout,
                                             message: "`\(invocation.argv.prefix(3).joined(separator: " "))` timed out after \(invocation.timeout)",
                                             next: "re-run with a larger --timeout, or run `xcd doctor` if a simulator is stuck")
             error.details.removeAll { $0.hasPrefix("exit: ") }
             throw error
         }
-        if Task.isCancelled { throw CancellationError() }
-        return ProcessOutput(exitCode: status, stdoutData: out, stderrData: err)
+        var stopped = output
+        stopped.stoppedAtDeadline = true
+        return stopped
     }
 
     private static func readToEnd(_ pipe: Pipe?) async -> Data {
@@ -117,6 +105,35 @@ public struct SystemProcessRunner: ProcessRunning {
         }
         handle.seekToEndOfFile()
         return handle
+    }
+}
+
+/// Where a child's standard streams go: to xcd's own for a passthrough child, to the invocation's output file, or else
+/// into pipes that xcd reads.
+private struct Streams {
+    let pipes: (out: Pipe, err: Pipe)?
+    let logHandle: FileHandle?
+    let stdio: ChildProcess.Stdio
+
+    init(for invocation: Invocation) throws {
+        if invocation.passthrough {
+            pipes = nil
+            logHandle = nil
+            stdio = .shared
+        } else if let file = invocation.outputFile {
+            let handle = try SystemProcessRunner.appendHandle(for: file)
+            logHandle = handle
+            pipes = nil
+            stdio = .redirected(output: handle.fileDescriptor, error: handle.fileDescriptor,
+                                input: invocation.inputFile)
+        } else {
+            let captured = (out: Pipe(), err: Pipe())
+            pipes = captured
+            logHandle = nil
+            stdio = .redirected(output: captured.out.fileHandleForWriting.fileDescriptor,
+                                error: captured.err.fileHandleForWriting.fileDescriptor,
+                                input: invocation.inputFile)
+        }
     }
 }
 

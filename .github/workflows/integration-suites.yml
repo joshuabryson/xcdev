@@ -1,7 +1,7 @@
 name: Integration suites
 
-# Each integration suite on a runner of its own, beside one job that runs them all at once as the release does,
-# so a failure can be told apart from one caused by suites competing for the same runner.
+# Each integration suite on a runner of its own, and the sample app's tests run by xcodebuild alone, to read what this
+# Xcode's test results say of a failed test.
 on:
   push:
     branches: [ci-integration-suites]
@@ -56,14 +56,21 @@ jobs:
           date -u
           ls -lT ~/Library/Logs/DiagnosticReports || true
 
-  all-at-once:
+  test-results:
     runs-on: macos-26
-    timeout-minutes: 120
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode
         run: scripts/select-xcode.sh "$XCODE_APP"
-      - name: Build
-        run: swift build
-      - name: Every suite at once
-        run: XCD_INTEGRATION=1 swift test
+      # One of the sample app's tests fails on purpose.
+      - name: Sample app's tests
+        run: |
+          udid=$(xcrun simctl create "Test results" "iPhone 17 Pro")
+          xcodebuild test -project Fixtures/SampleApp/SampleApp.xcodeproj -scheme SampleApp -destination "id=$udid" \
+            -resultBundlePath "$RUNNER_TEMP/SampleApp.xcresult" -quiet || echo "xcodebuild exited $?"
+      # The two commands `xcd test` reads a run's results with.
+      - name: Test results
+        run: |
+          xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/SampleApp.xcresult"
+          xcrun xcresulttool get test-results tests --path "$RUNNER_TEMP/SampleApp.xcresult"
