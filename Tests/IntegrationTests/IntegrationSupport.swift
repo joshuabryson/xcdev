@@ -12,10 +12,12 @@ let testsHome = NSHomeDirectory() + "/Library/Caches/xcdev-tests"
 
 /// Live services for `project`, with its own XCDEV_HOME so the real registry is never touched. Its xcd is the built one,
 /// not the test host, so a clone it boots gets a real idle watchdog (`xcd _watch-device`): run `swift build` first.
+/// A crash report is waited for two minutes rather than xcd's ten seconds: on GitHub's runners one took 46 s to appear.
 func services(_ project: TempProject) -> Services {
     var svc = Services(runner: SystemProcessRunner(), globalPaths: GlobalPaths(base: project.home), currentDirectory: project.root,
                        environment: [:])
     svc.xcdExecutable = repoRoot + "/.build/debug/xcd"
+    svc.crashWatcher = CrashWatcher(probe: SystemProcessProbe(), locator: CrashReportLocator(), reportWait: .seconds(120))
     return svc
 }
 

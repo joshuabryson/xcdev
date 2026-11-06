@@ -23,6 +23,9 @@ public struct Services: Sendable {
     /// The xcd a Mac recording runs as `xcd _record-window`. Under `swift test` this binary is the test host, so a
     /// test that records through these services names the built xcd here.
     public var xcdExecutable = Bundle.main.executablePath ?? CommandLine.arguments[0]
+    /// What tells a launched app's crash from its exit, and finds the crash report. Tests on a slow machine give it
+    /// longer to wait for the report.
+    public var crashWatcher = CrashWatcher(probe: SystemProcessProbe(), locator: CrashReportLocator())
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, currentDirectory: String,
                 environment: [String: String], progress: @escaping @Sendable (String) -> Void = { _ in },
@@ -89,8 +92,7 @@ public struct Services: Sendable {
     public var builds: BuildService { BuildService(runner: runner, provisioner: provisioner, progress: progress, hooks: hooks) }
     public var tests: TestService { TestService(builds: builds, detached: detached) }
     public var apps: RunService {
-        RunService(builds: builds, watcher: CrashWatcher(probe: SystemProcessProbe(), locator: CrashReportLocator()),
-                   isolation: MacIsolationService(runner: runner))
+        RunService(builds: builds, watcher: crashWatcher, isolation: MacIsolationService(runner: runner))
     }
     public var routes: RouteService { RouteService(apps: apps, arrival: ui, output: output) }
     public var projectCommands: ProjectCommandRunner {
