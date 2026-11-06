@@ -77,21 +77,37 @@ extension DoctorFixture {
         return path
     }
 
-    /// Holds the lock at `path` (as another xcd's `wt create` or `wt remove` would) from before this returns until
-    /// the task is cancelled or `lease` runs out. The lease turns a doctor that waits for the lock into a failing
-    /// test instead of a hung one. It is long because the whole suite runs at once: on a 3-CPU runner a doctor run
-    /// that takes a second alone has taken over a minute.
-    func holdLock(_ path: String, lease: Duration = .seconds(240)) async throws -> Task<Void, any Error> {
+    /// Holds the lock at `path`, as another xcd's `wt create` or `wt remove` would, from before this returns until
+    /// `letGo`, or until anything in this process waits for the lock. Doctor must never wait for it: one that did
+    /// would get the lock at once and fail the test at `letGo`, rather than hang it.
+    func holdLock(_ path: String) async throws -> HeldLock {
         let (acquired, signal) = AsyncStream<Void>.makeStream()
         let holder = Task {
             defer { signal.finish() }
-            try await FileLock.withLock(at: path) {
+            return try await FileLock.withLock(at: path) {
                 signal.yield()
-                try await Task.sleep(for: lease)
+                while !Task.isCancelled {
+                    if FileLock.isAwaited(at: path) { return true }
+                    try? await Task.sleep(for: .milliseconds(1))
+                }
+                return false
             }
         }
         for await _ in acquired { break }
-        return holder
+        return HeldLock(holder: holder)
+    }
+}
+
+/// A lock a test holds as another xcd would: see `DoctorFixture.holdLock`.
+struct HeldLock {
+    /// Ends saying whether anything waited for the lock.
+    let holder: Task<Bool, any Error>
+
+    /// Lets go of the lock, and fails the test if anything waited for it meanwhile.
+    func letGo(sourceLocation: SourceLocation = #_sourceLocation) async {
+        holder.cancel()
+        let waited = (try? await holder.value) ?? false
+        #expect(!waited, "something waited for a lock that another xcd holds", sourceLocation: sourceLocation)
     }
 }
 

@@ -179,7 +179,7 @@ import XcdevTestSupport
     }
 
     /// An old, unrecorded clone of a worktree another xcd is creating or removing is that xcd's.
-    @Test(.timeLimit(.minutes(5))) func aBusyWorktreesUnrecordedCloneIsNotOrphaned() async throws {
+    @Test func aBusyWorktreesUnrecordedCloneIsNotOrphaned() async throws {
         let (project, sims, worktrees, main) = try await setup()
         defer { project.remove() }
         _ = try await worktrees.create(name: "feat", in: main)
@@ -187,8 +187,7 @@ import XcdevTestSupport
                              dataPath: try agedDevice(project.base + "/old-device", seconds: 3600))
         let holder = try await holdLock(worktrees.lockPath(projectRoot: project.root, worktree: "feat"))
         let report = await doctor(project).run(fix: true, checks: [OrphanedClonesCheck()], from: project.root, includeDisk: false)
-        holder.cancel()
-        _ = await holder.result
+        await holder.letGo()
         #expect(report.problems.isEmpty)
         #expect(sims.devices.contains { $0.udid == clone })
         #expect(await doctor(project).run(fix: false, checks: [OrphanedClonesCheck()], from: nil).problems.map(\.subject) == [clone])

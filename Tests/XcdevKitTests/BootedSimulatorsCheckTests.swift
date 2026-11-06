@@ -270,8 +270,7 @@ import XcdevTestSupport
         await #expect(throws: DoctorLeftAlone(note: "Sample App/main is being created or removed by another xcd; left alone")) {
             try await BootedSimulatorsCheck().fix(problem, env)
         }
-        holder.cancel()
-        _ = await holder.result
+        await holder.letGo()
         #expect(detached.starts.isEmpty)
         #expect(DeviceLeases(globalPaths: GlobalPaths(base: project.home)).load(mine) == nil)
     }

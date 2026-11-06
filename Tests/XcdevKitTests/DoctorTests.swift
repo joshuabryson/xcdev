@@ -131,8 +131,7 @@ import XcdevTestSupport
         try FileManager.default.removeItem(atPath: back.path)
         let holder = try await holdLock(worktrees.lockPath(projectRoot: project.root, worktree: "back"))
         await #expect(throws: DoctorLeftAlone.self) { try await worktrees.dropMissing(id: back.id) }
-        holder.cancel()
-        _ = await holder.result
+        await holder.letGo()
         #expect(try worktrees.list(projectRoot: project.root).map(\.name) == ["back", "main"])
     }
 
@@ -149,7 +148,7 @@ import XcdevTestSupport
     }
 
     /// `wt create` runs post-worktree-create (up to 30 minutes) holding only the worktree's lock, not the project's.
-    @Test(.timeLimit(.minutes(5))) func aWorktreeStillBeingCreatedIsLeftAlone() async throws {
+    @Test func aWorktreeStillBeingCreatedIsLeftAlone() async throws {
         let (project, _, worktrees, _) = try await setup()
         defer { project.remove() }
         let path = try await halfCreated("busy", in: project)
@@ -157,8 +156,7 @@ import XcdevTestSupport
 
         let holder = try await holdLock(worktrees.lockPath(projectRoot: project.root, worktree: "busy"))
         let report = await doctor(project).run(fix: true, checks: [IncompleteWorktreesCheck()], from: project.root)
-        holder.cancel()
-        _ = await holder.result
+        await holder.letGo()
         #expect(report.problems.isEmpty && report.failure == nil)
         #expect(report.checks.first { $0.id == "incomplete-worktrees" }?.inProgress == [note])
         #expect(report.text.contains("\nbusy     incomplete-worktrees  \(note)\n"))
@@ -171,7 +169,7 @@ import XcdevTestSupport
         #expect(!FileManager.default.fileExists(atPath: path))
     }
 
-    @Test(.timeLimit(.minutes(5))) func aWorktreeBeingRemovedIsLeftToItsRemove() async throws {
+    @Test func aWorktreeBeingRemovedIsLeftToItsRemove() async throws {
         let (project, _, worktrees, main) = try await setup()
         defer { project.remove() }
         let (feat, _) = try await worktrees.create(name: "feat", in: main)
@@ -179,8 +177,7 @@ import XcdevTestSupport
         // `wt remove feat` after deleting the checkout, before dropping the entry: it holds the worktree's lock.
         let holder = try await holdLock(worktrees.lockPath(projectRoot: main.location.projectRoot, worktree: "feat"))
         let report = await doctor(project).run(fix: true, checks: DoctorService.pruneChecks, from: project.root, includeDisk: false)
-        holder.cancel()
-        _ = await holder.result
+        await holder.letGo()
         #expect(report.problems.isEmpty)
         #expect(report.checks.first?.inProgress == ["Sample App/feat is being created or removed by another xcd; left alone"])
         #expect(try worktrees.list(projectRoot: project.root).map(\.name) == ["feat", "main"])
@@ -188,21 +185,20 @@ import XcdevTestSupport
 
     /// The lock is probed once per snapshot, so detect and inProgress always agree, even if
     /// the lock is released between them.
-    @Test(.timeLimit(.minutes(5))) func theBusyProbeIsTakenOncePerSnapshot() async throws {
+    @Test func theBusyProbeIsTakenOncePerSnapshot() async throws {
         let (project, _, worktrees, _) = try await setup()
         defer { project.remove() }
         _ = try await halfCreated("busy", in: project)
         let holder = try await holdLock(worktrees.lockPath(projectRoot: project.root, worktree: "busy"))
         let env = await doctor(project).environment(from: nil)
-        holder.cancel()
-        _ = await holder.result
+        await holder.letGo()
         #expect(env.busy == ["busy-id"])
         #expect(await IncompleteWorktreesCheck().detect(env).isEmpty)
         #expect(IncompleteWorktreesCheck().inProgress(env) == ["Sample App/busy is being created or removed by another xcd; left alone"])
     }
 
     /// Doctor never waits for a worktree's lock.
-    @Test(.timeLimit(.minutes(5))) func withLockIfFreeNeverWaits() async throws {
+    @Test func withLockIfFreeNeverWaits() async throws {
         let project = try TempProject.make(config: WorktreeServiceTests.config)
         defer { project.remove() }
         let path = project.home + "/locks/probe.lock"
@@ -212,8 +208,7 @@ import XcdevTestSupport
         let holder = try await holdLock(path)
         #expect(FileLock.isHeld(at: path))
         #expect(try await FileLock.withLockIfFree(at: path) { 7 } == nil)
-        holder.cancel()
-        _ = await holder.result
+        await holder.letGo()
         #expect(!FileLock.isHeld(at: path))
     }
 

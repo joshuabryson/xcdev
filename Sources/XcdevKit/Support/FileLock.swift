@@ -1,6 +1,42 @@
 import Foundation
+import Synchronization
 
 public enum FileLock {
+    /// How many in this process wait for each lock, by path.
+    private static let waiting = Mutex<[String: Int]>([:])
+
+    /// Whether a `withLock` or `hold` in this process is waiting for the lock at `path`, which someone else has, so
+    /// that a test holding a lock as another xcd would sees at once what waits for it.
+    public static func isAwaited(at path: String) -> Bool {
+        waiting.withLock { $0[path, default: 0] > 0 }
+    }
+
+    /// `flock`, tried again when a signal interrupts it. Returns 0, or the errno that stopped it.
+    private static func attempt(_ operation: Int32, on fd: Int32) -> Int32 {
+        var code: Int32 = 0
+        repeat {
+            code = flock(fd, operation) == 0 ? 0 : errno
+        } while code == EINTR
+        return code
+    }
+
+    /// Takes the lock (`LOCK_EX` or `LOCK_SH`) on `fd`. While someone else has it this waits off the threads that run
+    /// Swift tasks, counted among the lock's waiters. Returns 0, or the errno that stopped it.
+    private static func take(_ operation: Int32, on fd: Int32, at path: String) async -> Int32 {
+        let first = attempt(operation | LOCK_NB, on: fd)
+        guard first == EWOULDBLOCK else { return first }
+        waiting.withLock { $0[path, default: 0] += 1 }
+        defer {
+            waiting.withLock { counts in
+                let left = counts[path, default: 1] - 1
+                counts[path] = left > 0 ? left : nil
+            }
+        }
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global().async { continuation.resume(returning: attempt(operation, on: fd)) }
+        }
+    }
+
     /// Makes the lock file's folder and opens the file, close-on-exec.
     private static func openLockFile(at path: String) throws -> Int32 {
         let directory = (path as NSString).deletingLastPathComponent
@@ -17,21 +53,7 @@ public enum FileLock {
     public static func withLock<T: Sendable>(at path: String, _ body: () async throws -> T) async throws -> T {
         let fd = try openLockFile(at: path)
         defer { close(fd) }
-        let lockErrno = await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
-            DispatchQueue.global().async {
-                while true {
-                    if flock(fd, LOCK_EX) == 0 {
-                        continuation.resume(returning: 0)
-                        return
-                    }
-                    let code = errno
-                    if code != EINTR {
-                        continuation.resume(returning: code)
-                        return
-                    }
-                }
-            }
-        }
+        let lockErrno = await take(LOCK_EX, on: fd, at: path)
         guard lockErrno == 0 else {
             throw XcdError(.internalError, "cannot lock \(path) (errno \(lockErrno): \(String(cString: strerror(lockErrno))))")
         }
@@ -50,15 +72,7 @@ public enum FileLock {
         }
         let fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0o644)
         guard fd >= 0 else { throw unusable(path, "cannot open lock file \(path) (\(describe(errno)))") }
-        let lockErrno = await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
-            DispatchQueue.global().async {
-                var code: Int32 = 0
-                repeat {
-                    code = flock(fd, LOCK_SH) == 0 ? 0 : errno
-                } while code == EINTR
-                continuation.resume(returning: code)
-            }
-        }
+        let lockErrno = await take(LOCK_SH, on: fd, at: path)
         guard lockErrno == 0 else {
             close(fd)
             throw unusable(path, "cannot lock \(path) (\(describe(lockErrno)))")
@@ -97,10 +111,7 @@ public enum FileLock {
             throw XcdError(.internalError, "cannot open lock file \(path) (errno \(errno))")
         }
         defer { close(fd) }
-        var lockErrno: Int32 = 0
-        repeat {
-            lockErrno = flock(fd, LOCK_EX | LOCK_NB) == 0 ? 0 : errno
-        } while lockErrno == EINTR
+        let lockErrno = attempt(LOCK_EX | LOCK_NB, on: fd)
         if lockErrno == EWOULDBLOCK { return nil }
         guard lockErrno == 0 else {
             throw XcdError(.internalError, "cannot lock \(path) (errno \(lockErrno): \(String(cString: strerror(lockErrno))))")
@@ -116,10 +127,7 @@ public enum FileLock {
         let fd = open(path, O_RDWR | O_CLOEXEC)
         guard fd >= 0 else { return false }          // never created, so never held
         defer { close(fd) }
-        var code: Int32 = 0
-        repeat {
-            code = flock(fd, LOCK_EX | LOCK_NB) == 0 ? 0 : errno
-        } while code == EINTR
+        let code = attempt(LOCK_EX | LOCK_NB, on: fd)
         guard code == 0 else { return code == EWOULDBLOCK }
         flock(fd, LOCK_UN)
         return false

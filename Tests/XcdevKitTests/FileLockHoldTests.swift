@@ -15,6 +15,35 @@ import Testing
         #expect(!FileLock.isHeld(at: path))
     }
 
+    /// A `withLock` that finds the lock held is known to be waiting for it until it has it; a try never is.
+    @Test func aLockTakenAfterAWaitIsAwaitedUntilItIsTaken() async throws {
+        let path = NSTemporaryDirectory() + "hold-\(UUID().uuidString)/lease.lock"
+        let held = try await FileLock.hold(at: path)
+        #expect(try await FileLock.withLockIfFree(at: path) { true } == nil)
+        #expect(!FileLock.isAwaited(at: path))
+        let waiter = Task { try await FileLock.withLock(at: path) { FileLock.isAwaited(at: path) } }
+        while !FileLock.isAwaited(at: path) { try await Task.sleep(for: .milliseconds(1)) }
+        FileLock.release(held)
+        #expect(try await waiter.value == false)
+        #expect(!FileLock.isAwaited(at: path))
+    }
+
+    /// A hold that finds the lock taken is known to be waiting too: here the lock is let go only once it is.
+    @Test func aHoldThatWaitsIsAwaited() async throws {
+        let path = NSTemporaryDirectory() + "hold-\(UUID().uuidString)/lease.lock"
+        let (taken, signal) = AsyncStream<Void>.makeStream()
+        let taker = Task {
+            try await FileLock.withLock(at: path) {
+                signal.yield()
+                while !FileLock.isAwaited(at: path) { try await Task.sleep(for: .milliseconds(1)) }
+            }
+        }
+        for await _ in taken { break }
+        FileLock.release(try await FileLock.hold(at: path))
+        try await taker.value
+        #expect(!FileLock.isAwaited(at: path))
+    }
+
     /// The lock file's folder, made read-only as a `sudo xcd` leaves it for this user: root owns it.
     static func readOnly(_ folder: String) throws {
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)

@@ -58,7 +58,7 @@ import XcdevTestSupport
     }
 
     /// A clone of a worktree another xcd is creating or removing is that xcd's to settle.
-    @Test(.timeLimit(.minutes(5))) func aBusyWorktreesBootingCloneIsLeftAlone() async throws {
+    @Test func aBusyWorktreesBootingCloneIsLeftAlone() async throws {
         let (project, sims, worktrees, main) = try await setup()
         defer { project.remove() }
         var (feat, _) = try await worktrees.create(name: "feat", in: main)
@@ -70,8 +70,7 @@ import XcdevTestSupport
 
         let holder = try await holdLock(worktrees.lockPath(projectRoot: project.root, worktree: "feat"))
         let report = await doctor(project).run(fix: true, checks: [StuckClonesCheck()], from: project.root, includeDisk: false)
-        holder.cancel()
-        _ = await holder.result
+        await holder.letGo()
         #expect(report.problems.isEmpty && report.failure == nil)
         #expect(report.checks.first?.inProgress.sorted() == [
             "xcd · Sample App · feat · iphone (\(booting)) is Booting while Sample App/feat is being created or removed by another xcd; left alone",
