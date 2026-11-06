@@ -14,11 +14,28 @@ let testsHome = NSHomeDirectory() + "/Library/Caches/xcdev-tests"
 /// not the test host, so a clone it boots gets a real idle watchdog (`xcd _watch-device`): run `swift build` first.
 /// A crash report is waited for two minutes rather than xcd's ten seconds: on GitHub's runners one took 46 s to appear.
 func services(_ project: TempProject) -> Services {
-    var svc = Services(runner: SystemProcessRunner(), globalPaths: GlobalPaths(base: project.home), currentDirectory: project.root,
+    var svc = Services(runner: TimingRunner(), globalPaths: GlobalPaths(base: project.home), currentDirectory: project.root,
                        environment: [:])
     svc.xcdExecutable = repoRoot + "/.build/debug/xcd"
     svc.crashWatcher = CrashWatcher(probe: SystemProcessProbe(), locator: CrashReportLocator(), reportWait: .seconds(120))
     return svc
+}
+
+/// Runs commands for real, and says on stderr how long each that took five seconds or more took, so that a slow run
+/// shows where its time went.
+struct TimingRunner: ProcessRunning {
+    let real = SystemProcessRunner()
+
+    func run(_ invocation: Invocation) async throws -> ProcessOutput {
+        let started = ContinuousClock.now
+        defer {
+            let took = ContinuousClock.now - started
+            if took >= .seconds(5) {
+                FileHandle.standardError.write(Data("took \(DurationText.format(took)): \(invocation.commandLine.prefix(200))\n".utf8))
+            }
+        }
+        return try await real.run(invocation)
+    }
 }
 
 /// Runs `body`, then always (even when it throws) deletes every simulator clone of this project and the project.

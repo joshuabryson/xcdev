@@ -47,9 +47,20 @@ jobs:
       - name: Build
         run: swift build
       # Under `script` the tests write to a terminal, which prints each line as it comes, so a job that is
-      # cancelled or times out keeps what its tests said.
+      # cancelled or times out keeps what its tests said. Every 30 seconds the runner's load, memory, booted
+      # simulators, and busiest processes are noted for the Load step.
       - name: Suite
-        run: XCD_INTEGRATION=1 NO_COLOR=1 script -q /dev/null swift test --filter "IntegrationTests\.${{ matrix.suite }}/"
+        run: |
+          (set +e; while sleep 30; do
+            echo "== $(date -u +%T)  load $(sysctl -n vm.loadavg)  swap $(sysctl -n vm.swapusage)"
+            memory_pressure -Q | tail -1
+            echo "booted: $(xcrun simctl list devices booted | grep -c Booted)"
+            ps -Ao pcpu=,rss=,ucomm= -r | head -8
+          done) > "$RUNNER_TEMP/load.log" 2>&1 &
+          XCD_INTEGRATION=1 NO_COLOR=1 script -q /dev/null swift test --filter "IntegrationTests\.${{ matrix.suite }}/"
+      - name: Load
+        if: always()
+        run: cat "$RUNNER_TEMP/load.log"
       - name: Crash reports
         if: always()
         run: |
