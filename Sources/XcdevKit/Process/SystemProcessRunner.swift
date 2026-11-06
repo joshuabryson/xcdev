@@ -28,13 +28,13 @@ public struct SystemProcessRunner: ProcessRunning {
         async let outData = Self.readToEnd(streams.pipes?.out)
         async let errData = Self.readToEnd(streams.pipes?.err)
 
-        // The deadline is a Dispatch timer, as is the SIGKILL that `terminate` sends after it, so that it fires on time
-        // however long the threads that run Swift tasks are kept busy.
+        // The deadline waits on xcd's own queue, as does the SIGKILL that `terminate` sends after it, so that it fires on
+        // time however long the threads that run Swift tasks, or those of the shared queues, are kept busy.
         let timedOut = Flag()
         let deadline = DispatchWorkItem {
             if child.terminate() { timedOut.set() }
         }
-        DispatchQueue.global().asyncAfter(deadline: .now() + DurationText.seconds(invocation.timeout), execute: deadline)
+        ChildProcess.deadlines.asyncAfter(deadline: .now() + DurationText.seconds(invocation.timeout), execute: deadline)
         let status = await withTaskCancellationHandler {
             await child.wait()
         } onCancel: {

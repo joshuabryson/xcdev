@@ -145,11 +145,15 @@ final class ChildProcess: Sendable {
         leadsGroup ? signal(0, using: send) : life.withLock { $0 == .running }
     }
 
+    /// Where deadlines and the SIGKILL after them wait: a queue of xcd's own, which gets a thread when one is due even
+    /// while every thread of the shared queues is blocked, as reading a child's output or waiting for a lock blocks one.
+    static let deadlines = DispatchQueue(label: "dev.xcdev.deadlines")
+
     /// Sends SIGTERM, then SIGKILL two seconds later to whatever is still running. Returns whether it was running.
     @discardableResult
     func terminate() -> Bool {
         guard isAlive(), signal(SIGTERM) else { return false }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [self] in
+        Self.deadlines.asyncAfter(deadline: .now() + 2) { [self] in
             if isAlive() { signal(SIGKILL) }
         }
         return true
