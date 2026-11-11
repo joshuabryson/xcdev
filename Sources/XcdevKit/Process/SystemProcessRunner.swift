@@ -8,17 +8,21 @@ public struct SystemProcessRunner: ProcessRunning {
     private let interrupts: Interrupts
     /// How long a child its deadline or a cancellation stopped gets after SIGTERM, before SIGKILL.
     private let killAfter: Duration
+    /// Stretches every invocation's limit, from the inherited environment's `XCD_TIMEOUT_SCALE`.
+    private let timeoutScale: TimeoutScale
 
     public init(inheritedEnvironment: [String: String] = ProcessInfo.processInfo.environment,
                 interrupts: Interrupts = .shared, killAfter: Duration = .seconds(2)) {
         self.inheritedEnvironment = inheritedEnvironment
         self.interrupts = interrupts
         self.killAfter = killAfter
+        timeoutScale = TimeoutScale(environment: inheritedEnvironment)
     }
 
     /// A passthrough child runs in xcd's process group, so it can read the terminal and gets its Ctrl-C; every other
     /// child leads a group of its own, out of the terminal's reach, which `Interrupts` stops on SIGINT or SIGTERM.
     public func run(_ invocation: Invocation) async throws -> ProcessOutput {
+        let invocation = scaled(invocation)
         let streams = try Streams(for: invocation)
         defer { try? streams.logHandle?.close() }
         let child = try launch(invocation, stdio: streams.stdio)
@@ -31,13 +35,7 @@ public struct SystemProcessRunner: ProcessRunning {
         async let outData = Self.readToEnd(streams.pipes?.out)
         async let errData = Self.readToEnd(streams.pipes?.err)
 
-        // The deadline waits on xcd's own queue, as does the SIGKILL that `terminate` sends after it, so that it fires on
-        // time however long the threads that run Swift tasks, or those of the shared queues, are kept busy.
-        let timedOut = Flag()
-        let deadline = DispatchWorkItem {
-            if child.terminate(killAfter: killAfter) { timedOut.set() }
-        }
-        ChildProcess.deadlines.asyncAfter(deadline: .now() + DurationText.seconds(invocation.timeout), execute: deadline)
+        let (deadline, timedOut) = startDeadline(invocation.timeout, for: child)
         let status = await withTaskCancellationHandler {
             await child.wait()
         } onCancel: {
@@ -51,6 +49,28 @@ public struct SystemProcessRunner: ProcessRunning {
         if timedOut.isSet { return try Self.stoppedAtDeadline(invocation, output) }
         if Task.isCancelled { throw CancellationError() }
         return output
+    }
+
+    /// The invocation with its limit stretched by the timeout scale. A `stopAtTimeout` deadline is how long to watch,
+    /// not a limit, so it keeps its length.
+    private func scaled(_ invocation: Invocation) -> Invocation {
+        guard !invocation.stopAtTimeout else { return invocation }
+        var scaled = invocation
+        scaled.timeout = timeoutScale.scaled(invocation.timeout)
+        return scaled
+    }
+
+    /// Stops `child` at `limit`, and returns the deadline to cancel once it has ended and a flag set when it fired. The
+    /// deadline waits on xcd's own queue, as does the SIGKILL that `terminate` sends after it, so that it fires on time
+    /// however long the threads that run Swift tasks, or those of the shared queues, are kept busy.
+    private func startDeadline(_ limit: Duration, for child: ChildProcess) -> (DispatchWorkItem, Flag) {
+        let timedOut = Flag()
+        let killAfter = killAfter
+        let deadline = DispatchWorkItem {
+            if child.terminate(killAfter: killAfter) { timedOut.set() }
+        }
+        ChildProcess.deadlines.asyncAfter(deadline: .now() + DurationText.seconds(limit), execute: deadline)
+        return (deadline, timedOut)
     }
 
     /// Starts the child, saying when a missing working directory is why it could not start.

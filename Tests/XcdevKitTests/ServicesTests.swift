@@ -14,6 +14,14 @@ import XcdevTestSupport
         #expect(services.media.currentDirectory == "/cwd")
     }
 
+    /// The crash report is waited for 10 s, times `XCD_TIMEOUT_SCALE` from the environment the services are given.
+    @Test func theCrashReportWaitFollowsTheTimeoutScale() {
+        let plain = Services(runner: FakeProcessRunner(), globalPaths: GlobalPaths(base: "/h"), currentDirectory: "/cwd", environment: [:])
+        let slow = Services(runner: FakeProcessRunner(), globalPaths: GlobalPaths(base: "/h"), currentDirectory: "/cwd",
+                            environment: ["XCD_TIMEOUT_SCALE": "4"])
+        #expect(plain.crashWatcher.reportWait == .seconds(10) && slow.crashWatcher.reportWait == .seconds(40))
+    }
+
     /// Every clone a command boots starts its watchdog as this xcd, on the shared launcher, under this home.
     @Test func theProvisionerStartsIdleSessions() throws {
         let detached = FakeDetachedProcesses()

@@ -23,9 +23,9 @@ public struct Services: Sendable {
     /// The xcd a Mac recording runs as `xcd _record-window`. Under `swift test` this binary is the test host, so a
     /// test that records through these services names the built xcd here.
     public var xcdExecutable = Bundle.main.executablePath ?? CommandLine.arguments[0]
-    /// What tells a launched app's crash from its exit, and finds the crash report. Tests on a slow machine give it
-    /// longer to wait for the report.
-    public var crashWatcher = CrashWatcher(probe: SystemProcessProbe(), locator: CrashReportLocator())
+    /// What tells a launched app's crash from its exit, and finds the crash report, which it waits for longer under
+    /// `XCD_TIMEOUT_SCALE`.
+    public var crashWatcher: CrashWatcher
 
     public init(runner: any ProcessRunning, globalPaths: GlobalPaths, currentDirectory: String,
                 environment: [String: String], progress: @escaping @Sendable (String) -> Void = { _ in },
@@ -42,6 +42,8 @@ public struct Services: Sendable {
         self.interrupts = interrupts
         self.detached = detached
         self.runnerTransport = runnerTransport
+        crashWatcher = CrashWatcher(probe: SystemProcessProbe(), locator: CrashReportLocator(),
+                                    reportWait: TimeoutScale(environment: environment).scaled(CrashWatcher.defaultReportWait))
     }
 
     /// Progress stops once Ctrl-C has fired the handler: what follows would only describe the stopped children.

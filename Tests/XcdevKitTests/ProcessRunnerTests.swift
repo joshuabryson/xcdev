@@ -113,6 +113,22 @@ import XcdevTestSupport
         #expect(out.stoppedAtDeadline && out.exitCode == 143)                // 128 + SIGTERM; a sleep that ended by itself gives 0
     }
 
+    /// `XCD_TIMEOUT_SCALE` stretches a limit: a 0.4 s sleep under a 0.2 s limit, five times as long, finishes.
+    @Test func theTimeoutScaleStretchesALimit() async throws {
+        let scaled = SystemProcessRunner(inheritedEnvironment: ["XCD_TIMEOUT_SCALE": "5"])
+        let out = try await scaled.run(Invocation("/bin/sh", ["-c", "sleep 0.4; echo done"], timeout: .milliseconds(200)))
+        #expect(out.exitCode == 0 && out.stdoutString == "done\n")
+    }
+
+    /// A deadline that is how long to watch, not a limit, keeps its length: the 0.2 s deadline stops a child that would
+    /// end by itself at 3 s, long before the 10 s the scale would make of it.
+    @Test func theTimeoutScaleLeavesAStopAtTimeoutAlone() async throws {
+        let scaled = SystemProcessRunner(inheritedEnvironment: ["XCD_TIMEOUT_SCALE": "50"])
+        let out = try await scaled.run(Invocation("/bin/sh", ["-c", "sleep 3; echo ended"], timeout: .milliseconds(200), stopAtTimeout: true))
+        #expect(out.stoppedAtDeadline)
+        #expect(!out.stdoutString.contains("ended"))
+    }
+
     @Test func aProcessThatEndsBeforeItsDeadlineWasNotStopped() async throws {
         let out = try await runner.run(Invocation("/bin/sh", ["-c", "exit 3"], timeout: .seconds(5), stopAtTimeout: true))
         #expect(out.exitCode == 3 && !out.stoppedAtDeadline)

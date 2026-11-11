@@ -14,7 +14,8 @@ XCD_INTEGRATION=1 swift test --filter BuildRunIntegrationTests    # one integrat
 The integration suites under `Tests/IntegrationTests` drive real Xcode, git, and simulators; each one's `@Suite`
 line says what it needs (an iOS simulator runtime, SwiftLint, the Accessibility grant, the iPhone Duo). Run them
 one suite at a time with `--filter`: run together, one failing `xcodebuild test` starts a minutes-long
-`simctl diagnose` that stalls the rest.
+`simctl diagnose` that stalls the rest. On a slow machine, such as a CI runner, `XCD_TIMEOUT_SCALE=4` gives every
+command xcd runs, and its wait for a crash report, four times as long.
 
 Two files are generated, and a unit test fails until they are regenerated:
 

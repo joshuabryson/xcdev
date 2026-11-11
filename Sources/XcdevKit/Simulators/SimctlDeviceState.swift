@@ -105,18 +105,20 @@ extension SimctlClient {
     public static let privacyServices = ["all", "calendar", "contacts", "contacts-limited", "location", "location-always",
                                          "photos", "photos-add", "media-library", "microphone", "motion", "reminders", "siri"]
 
+    /// How many times `openurl` is run while simctl gives up waiting, about 10 s each: about a minute in all.
+    static let openURLTries = 6
+
     public func openURL(udid: String, url: String) async throws {
         let invocation = simctl(["openurl", udid, url])
         var out = try await runner.run(invocation)
-        guard !out.succeeded else { return }
         // Safari can be slow to launch on a freshly booted clone; simctl then gives up with exit 60 ("Operation timed out").
-        if Self.timedOut(out) {
+        for _ in 1..<Self.openURLTries where Self.timedOut(out) {
             out = try await runner.run(invocation)
-            guard !out.succeeded else { return }
-            if Self.timedOut(out) {
-                throw XcdError.subprocess(invocation, out, code: .simulatorFailed, message: "the simulator took too long to open \(url)",
-                                          next: "the simulator may still be starting up; wait a few seconds and retry, or run `xcd doctor`")
-            }
+        }
+        guard !out.succeeded else { return }
+        if Self.timedOut(out) {
+            throw XcdError.subprocess(invocation, out, code: .simulatorFailed, message: "the simulator took too long to open \(url)",
+                                      next: "the simulator may still be starting up; wait a few seconds and retry, or run `xcd doctor`")
         }
         let scheme = url.split(separator: ":", maxSplits: 1).first.map(String.init) ?? url
         let next = out.stderrString.contains("LSApplicationWorkspaceErrorDomain")

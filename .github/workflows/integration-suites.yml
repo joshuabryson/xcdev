@@ -1,6 +1,6 @@
 name: Integration suites
 
-# Each integration suite on a runner of its own, and a measure of what a clone's first boot costs on these runners.
+# Each integration suite on a runner of its own.
 on:
   push:
     branches: [ci-integration-suites]
@@ -48,8 +48,11 @@ jobs:
         run: swift build
       # Under `script` the tests write to a terminal, which prints each line as it comes, so a job that is
       # cancelled or times out keeps what its tests said. Every 30 seconds the runner's load, memory, booted
-      # simulators, and busiest processes are noted for the Load step.
+      # simulators, and busiest processes are noted for the Load step. A fresh clone's first boot keeps these 3-CPU
+      # runners busy for minutes, so xcd's limits are four times as long: launching Settings took up to 201 s.
       - name: Suite
+        env:
+          XCD_TIMEOUT_SCALE: 4
         run: |
           (set +e; while sleep 30; do
             echo "== $(date -u +%T)  load $(sysctl -n vm.loadavg)  swap $(sysctl -n vm.swapusage)"
@@ -66,63 +69,3 @@ jobs:
         run: |
           date -u
           ls -lT ~/Library/Logs/DiagnosticReports || true
-
-  # Two clones' first boots, one after the other, from a template that was never started (fresh) or was started
-  # once and left to settle (warm), and how long the commands the suites failed on take on each clone right after.
-  first-boot:
-    runs-on: macos-26
-    timeout-minutes: 100
-    strategy:
-      fail-fast: false
-      matrix:
-        template: [fresh, warm]
-    name: first-boot (${{ matrix.template }})
-    steps:
-      - uses: actions/checkout@v4
-      - name: Select Xcode
-        run: scripts/select-xcode.sh "$XCODE_APP"
-      - name: Boots
-        run: |
-          (set +e; while sleep 30; do echo "== $(date -u +%T)  load $(sysctl -n vm.loadavg)"; ps -Ao pcpu=,ucomm= -r | head -6; done) \
-            > "$RUNNER_TEMP/load.log" 2>&1 &
-          # Prints how long a command took, its exit status, and the load after it, with the end of its output when it
-          # failed; stops it after `limit` seconds (exit 142).
-          timed() {
-            local limit=$1 start=$(date +%s) status=0; shift
-            perl -e 'alarm shift; exec @ARGV' "$limit" "$@" > "$RUNNER_TEMP/out" 2>&1 || status=$?
-            echo "$(( $(date +%s) - start ))s  exit $status  load $(sysctl -n vm.loadavg | cut -d' ' -f2)  $*"
-            if [ $status -ne 0 ]; then tail -3 "$RUNNER_TEMP/out"; fi
-          }
-          # Waits for the 1-minute load to fall under 4, for up to `limit` seconds.
-          settle() {
-            local start=$(date +%s)
-            while (( $(sysctl -n vm.loadavg | cut -d' ' -f2 | cut -d. -f1) >= 4 && $(date +%s) - start < $1 )); do sleep 10; done
-            echo "$(( $(date +%s) - start ))s  until the load was $(sysctl -n vm.loadavg | cut -d' ' -f2)"
-          }
-          echo "load before: $(sysctl -n vm.loadavg)"
-          template=$(xcrun simctl create "Template" "iPhone 17 Pro")
-          xcrun simctl list devices | grep "$template" || true
-          if [ "${{ matrix.template }}" = warm ]; then
-            echo "-- the template's own first boot"
-            timed 900 xcrun simctl boot "$template"
-            timed 900 xcrun simctl bootstatus "$template"
-            settle 900
-            timed 300 xcrun simctl shutdown "$template"
-          fi
-          for n in 1 2; do
-            echo "-- clone $n"
-            clone=$(xcrun simctl clone "$template" "Clone $n")
-            timed 900 xcrun simctl boot "$clone"
-            timed 900 xcrun simctl bootstatus "$clone"
-            timed 300 xcrun simctl list -j
-            timed 300 xcrun simctl launch "$clone" com.apple.Preferences
-            timed 300 xcrun simctl openurl "$clone" https://example.com
-            timed 300 xcrun simctl io "$clone" screenshot "$RUNNER_TEMP/shot.png"
-            timed 600 xcrun simctl addmedia "$clone" "$RUNNER_TEMP/shot.png"
-            settle 900
-            timed 300 xcrun simctl shutdown "$clone"
-            xcrun simctl delete "$clone"
-          done
-      - name: Load
-        if: always()
-        run: cat "$RUNNER_TEMP/load.log"

@@ -91,23 +91,36 @@ import XcdevTestSupport
     \tOperation timed out
     """
 
-    @Test func openURLRetriesATimeoutOnce() async throws {
+    /// simctl gives up after about 10 s; on GitHub's runners Safari's first start on a clone took longer than two tries.
+    @Test func openURLRetriesATimeoutUntilItOpens() async throws {
         let attempts = Counter()
         fake.stub(["xcrun", "simctl", "openurl"]) { _ in
-            attempts.increment() == 1
+            attempts.increment() < 6
                 ? ProcessOutput(exitCode: 60, stdout: "", stderr: Self.timedOut)
                 : ProcessOutput(exitCode: 0, stdout: "", stderr: "")
         }
         try await client.openURL(udid: "U", url: "https://example.com")
-        #expect(attempts.value == 2)
+        #expect(attempts.value == 6)
     }
 
-    @Test func openURLThatTimesOutTwiceSaysTheSimulatorIsSlow() async throws {
+    @Test func openURLThatTimesOutSixTimesSaysTheSimulatorIsSlow() async throws {
         fake.stub(["xcrun", "simctl", "openurl"], exitCode: 60, stderr: Self.timedOut)
         let error = await #expect(throws: XcdError.self) { try await client.openURL(udid: "U", url: "https://example.com") }
         #expect(error?.code == .simulatorFailed && error?.message == "the simulator took too long to open https://example.com")
         #expect(error?.next == "the simulator may still be starting up; wait a few seconds and retry, or run `xcd doctor`")
-        #expect(fake.calls.count == 2)
+        #expect(fake.calls.count == 6)
+    }
+
+    /// A timeout followed by another failure is that failure.
+    @Test func openURLStopsRetryingAtAFailureThatIsNotATimeout() async throws {
+        let attempts = Counter()
+        fake.stub(["xcrun", "simctl", "openurl"]) { _ in
+            attempts.increment() == 1
+                ? ProcessOutput(exitCode: 60, stdout: "", stderr: Self.timedOut)
+                : ProcessOutput(exitCode: 115, stdout: "", stderr: "(domain=LSApplicationWorkspaceErrorDomain, code=115)")
+        }
+        let error = await #expect(throws: XcdError.self) { try await client.openURL(udid: "U", url: "xcdsample://x") }
+        #expect(error?.message == "the simulator could not open xcdsample://x" && attempts.value == 2)
     }
 
     @Test func openURLDoesNotRetryOtherFailures() async throws {

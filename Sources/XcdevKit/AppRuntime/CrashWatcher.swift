@@ -25,8 +25,11 @@ public struct CrashWatcher: Sendable {
     public let reportWait: Duration
     let sleep: @Sendable (Duration) async throws -> Void
 
+    /// How long a crash report is waited for on a machine of usual speed.
+    public static let defaultReportWait = Duration.seconds(10)
+
     public init(probe: any ProcessProbing, locator: CrashReportLocator, pollInterval: Duration = .milliseconds(250),
-                reportWait: Duration = .seconds(10),
+                reportWait: Duration = defaultReportWait,
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.probe = probe
         self.locator = locator
