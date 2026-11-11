@@ -2,6 +2,10 @@ import Foundation
 import Testing
 import XcdevTestSupport
 
+/// The tests that wait out xcd's real interrupt timings, seconds each, run before a release with the integration
+/// tests; `InterruptsTests` takes the same steps with a fake clock on every run.
+private let realTimings = ProcessInfo.processInfo.environment["XCD_INTEGRATION"] == "1"
+
 /// Runs the built `xcd` on a pseudo-terminal, as a shell would on a real one, to check what the terminal reaches:
 /// a plugin reading its input, and Ctrl-C. Only processes these tests start are signalled. Running the real binary
 /// keeps every signal out of the test process.
@@ -107,7 +111,8 @@ import XcdevTestSupport
 
     /// Ctrl-C while xcd runs a child in a group of its own: the handler stops the child's whole group, including
     /// the background job that ignores SIGINT, and xcd exits 130.
-    @Test func ctrlCStopsAChildInItsOwnGroupAndItsGrandchild() async throws {
+    @Test(.enabled(if: realTimings, "set XCD_INTEGRATION=1 to run (waits out xcd's 3 s between SIGINT and SIGTERM)"))
+    func ctrlCStopsAChildInItsOwnGroupAndItsGrandchild() async throws {
         let hook = try HookProject()
         defer { hook.project.remove() }
         let session = try hook.session()
@@ -122,7 +127,8 @@ import XcdevTestSupport
 
     /// Closing the terminal (SIGHUP, then every write to it failing) stops the hook too, and xcd exits 129 rather
     /// than crashing on the failed writes.
-    @Test func closingTheTerminalStopsTheChildrenAndExits129() async throws {
+    @Test(.enabled(if: realTimings, "set XCD_INTEGRATION=1 to run (waits out xcd's 3 s between SIGINT and SIGTERM)"))
+    func closingTheTerminalStopsTheChildrenAndExits129() async throws {
         let hook = try HookProject()
         defer { hook.project.remove() }
         let session = try hook.session()
@@ -136,7 +142,8 @@ import XcdevTestSupport
 
     /// The handler's line goes to stderr; with stderr closed it is dropped, not a crash. stdout is a pipe nobody
     /// reads, so xcd is stuck writing bare `xcd`'s plugin list when SIGHUP arrives.
-    @Test func anInterruptWithStderrClosedExitsCleanly() async throws {
+    @Test(.enabled(if: realTimings, "set XCD_INTEGRATION=1 to run (waits out xcd's 1 s limits on a stuck write)"))
+    func anInterruptWithStderrClosedExitsCleanly() async throws {
         let base = try Self.plugins(Dictionary(uniqueKeysWithValues: (1...600).map {
             ("plugin-with-a-long-name-so-the-list-fills-the-pipe-\($0)", "")
         }))

@@ -28,8 +28,12 @@ let package = Package(
         ),
         .target(
             name: "XcdevTestSupport",
-            dependencies: ["XcdevKit"],
+            dependencies: ["XcdevKit", "XcdevTestEnvironment"],
             path: "Tests/XcdevTestSupport"
+        ),
+        .target(
+            name: "XcdevTestEnvironment",
+            path: "Tests/XcdevTestEnvironment"
         ),
         .testTarget(
             name: "XcdevKitTests",

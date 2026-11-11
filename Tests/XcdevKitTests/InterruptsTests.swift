@@ -188,7 +188,8 @@ import XcdevTestSupport
     @Test func aStuckCleanupOrReportDoesntSkipTheOthers() {
         let ran = Lines()
         let release = DispatchSemaphore(value: 0)
-        let interrupts = Interrupts(report: { _ in release.wait() }, send: FakeGroups().send, sleep: { _ in })
+        let interrupts = Interrupts(writeLimit: .milliseconds(50), report: { _ in release.wait() }, send: FakeGroups().send,
+                                    sleep: { _ in /* no children to wait on */ })
         _ = interrupts.addCleanup { ran.add("older scratch") }
         _ = interrupts.addCleanup(writes: true) { ran.add("line"); release.wait() }
         _ = interrupts.addCleanup { ran.add("newer scratch") }

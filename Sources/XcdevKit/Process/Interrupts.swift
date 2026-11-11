@@ -26,7 +26,7 @@ public final class Interrupts: Sendable {
     private struct State {
         var children: [(child: ChildProcess, name: String)] = []
         var foreground: [ChildProcess] = []
-        var cleanups: [(id: Int, writes: Bool, run: @Sendable () -> Void)] = []
+        var cleanups: [RegisteredCleanup] = []
         var nextID = 0
         var fired = false
         /// Writes `perform` is running now. They run outside the lock, so a stuck one can't block the handler.
@@ -38,16 +38,20 @@ public final class Interrupts: Sendable {
     /// Where the signal sources deliver, so a passthrough child's end can wait for a Ctrl-C that came with it.
     private let queue = DispatchQueue(label: "xcd.interrupts")
     let grace: Duration
+    /// How long each cleanup that writes, and the report, may take before the handler goes on without it: either
+    /// may be stuck on a blocked stderr.
+    let writeLimit: Duration
     let report: @Sendable (String) -> Void
     let send: @Sendable (pid_t, Int32) -> Int32
     let sleep: @Sendable (Duration) -> Void
 
     /// `report` prints the handler's line (stderr, as `xcd: <line>`); `send` and `sleep` are `kill` and a real sleep.
-    public init(grace: Duration = .seconds(3),
+    public init(grace: Duration = .seconds(3), writeLimit: Duration = .seconds(1),
                 report: @escaping @Sendable (String) -> Void = { StandardError.write("xcd: \($0)\n") },
                 send: @escaping @Sendable (pid_t, Int32) -> Int32 = { kill($0, $1) },
                 sleep: @escaping @Sendable (Duration) -> Void = { usleep(UInt32($0 / .microseconds(1))) }) {
         self.grace = grace
+        self.writeLimit = writeLimit
         self.report = report
         self.send = send
         self.sleep = sleep
@@ -112,7 +116,7 @@ public final class Interrupts: Sendable {
         enum Action {
             case ignore
             case forward([ChildProcess])
-            case stop([(child: ChildProcess, name: String)], cleanups: [(writes: Bool, run: @Sendable () -> Void)])
+            case stop([(child: ChildProcess, name: String)], cleanups: [RegisteredCleanup])
         }
         let action: Action = state.withLock { state in
             if !state.foreground.isEmpty {
@@ -120,7 +124,7 @@ public final class Interrupts: Sendable {
             }
             guard !state.fired else { return .ignore }
             state.fired = true
-            return .stop(state.children, cleanups: state.cleanups.reversed().map { ($0.writes, $0.run) })
+            return .stop(state.children, cleanups: state.cleanups.reversed())
         }
         switch action {
         case .ignore:
@@ -129,19 +133,25 @@ public final class Interrupts: Sendable {
             for child in children { child.signal(signal, using: send) }
             return nil
         case .stop(let children, let cleanups):
-            waitForWrites()
-            let stopped = stop(children)
-            // Each on its own and bounded, so a stuck one can't skip the rest: first those that only touch files
-            // (init's scratch folder), then those that write to stderr (a spinner's line), which may be stuck too,
-            // like the report.
-            for cleanup in cleanups where !cleanup.writes { _ = Self.bounded(.seconds(5), cleanup.run) }
-            for cleanup in cleanups where cleanup.writes { _ = Self.bounded(.seconds(1), cleanup.run) }
-            let report = report
-            _ = Self.bounded(.seconds(1)) {
-                report("interrupted" + (stopped.isEmpty ? "" : "; stopped " + stopped.joined(separator: ", ")))
-            }
-            return 128 + signal
+            return finish(signal, stopping: children, then: cleanups)
         }
+    }
+
+    /// Stops the children, runs the cleanups (newest first), and prints the handler's line. Returns the exit code.
+    private func finish(_ signal: Int32, stopping children: [(child: ChildProcess, name: String)],
+                        then cleanups: [RegisteredCleanup]) -> Int32 {
+        waitForWrites()
+        let stopped = stop(children)
+        // Each on its own and bounded, so a stuck one can't skip the rest: first those that only touch files
+        // (init's scratch folder), then those that write to stderr (a spinner's line), which may be stuck too,
+        // like the report.
+        for cleanup in cleanups where !cleanup.writes { _ = Self.bounded(.seconds(5), cleanup.run) }
+        for cleanup in cleanups where cleanup.writes { _ = Self.bounded(writeLimit, cleanup.run) }
+        let report = report
+        _ = Self.bounded(writeLimit) {
+            report("interrupted" + (stopped.isEmpty ? "" : "; stopped " + stopped.joined(separator: ", ")))
+        }
+        return 128 + signal
     }
 
     /// Gives writes already under way up to a second to finish, so a result being printed isn't cut short.
@@ -152,23 +162,6 @@ public final class Interrupts: Sendable {
             sleep(step)
             waited += step
         }
-    }
-
-    /// Runs `work` on a thread of its own and waits for it up to `limit`. Returns whether it finished.
-    static func bounded(_ limit: DispatchTimeInterval, _ work: @escaping @Sendable () -> Void) -> Bool {
-        let done = DispatchSemaphore(value: 0)
-        Thread.detachNewThread {
-            work()
-            done.signal()
-        }
-        return done.wait(timeout: .now() + limit) == .success
-    }
-
-    /// Flushes stdout and stderr if that finishes within a second, then ends the process at once. Not `exit`: its
-    /// flush would wait forever on a pipe nobody reads, and xcd has nothing else to run at exit.
-    public static func exitPromptly(_ code: Int32) {
-        _ = bounded(.seconds(1)) { fflush(nil) }
-        _exit(code)
     }
 
     /// SIGINT to each child's group, SIGTERM to those still running after `grace`, SIGKILL to those still running a
@@ -251,7 +244,7 @@ public final class Interrupts: Sendable {
     public func addCleanup(writes: Bool = false, _ cleanup: @escaping @Sendable () -> Void) -> Cleanup {
         state.withLock { state in
             state.nextID += 1
-            state.cleanups.append((state.nextID, writes, cleanup))
+            state.cleanups.append(RegisteredCleanup(id: state.nextID, writes: writes, run: cleanup))
             return Cleanup(id: state.nextID)
         }
     }
@@ -282,6 +275,32 @@ public final class Interrupts: Sendable {
         guard !perform(write) else { return }
         while !Task.isCancelled { try? await Task.sleep(for: .seconds(1)) }
     }
+}
+
+extension Interrupts {
+    /// Runs `work` on a thread of its own and waits for it up to `limit`. Returns whether it finished.
+    static func bounded(_ limit: Duration, _ work: @escaping @Sendable () -> Void) -> Bool {
+        let done = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            work()
+            done.signal()
+        }
+        return done.wait(timeout: .now() + DurationText.seconds(limit)) == .success
+    }
+
+    /// Flushes stdout and stderr if that finishes within a second, then ends the process at once. Not `exit`: its
+    /// flush would wait forever on a pipe nobody reads, and xcd has nothing else to run at exit.
+    public static func exitPromptly(_ code: Int32) {
+        _ = bounded(.seconds(1)) { fflush(nil) }
+        _exit(code)
+    }
+}
+
+/// A cleanup `addCleanup` registered. One that `writes` (to stderr) runs after the others and gets less time.
+private struct RegisteredCleanup {
+    let id: Int
+    let writes: Bool
+    let run: @Sendable () -> Void
 }
 
 /// SIGINT and SIGQUIT ignored while any passthrough child runs, as a shell ignores them while a foreground job does.

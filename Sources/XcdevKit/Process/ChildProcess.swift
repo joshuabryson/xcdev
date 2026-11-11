@@ -149,11 +149,11 @@ final class ChildProcess: Sendable {
     /// while every thread of the shared queues is blocked, as reading a child's output or waiting for a lock blocks one.
     static let deadlines = DispatchQueue(label: "dev.xcdev.deadlines")
 
-    /// Sends SIGTERM, then SIGKILL two seconds later to whatever is still running. Returns whether it was running.
+    /// Sends SIGTERM, then SIGKILL `killAfter` later to whatever is still running. Returns whether it was running.
     @discardableResult
-    func terminate() -> Bool {
+    func terminate(killAfter: Duration) -> Bool {
         guard isAlive(), signal(SIGTERM) else { return false }
-        Self.deadlines.asyncAfter(deadline: .now() + 2) { [self] in
+        Self.deadlines.asyncAfter(deadline: .now() + DurationText.seconds(killAfter)) { [self] in
             if isAlive() { signal(SIGKILL) }
         }
         return true

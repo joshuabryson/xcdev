@@ -73,6 +73,7 @@ import XcdevTestSupport
 
     /// The sleep ignores SIGTERM too: a signal its shell ignores stays ignored in what the shell starts.
     @Test func timeoutEscalatesToKillWhenTermIsIgnored() async throws {
+        let runner = SystemProcessRunner(killAfter: .milliseconds(100))
         let error = await #expect(throws: XcdError.self) {
             try await runner.run(Invocation("/bin/sh", ["-c", "trap '' TERM; sleep 30; echo finished >&2"],
                                             timeout: .milliseconds(300)))

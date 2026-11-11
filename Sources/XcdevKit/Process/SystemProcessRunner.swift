@@ -6,11 +6,14 @@ public struct SystemProcessRunner: ProcessRunning {
     private let inheritedEnvironment: [String: String]
     /// Tracks the children for the SIGINT/SIGTERM handler, and stops a passthrough child's Ctrl-C reaching xcd.
     private let interrupts: Interrupts
+    /// How long a child its deadline or a cancellation stopped gets after SIGTERM, before SIGKILL.
+    private let killAfter: Duration
 
     public init(inheritedEnvironment: [String: String] = ProcessInfo.processInfo.environment,
-                interrupts: Interrupts = .shared) {
+                interrupts: Interrupts = .shared, killAfter: Duration = .seconds(2)) {
         self.inheritedEnvironment = inheritedEnvironment
         self.interrupts = interrupts
+        self.killAfter = killAfter
     }
 
     /// A passthrough child runs in xcd's process group, so it can read the terminal and gets its Ctrl-C; every other
@@ -32,13 +35,13 @@ public struct SystemProcessRunner: ProcessRunning {
         // time however long the threads that run Swift tasks, or those of the shared queues, are kept busy.
         let timedOut = Flag()
         let deadline = DispatchWorkItem {
-            if child.terminate() { timedOut.set() }
+            if child.terminate(killAfter: killAfter) { timedOut.set() }
         }
         ChildProcess.deadlines.asyncAfter(deadline: .now() + DurationText.seconds(invocation.timeout), execute: deadline)
         let status = await withTaskCancellationHandler {
             await child.wait()
         } onCancel: {
-            child.terminate()
+            child.terminate(killAfter: killAfter)
         }
         interrupts.finished(child)
         deadline.cancel()
