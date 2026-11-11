@@ -488,12 +488,12 @@ import XcdevTestSupport
         device.onPause = { if $0.pauses == 3 { $0.state = .background } }
         let result = try engine.button(request("home", tree: true)).get()
         #expect(result.tree?.state == "background" && device.pauses == 4)   // three waiting, one before the tree
-        // An app that never leaves is not waited for beyond two seconds, and another button is not waited for at all.
+        // An app that never leaves is not waited for beyond ten seconds, and another button is not waited for at all.
         device.onPause = nil
         device.state = .foreground
         device.pauses = 0
         #expect(try engine.button(request("home")).get().tree == nil)
-        #expect(device.pauses == 20)
+        #expect(device.pauses == 100)
         device.buttons = [.home, .action]
         device.pauses = 0
         _ = try engine.button(request("action")).get()

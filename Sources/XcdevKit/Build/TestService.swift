@@ -38,7 +38,7 @@ public struct TestService: Sendable {
         let plan = try await builds.plan(device: options.device, scheme: options.scheme, role: .test, in: &ctx)
         let stopped = await stopRunner(for: plan, options, in: ctx)
         let run = try await runTests(plan, options, in: ctx)
-        let results = await testResults(bundle: run.bundle, xcode: plan.xcode)
+        let results = await testResults(bundle: run.bundle, xcode: plan.xcode, root: ctx.location.worktreeRoot)
         let verdict = Self.verdict(run, results)
         var report = TestReport(outcome: verdict.outcome, scheme: plan.scheme, target: plan.target.name,
                                 targetSummary: plan.target.summary, seconds: builds.now().timeIntervalSince(run.started),
@@ -104,8 +104,9 @@ public struct TestService: Sendable {
         return Verdict(outcome: run.buildResults?.succeeded == true ? .failed : .buildFailed, buildErrors: errors, logTail: tail)
     }
 
-    /// nil when the bundle is missing or has no readable summary.
-    private func testResults(bundle: String, xcode: XcodeInstall) async -> TestResults? {
+    /// nil when the bundle is missing or has no readable summary. A failure Xcode names by its file alone is looked
+    /// up among the files git knows under `root`.
+    private func testResults(bundle: String, xcode: XcodeInstall, root: String) async -> TestResults? {
         guard FileManager.default.fileExists(atPath: bundle) else { return nil }
         func get(_ kind: String) async -> Data? {
             let invocation = Invocation.xcrun(["xcresulttool", "get", "test-results", kind, "--path", bundle],
@@ -113,7 +114,9 @@ public struct TestService: Sendable {
             guard let out = try? await builds.runner.run(invocation), out.succeeded else { return nil }
             return out.stdout
         }
-        guard let summary = await get("summary") else { return nil }
-        return try? TestResults.parse(summary: summary, tests: await get("tests"))
+        guard let summary = await get("summary"),
+              let results = try? TestResults.parse(summary: summary, tests: await get("tests")) else { return nil }
+        guard results.needsPlacing, let files = try? await ChangeFinder(runner: builds.runner).knownPaths(in: root) else { return results }
+        return results.placing(files, under: root)
     }
 }

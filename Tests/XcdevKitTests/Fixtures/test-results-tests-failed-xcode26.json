@@ -1,0 +1,88 @@
+{
+  "devices" : [
+    {
+      "architecture" : "arm64",
+      "deviceId" : "E8349071-CA91-4EF1-8E64-02AE781CEEC3",
+      "deviceName" : "Test results",
+      "modelName" : "iPhone 17 Pro",
+      "osBuildNumber" : "23F77",
+      "osVersion" : "26.5",
+      "platform" : "iOS Simulator"
+    }
+  ],
+  "testNodes" : [
+    {
+      "children" : [
+        {
+          "children" : [
+            {
+              "name" : "passes()",
+              "nodeIdentifier" : "passes()",
+              "nodeIdentifierURL" : "test://com.apple.xcode/SampleApp/SampleAppTests/passes()",
+              "nodeType" : "Test Case",
+              "result" : "Passed"
+            },
+            {
+              "children" : [
+                {
+                  "name" : "SampleAppTests.swift:9: Expectation failed: (1 + 1 → 2) == 3: failing on purpose",
+                  "nodeType" : "Failure Message"
+                }
+              ],
+              "name" : "failsOnPurpose()",
+              "nodeIdentifier" : "failsOnPurpose()",
+              "nodeIdentifierURL" : "test://com.apple.xcode/SampleApp/SampleAppTests/failsOnPurpose()",
+              "nodeType" : "Test Case",
+              "result" : "Failed"
+            },
+            {
+              "children" : [
+                {
+                  "duration" : "0.0014s",
+                  "durationInSeconds" : 0.0013580322265625,
+                  "name" : "testPasses()",
+                  "nodeIdentifier" : "LegacyTests/testPasses()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/SampleApp/SampleAppTests/LegacyTests/testPasses",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "children" : [
+                    {
+                      "name" : "Test skipped - skipped on purpose",
+                      "nodeType" : "Failure Message"
+                    }
+                  ],
+                  "duration" : "0.012s",
+                  "durationInSeconds" : 0.011716008186340332,
+                  "name" : "testSkipped()",
+                  "nodeIdentifier" : "LegacyTests/testSkipped()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/SampleApp/SampleAppTests/LegacyTests/testSkipped",
+                  "nodeType" : "Test Case",
+                  "result" : "Skipped"
+                }
+              ],
+              "name" : "LegacyTests",
+              "nodeIdentifierURL" : "test://com.apple.xcode/SampleApp/SampleAppTests/LegacyTests",
+              "nodeType" : "Test Suite",
+              "result" : "Passed"
+            }
+          ],
+          "name" : "SampleAppTests",
+          "nodeIdentifierURL" : "test://com.apple.xcode/SampleApp/SampleAppTests",
+          "nodeType" : "Unit test bundle",
+          "result" : "Failed"
+        }
+      ],
+      "name" : "SampleApp",
+      "nodeType" : "Test Plan",
+      "result" : "Failed"
+    }
+  ],
+  "testPlanConfigurations" : [
+    {
+      "configurationId" : "1",
+      "configurationName" : "Test Scheme Action"
+    }
+  ]
+}

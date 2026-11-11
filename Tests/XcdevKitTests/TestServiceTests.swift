@@ -33,6 +33,32 @@ import XcdevTestSupport
         #expect(args.starts(with: ["xcodebuild", "test"]))
         #expect(args.contains("AppTests"))                         // schemes.test
         #expect(report.text.hasPrefix("tests failed  scheme=AppTests device=iphone (iPhone 18 Pro, iOS 27.0)  0.0s\npassed=2 failed=1 skipped=1\n/Users/dev/My Apps/SampleApp/SampleAppTests/SampleAppTests.swift:9: error: SampleAppTests/failsOnPurpose(): Expectation failed"))
+        #expect(!fake.commandLines.contains { $0.contains("ls-files") })    // every failure had its path already
+    }
+
+    /// Xcode 26.2's results, as GitHub's runner printed them: the failure names its file without the folder.
+    @Test func aFailureNamedByItsFileAloneIsPlacedInTheWorktree() async throws {
+        defer { worktree.remove() }
+        fake.stub(["git", "-C", worktree.root, "ls-files"],
+                  stdout: "SampleApp/App.swift\0SampleAppTests/SampleAppTests.swift\0SampleAppTests/LegacyTests.swift\0")
+        let (report, _) = try await run(.init(exitCode: 65, log: "** TEST FAILED **\n",
+                                              buildResults: #"{"status":"succeeded","errors":[],"warnings":[]}"#,
+                                              testSummary: Fixture.string("test-results-summary-failed.json"),
+                                              testTree: Fixture.string("test-results-tests-failed-xcode26.json")))
+        #expect(report.failures == [TestFailure(test: "SampleAppTests/failsOnPurpose()",
+                                                message: "Expectation failed: (1 + 1 → 2) == 3: failing on purpose",
+                                                file: worktree.root + "/SampleAppTests/SampleAppTests.swift", line: 9)])
+    }
+
+    /// Where git can't list the files, the failure keeps the name Xcode gave it.
+    @Test func aFailureKeepsItsBareFileNameWhenGitCantListTheFiles() async throws {
+        defer { worktree.remove() }
+        fake.stub(["git", "-C", worktree.root, "ls-files"], exitCode: 128, stderr: "fatal: not a git repository")
+        let (report, _) = try await run(.init(exitCode: 65, log: "** TEST FAILED **\n",
+                                              buildResults: #"{"status":"succeeded","errors":[],"warnings":[]}"#,
+                                              testSummary: Fixture.string("test-results-summary-failed.json"),
+                                              testTree: Fixture.string("test-results-tests-failed-xcode26.json")))
+        #expect(report.failures.map(\.file) == ["SampleAppTests.swift"] && report.failures.map(\.line) == [9])
     }
 
     @Test func filtersArePassedAndAPassingRunSucceeds() async throws {

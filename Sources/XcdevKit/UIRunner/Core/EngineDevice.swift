@@ -22,13 +22,14 @@ extension RunnerEngine {
     }
 
     /// Home sends the app in front to the background a moment after the press returns (seen: still in front
-    /// 0.3 s later). Waits up to two seconds for that, so a tree read next shows where the device ended up.
+    /// 0.3 s later, and over 2 s later on GitHub's busy runner). Waits up to ten seconds for that, so a tree read
+    /// next shows where the device ended up.
     func waitForAppToLeave(_ scope: ActionScope) {
         guard !scope.system, let bundleId = scope.bundleId else { return }
-        var waited = 0.0
-        while device.appState(bundleId) == .foreground, waited < 2 {
+        var polls = Int((10 / Self.pollInterval).rounded())
+        while device.appState(bundleId) == .foreground, polls > 0 {
             device.pause(Self.pollInterval)
-            waited += Self.pollInterval
+            polls -= 1
         }
     }
 

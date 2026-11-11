@@ -46,6 +46,43 @@ import Testing
         """)
     }
 
+    /// Xcode 26.2 gives a failure no `sourceLocation` and starts its text with the file's name and the line instead.
+    @Test func aFailureWithoutALocationTakesItFromTheStartOfItsText() throws {
+        func tree(_ message: String, location: String = "") -> Data {
+            let failure = #"{"name":"\#(message)","nodeType":"Failure Message"\#(location)}"#
+            let testCase = #"{"name":"direct()","nodeType":"Test Case","result":"Failed","#
+                + #""nodeIdentifierURL":"test://com.apple.xcode/SampleApp/SampleAppTests/direct()","children":[\#(failure)]}"#
+            return Data(#"{"testNodes":[{"name":"P","nodeType":"Test Plan","children":[\#(testCase)]}]}"#.utf8)
+        }
+        func failure(_ tree: Data) throws -> TestFailure {
+            try #require(TestResults.parse(summary: data("test-results-summary-nested.json"), tests: tree).failures.first)
+        }
+        #expect(try failure(tree("SampleAppTests.swift:9: Expectation failed: (1 + 1 → 2) == 3: failing on purpose")) == TestFailure(
+            test: "SampleAppTests/direct()", message: "Expectation failed: (1 + 1 → 2) == 3: failing on purpose",
+            file: "SampleAppTests.swift", line: 9))
+        #expect(try failure(tree("My Tests.swift:12: XCTAssertEqual failed")).file == "My Tests.swift")
+        // A text that only looks like it starts with a location, and a failure that has one, are left as they are.
+        for text in ["Expectation failed: a:1: b", "Value 3:12: off", "x.swift:+9: y", "x.swift:9:no space"] {
+            #expect(try failure(tree(text)) == TestFailure(test: "SampleAppTests/direct()", message: text, file: nil, line: nil))
+        }
+        let located = try failure(tree("Other.swift:3: x", location: #","sourceLocation":{"filePath":"/a/A.swift","lineNumber":7}"#))
+        #expect(located.message == "Other.swift:3: x" && located.file == "/a/A.swift" && located.line == 7)
+    }
+
+    /// The bare name becomes the file's path in the worktree when exactly one file there has that name.
+    @Test func aBareFileNameIsPlacedWhenOnlyOneFileHasIt() {
+        func results(_ files: [String?]) -> TestResults {
+            TestResults(counts: TestCounts(total: 1, passed: 0, failed: 1, skipped: 0, expectedFailures: 0),
+                        failures: files.map { TestFailure(test: "T/t()", message: "m", file: $0, line: 1) })
+        }
+        let known = ["SampleAppTests/SampleAppTests.swift", "SampleApp/App.swift", "A/Twice.swift", "B/Twice.swift", "Top.swift"]
+        let placed = results(["SampleAppTests.swift", "Twice.swift", "Missing.swift", "/abs/App.swift", "Top.swift", nil])
+            .placing(known, under: "/w")
+        #expect(placed.failures.map(\.file) == ["/w/SampleAppTests/SampleAppTests.swift", "Twice.swift", "Missing.swift",
+                                                "/abs/App.swift", "/w/Top.swift", nil])
+        #expect(results(["/abs/App.swift", nil]).needsPlacing == false && results(["Top.swift"]).needsPlacing)
+    }
+
     @Test func summaryAloneStillListsFailures() throws {
         let results = try TestResults.parse(summary: data("test-results-summary-failed.json"), tests: nil)
         #expect(results.failures.map(\.test) == ["SampleAppTests/failsOnPurpose()"])

@@ -38,8 +38,12 @@ public struct ChangeFinder: Sendable {
 
     /// Every Swift file git knows in the worktree: tracked, or untracked and not ignored.
     public func everyFile(in root: String) async throws -> [ScopedFile] {
-        let known = try await records(["ls-files", "--cached", "--others", "--exclude-standard", "-z"], in: root)
-        return Self.swiftFiles(known.map { ScopedFile(path: $0, basePath: nil) }, in: root)
+        Self.swiftFiles(try await knownPaths(in: root).map { ScopedFile(path: $0, basePath: nil) }, in: root)
+    }
+
+    /// The path of every file git knows in the worktree, of any kind, relative to `root`.
+    func knownPaths(in root: String) async throws -> [String] {
+        try await records(["ls-files", "--cached", "--others", "--exclude-standard", "-z"], in: root)
     }
 
     /// git's output with `-z`: records that end in NUL, with every path as it is on disk.

@@ -51,7 +51,7 @@ private let realTimings = ProcessInfo.processInfo.environment["XCD_INTEGRATION"]
 
     /// Ctrl-C reaches the plugin, which owns the terminal while it runs; xcd outlives it and exits 130 (128 + SIGINT).
     @Test func ctrlCStopsAPluginAndXcdExits130() async throws {
-        let nap = "29.\(Int.random(in: 10000...99999))"                          // marks this test's sleep
+        let nap = "3599.\(Int.random(in: 10000...99999))"                        // marks this test's sleep; only Ctrl-C ends it
         let base = try Self.plugins(["waiter": "echo \"pid:$$ ready\"; exec sleep \(nap)"])
         defer { try? FileManager.default.removeItem(atPath: base) }
         let session = try PseudoTerminal.spawn(Self.xcd(), ["waiter"], directory: base, environment: [
@@ -66,10 +66,11 @@ private let realTimings = ProcessInfo.processInfo.environment["XCD_INTEGRATION"]
 
     /// A throwaway repo whose post-worktree-create hook (a 30-minute deadline; `wt create` clones no simulator)
     /// records its shell's pid and starts a background `sleep <nap>`, which ignores SIGINT as non-interactive shells
-    /// make background jobs do. `pids` waits for both pids.
+    /// make background jobs do. `pids` waits for both pids. The sleep lasts an hour, so only the test's signal ends
+    /// the hook, however long a busy machine keeps the test waiting for its turn.
     struct HookProject {
         let project: TempProject
-        let nap = "29.\(Int.random(in: 10000...99999))"                     // in the hook's argv and the sleep's
+        let nap = "3599.\(Int.random(in: 10000...99999))"                   // in the hook's argv and the sleep's
 
         init() throws {
             project = try TempProject.make(config: """
