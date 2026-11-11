@@ -61,7 +61,8 @@ struct PostureIntegrationTests {
             let open = try await svc.posture.fold(FoldOptions(posture: .open), in: &ctx)
             #expect(open.posture == "open" && open.angle == 180 && open.display == "inner" && open.verified && open.route == "direct")
             let half = try await svc.posture.fold(FoldOptions(posture: .half), in: &ctx)
-            #expect(half.posture == "half" && half.angle == 90 && half.verified)
+            // iOS 27.2 leaves the hinge 2.6° past 90°.
+            #expect(half.posture == "half" && half.angle.map { abs($0 - 90) <= Posture.angleTolerance } == true && half.verified, "\(half.text)")
             let again = try await svc.posture.fold(FoldOptions(posture: .half), in: &ctx)
             #expect(again.already && again.route == nil)
             // From 90° SpringBoard writes no line for 120°; the hinge did move, so the display agrees.

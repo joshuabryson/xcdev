@@ -57,10 +57,13 @@ import Testing
         #expect(unknownAngle.postureText == "closed" && unknownAngle.display == "cover")
         #expect(PostureState(innerActive: true).postureText == "open or half")
         #expect(PostureState(innerActive: true, posture: .half).display == "inner")
-        // With a known angle the 1° rule decides, even on the cover, which the Duo keeps on at 61.7°; and the angle names
+        // With a known angle the 3° rule decides, even on the cover, which the Duo keeps on at 61.7°; and the angle names
         // its nearest posture when the line's state word is none of the three.
         #expect(PostureState(innerActive: false, degrees: 61.7).satisfies(.hinge(degrees: 0)) == false)
         #expect(PostureState(innerActive: false, degrees: 61.7).postureText == "half")
+        // iOS 27.2 leaves a half fold 2.6° past 90°, from either side: that is half already, and 3.1° off is not.
+        let half = [87.4, 92.6, 86.9].map { PostureState(innerActive: true, degrees: $0, posture: .half) }
+        #expect(half.map { $0.satisfies(.hinge(degrees: 90)) } == [true, true, false])
     }
 
     @Test func postureFailedIsAnEnvironmentFailure() {

@@ -50,14 +50,24 @@ public struct PoseLine: Sendable, Equatable {
     public var posture: Posture?
     /// The state word as logged, suffix included: `partiallyOpen+toClosed`.
     public var state: String
+    /// For a `COMPLETED:` line, whether the transition left the inner display primary (`.inner:pri`) rather than the
+    /// cover (`.cover:pri`); nil for a `DCMPose` line, which names no display.
+    public var innerPrimary: Bool?
 
     /// Nil for any other line, a transition's `STARTING:` and `DCMResolved:` lines among them.
     public static func parse(_ line: String) -> PoseLine? {
-        let pattern = /^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+) .*(?:DCMPose: |COMPLETED: [^|]*\| )([0-9.]+)° \([^)]*\): ([A-Za-z+]+)/
-        guard let match = line.firstMatch(of: pattern), let degrees = Double(match.2),
+        let pattern = /^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+) .*(?:DCMPose: |COMPLETED: ([^|]*)\| )([0-9.]+)° \([^)]*\): ([A-Za-z+]+)/
+        guard let match = line.firstMatch(of: pattern), let degrees = Double(match.3),
               let timestamp = timestamp(String(match.1)) else { return nil }
-        let state = String(match.3)
-        return PoseLine(timestamp: timestamp, degrees: degrees, posture: Posture(springBoardState: state), state: state)
+        let state = String(match.4)
+        return PoseLine(timestamp: timestamp, degrees: degrees, posture: Posture(springBoardState: state), state: state,
+                        innerPrimary: match.2.flatMap(innerPrimary))
+    }
+
+    /// From a `COMPLETED:` line's displays, whether the inner one is primary; nil when neither is.
+    static func innerPrimary(_ displays: Substring) -> Bool? {
+        if displays.contains(".inner:pri") { return true }
+        return displays.contains(".cover:pri") ? false : nil
     }
 
     /// Every hinge line of a `log show --style compact` output, oldest first.

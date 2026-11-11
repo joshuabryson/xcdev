@@ -72,6 +72,11 @@ import XcdevTestSupport
         "\(time) Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DevicePose] DCMPose: \(degrees)° (0.00 fold:0.00): \(state) [device:Pu]\n"
     }
 
+    /// A display transition's `COMPLETED:` line, with the displays as SpringBoard writes them (`.cover:aux .inner:pri`).
+    func completed(_ time: String, _ displays: String, _ degrees: String, _ state: String) -> String {
+        "\(time) Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DisplayContentMode] COMPLETED:     \(displays) | \(degrees)° (0.00 fold:0.00): \(state) [device:Pu]\n"
+    }
+
     @Test func withNoArgumentFoldBootsTheCloneAndReportsThePosture() async throws {
         defer { worktree.remove() }
         var (service, ctx) = try setup()
@@ -202,17 +207,59 @@ import XcdevTestSupport
         #expect(report.verified && report.angle == 120 && report.posture == "half")
     }
 
-    /// SpringBoard logs its own angle, not the one sent: 120° from closed is 118.3°. That is not
-    /// within 1°, so it is unverified, and the report gives the angle the simulator shows.
-    @Test func anAngleTheSimulatorRoundsIsUnverifiedWithTheAngleItShows() async throws {
+    /// SpringBoard logs its own angle, not the one sent: 120° from closed is 118.3°. That is within 3°, so it is
+    /// verified, and the report gives the angle the simulator shows.
+    @Test func anAngleTheSimulatorRoundsIsVerifiedWithTheAngleItShows() async throws {
         defer { worktree.remove() }
         let route = FakeRoute()
         var (service, ctx) = try setup(routes: [route])
         try stubBeforeAndAfter(route, before: line("2026-10-17 18:33:20.000", "0.0", "fullyClosed"),
                                after: "devicectl-displays-open.json", afterLines: line("2026-10-17 20:00:01.000", "118.3", "partiallyOpen"))
         let report = try await service.fold(FoldOptions(degrees: 120), in: &ctx)
-        #expect(!report.verified && report.posture == "half" && report.angle == 118.3)
+        #expect(report.verified && report.posture == "half" && report.angle == 118.3)
         #expect(report.text.hasPrefix("posture: half (118°)  display: inner"))
+    }
+
+    /// iOS 27.2 leaves the hinge 2.6° past a half fold: from open SpringBoard's last line says 87.4°, which is the
+    /// half fold, verified with the angle shown. The angles and states are an iOS 27.2 Duo clone's, 2026-11-11.
+    @Test func aHalfFoldThatStopsPastNinetyDegreesIsVerified() async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        let lines = line("2026-10-17 20:00:01.000", "174.0", "partiallyOpen+toClosed")
+            + line("2026-10-17 20:00:01.900", "87.4", "partiallyOpen+foldAvoidance")
+        try stubBeforeAndAfter(route, before: line("2026-10-17 18:40:00.000", "180.0", "openFlat"),
+                               after: "devicectl-displays-open.json", afterLines: lines, from: "devicectl-displays-open.json")
+        let report = try await service.fold(FoldOptions(posture: .half), in: &ctx)
+        #expect(route.applied.withLock { $0 } == [.hinge(degrees: 90)])
+        #expect(report.verified && report.posture == "half" && report.angle == 87.4)
+        #expect(report.text.hasPrefix("posture: half (87°)  display: inner"))
+    }
+
+    /// devicectl can say the cover is on for seconds after SpringBoard has completed the switch to the inner display:
+    /// a `COMPLETED:` line newer than the send stands for it. On an iOS 27.2 Duo clone, 2026-11-11, devicectl still
+    /// said cover 3.6 s after this switch.
+    @Test func aCompletedSwitchAfterTheSendVerifiesOpenWhileDevicectlStillSaysCover() async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        let lines = line("2026-10-17 20:00:01.000", "12.3", "closed+toOpen")
+            + completed("2026-10-17 20:00:01.600", ".cover:aux .inner:pri", "180.0", "openFlat")
+        try stubBeforeAndAfter(route, before: line("2026-10-17 18:33:20.000", "0.0", "fullyClosed"),
+                               after: "devicectl-displays-closed.json", afterLines: lines)
+        let report = try await service.fold(FoldOptions(posture: .open), in: &ctx)
+        #expect(report.verified && report.posture == "open" && report.angle == 180 && report.display == "inner", "\(report.text)")
+    }
+
+    /// Only a switch completed after the send counts: an older one says nothing about this request.
+    @Test func aCompletedSwitchFromBeforeTheSendDoesNotVerify() async throws {
+        defer { worktree.remove() }
+        let route = FakeRoute()
+        var (service, ctx) = try setup(routes: [route])
+        try stubBeforeAndAfter(route, before: line("2026-10-17 18:33:20.000", "0.0", "fullyClosed"), after: "devicectl-displays-closed.json",
+                               afterLines: completed("2026-10-17 18:50:00.000", ".cover:aux .inner:pri", "180.0", "openFlat"))
+        let error = await #expect(throws: XcdError.self) { try await service.fold(FoldOptions(posture: .open), in: &ctx) }
+        #expect(error?.code == .postureFailed && error?.details == ["seen: display cover, screen portrait"])
     }
 
     /// From open, the cover comes on after the send and no line follows: that proves 0°, and no other angle.
@@ -284,17 +331,18 @@ import XcdevTestSupport
         #expect(report.verified && report.angle == 30 && report.display == "inner")
     }
 
-    /// At 60° the Duo keeps the cover on, and SpringBoard's line says 61.7° `closed`: the display
-    /// agrees, the line is not within 1°, so it is unverified rather than `posture_failed`.
-    @Test func sixtyDegreesOnTheCoverIsUnverifiedNotPostureFailed() async throws {
+    /// At 60° the Duo keeps the cover on, and SpringBoard's line says 61.7° `closed`: the display agrees and the line
+    /// is within 3°, so it is verified. At 50° the same line is not, so it is unverified rather than `posture_failed`.
+    @Test(arguments: [(60.0, true), (50.0, false)])
+    func anAngleOnTheCoverIsVerifiedByItsLineAndNeverPostureFailed(degrees: Double, verified: Bool) async throws {
         defer { worktree.remove() }
         let route = FakeRoute()
         var (service, ctx) = try setup(routes: [route])
         try stubBeforeAndAfter(route, before: line("2026-10-17 18:33:20.000", "0.0", "fullyClosed"),
                                after: "devicectl-displays-closed.json", afterLines: line("2026-10-17 20:00:01.000", "61.7", "closed"))
-        let report = try await service.fold(FoldOptions(degrees: 60), in: &ctx)
-        #expect(route.applied.withLock { $0 } == [.hinge(degrees: 60)])
-        #expect(!report.verified && report.display == "cover" && report.angle == 61.7)
+        let report = try await service.fold(FoldOptions(degrees: degrees), in: &ctx)
+        #expect(route.applied.withLock { $0 } == [.hinge(degrees: degrees)])
+        #expect(report.verified == verified && report.display == "cover" && report.angle == 61.7)
     }
 
     /// The hinge's display rule: the cover at 0°, the inner display from 90°, either one between.
@@ -317,16 +365,17 @@ import XcdevTestSupport
         #expect(!PostureReader.displaysSuffice(PostureChange(.orientation(.portrait), from: fromOpen)))
     }
 
-    /// A line newer than the send verifies `open` only within 1° of 180°; the inner display is on in every case.
-    @Test(arguments: [(179.0, true), (178.0, false), (90.0, false)])
-    func aLineVerifiesOpenOnlyWithinOneDegree(degrees: Double, verified: Bool) async throws {
+    /// A line newer than the send verifies `open` only within 3° of 180°; the inner display is on in every case, and
+    /// the report gives the line's angle either way.
+    @Test(arguments: [(177.0, true), (176.0, false), (90.0, false)])
+    func aLineVerifiesOpenOnlyWithinThreeDegrees(degrees: Double, verified: Bool) async throws {
         defer { worktree.remove() }
         let route = FakeRoute()
         var (service, ctx) = try setup(routes: [route])
         try stubBeforeAndAfter(route, before: line("2026-10-17 18:33:20.000", "0.0", "fullyClosed"), after: "devicectl-displays-open.json",
                                afterLines: line("2026-10-17 20:00:01.000", String(degrees), Posture.nearest(degrees).springBoardState))
         let report = try await service.fold(FoldOptions(posture: .open), in: &ctx)
-        #expect(report.verified == verified && report.display == "inner")
+        #expect(report.verified == verified && report.display == "inner" && report.angle == degrees)
     }
 
     /// What asking a clone that stays closed to open through `route` throws.

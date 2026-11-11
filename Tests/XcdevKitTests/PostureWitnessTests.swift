@@ -68,6 +68,18 @@ import Testing
         #expect(line.timestamp == PoseLine.timestamp("2026-10-19 18:22:22.535"))
     }
 
+    /// A `COMPLETED:` line names the display the transition left primary; a `DCMPose` line names none. Taken from an
+    /// iOS 27.2 Duo clone's log, 2026-11-11.
+    @Test func aCompletedLineNamesTheDisplayItLeftPrimary() throws {
+        let opened = try #require(PoseLine.parse(
+            "2026-11-11 12:00:17.682 Df SpringBoard[76252:2a18ad2] [com.apple.SpringBoard:DisplayContentMode] COMPLETED:     .cover:aux .inner:pri | 180.0° (1.00 fold:1.00): openFlat [device:Pu]"))
+        let closed = try #require(PoseLine.parse(
+            "2026-11-11 11:58:50.395 Df SpringBoard[74543:2a16296] [com.apple.SpringBoard:DisplayContentMode] COMPLETED:     .cover:pri .inner:off | 0.0° (0.00 fold:0.00): fullyClosed [device:Pu]"))
+        let pose = try #require(PoseLine.parse(
+            "2026-11-11 12:00:29.973 Df SpringBoard[76252:2a18ad2] [com.apple.SpringBoard:DevicePose] DCMPose: 87.4° (0.49 fold:1.00): partiallyOpen+foldAvoidance [device:Pu]"))
+        #expect(opened.innerPrimary == true && closed.innerPrimary == false && pose.innerPrimary == nil)
+    }
+
     /// The transition's other lines carry an angle after a `|` too, but say where it started, not where it ended.
     @Test func startingAndResolvedLinesAreNotHingeLines() {
         #expect(PoseLine.parse("2026-10-19 18:22:21.105 Df SpringBoard[88269:1063c187] [com.apple.SpringBoard:DisplayContentMode] STARTING:      .inner:off→pri .cover:pri→aux | style .continuousSnapshot | 180.0° (1.00 fold:1.00): openFlat [device:Pu]") == nil)

@@ -13,6 +13,10 @@ public enum Posture: String, Codable, Sendable, CaseIterable {
         }
     }
 
+    /// How far SpringBoard's angle may be from the one asked for and still be it: iOS 27.2 leaves the hinge 2.6° past
+    /// an angle between closed and open (90° from open logs 87.4°, from closed 92.6°), where iOS 27.1 logged 90.0°.
+    public static let angleTolerance = 3.0
+
     /// The posture nearest an angle: closed below 45°, open from 135°, half between.
     public static func nearest(_ degrees: Double) -> Posture {
         if degrees < 45 { return .closed }
@@ -122,14 +126,14 @@ public struct PostureState: Sendable, Equatable {
 
     /// Whether this state already is what `request` asks for, so nothing needs sending. The cover
     /// being active is proof of 0° only when no hinge line of this boot is known, since the Duo keeps the cover at
-    /// 61.7°; a known angle is decided by the 1° rule.
+    /// 61.7°; a known angle is decided by `Posture.angleTolerance`.
     public func satisfies(_ request: PostureRequest) -> Bool {
         switch request {
         case .orientation(let wanted):
             return orientation == wanted
         case .hinge(let wanted):
             guard let degrees else { return !innerActive && wanted == 0 }
-            return abs(degrees - wanted) <= 1
+            return abs(degrees - wanted) <= Posture.angleTolerance
         }
     }
 }
