@@ -7,6 +7,20 @@ import XcdevTestSupport
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xcd detached \(UUID().uuidString)").path
     let launcher = SystemDetachedProcesses(inheritedEnvironment: ["PATH": "/usr/bin:/bin"])
 
+    /// Whether `condition` holds within 10 s, checked every 10 ms: a started process gets there in its own time.
+    func soon(_ condition: () -> Bool) async throws -> Bool {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while !condition() {
+            guard ContinuousClock.now < deadline else { return false }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        return true
+    }
+
+    func log(_ path: String, says text: String) -> Bool {
+        (try? String(contentsOfFile: path, encoding: .utf8))?.contains(text) == true
+    }
+
     @Test(.timeLimit(.minutes(1))) func aStartedProcessHasItsOwnSessionAndOutlivesItsStarter() async throws {
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let log = dir + "/logs/a.log"
@@ -14,9 +28,8 @@ import XcdevTestSupport
         #expect(getsid(id.pid) == id.pid)                       // its own session: no terminal signal reaches it
         #expect(getpgid(id.pid) == id.pid)
         #expect(launcher.inspector.isRunning(id))
-        try await Task.sleep(for: .milliseconds(300))
-        #expect(try String(contentsOfFile: log, encoding: .utf8).contains("started"))
-        #expect(launcher.inspector.identity(of: id.pid)?.arguments == ["sleep", "30"])   // read back after exec
+        #expect(try await soon { self.log(log, says: "started") })
+        #expect(try await soon { launcher.inspector.identity(of: id.pid)?.arguments == ["sleep", "30"] })   // read back after exec
         #expect(await launcher.stop(id, marker: "sleep", signal: SIGINT, timeout: .seconds(5)) == .stopped)
         #expect(!launcher.inspector.isRunning(id))
         #expect(await launcher.stop(id, marker: nil, signal: SIGINT, timeout: .seconds(5)) == .notRunning)
@@ -24,9 +37,10 @@ import XcdevTestSupport
 
     @Test(.timeLimit(.minutes(1))) func aProcessThatIgnoresTheSignalIsKilled() async throws {
         defer { try? FileManager.default.removeItem(atPath: dir) }
-        let id = try launcher.start(Invocation("/bin/sh", ["-c", "trap '' INT; while :; do sleep 1; done"]), log: dir + "/b.log")
-        try await Task.sleep(for: .milliseconds(200))
-        #expect(await launcher.stop(id, marker: nil, signal: SIGINT, timeout: .milliseconds(500)) == .killed)
+        let log = dir + "/b.log"
+        let id = try launcher.start(Invocation("/bin/sh", ["-c", "trap '' INT; echo ignoring; while :; do sleep 1; done"]), log: log)
+        #expect(try await soon { self.log(log, says: "ignoring") })
+        #expect(await launcher.stop(id, marker: nil, signal: SIGINT, timeout: .milliseconds(100)) == .killed)
         #expect(!launcher.inspector.isRunning(id))
     }
 
@@ -43,8 +57,7 @@ import XcdevTestSupport
         defer { try? FileManager.default.removeItem(atPath: dir) }
         do {
             let id = try launcher.start(Invocation("/bin/sh", ["-c", "exit 3"]), log: dir + "/c.log")
-            try await Task.sleep(for: .milliseconds(300))
-            #expect(!launcher.inspector.isRunning(id))
+            #expect(try await soon { !launcher.inspector.isRunning(id) })
         } catch let error as XcdError {
             #expect(error.code == .subprocessFailed)
         }

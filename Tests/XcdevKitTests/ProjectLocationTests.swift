@@ -27,6 +27,19 @@ struct MountPointGit: ProcessRunning {
         await #expect(throws: XcdError.self) { _ = try await locator.locate(from: directory) }
     }
 
+    /// Every command starts here, so one git call answers both: the checkout's top folder, and the repository's shared
+    /// folder, whose parent is the main checkout.
+    @Test func oneGitCallFindsTheCheckoutAndTheMainCheckout() async throws {
+        let project = try TempProject.make(config: "version: 1\nproject: App.xcodeproj\n")
+        defer { project.remove() }
+        let worktree = project.base + "/login"
+        try project.git("worktree", "add", "-q", "-b", "login", worktree)
+        let runner = RecordingRunner()
+        let location = try await WorktreeLocator(runner: runner).locate(from: worktree)
+        #expect(location == ProjectLocation(projectRoot: project.root, worktreeRoot: Paths.canonical(worktree)))
+        #expect(runner.calls.count == 1, "\(runner.calls.map(\.commandLine))")
+    }
+
     @Test func aFolderWithNoGitAboveItIsNotInAProject() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xcd-plain-\(UUID().uuidString)").path
         try FileManager.default.createDirectory(atPath: dir + "/deeper", withIntermediateDirectories: true)

@@ -16,7 +16,7 @@ extension TempProject {
     public func rev(_ ref: String, in directory: String? = nil) throws -> String {
         let process = Process()
         let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.executableURL = URL(fileURLWithPath: Self.gitExecutable)
         process.arguments = ["-C", directory ?? root, "rev-parse", ref]
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice

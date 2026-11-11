@@ -20,15 +20,15 @@ public struct WorktreeLocator: Sendable {
 
     public init(runner: any ProcessRunning) { self.runner = runner }
 
+    /// One git call, since every command starts here: the checkout's top folder on the first line, the repository's
+    /// shared folder (whose parent is the main checkout) on the second.
     public func locate(from directory: String) async throws -> ProjectLocation {
-        let invocation = Invocation.git(["rev-parse", "--show-toplevel"], in: directory)
-        let top = try await runner.run(invocation)
-        guard top.succeeded else { throw Self.failure(invocation, top, from: directory) }
-        let common = try await runner.runChecked(.git(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: directory))
-        let commonDir = common.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
-        let projectRoot = URL(fileURLWithPath: commonDir).deletingLastPathComponent().path
-        let worktreeRoot = top.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
-        return ProjectLocation(projectRoot: Paths.canonical(projectRoot), worktreeRoot: Paths.canonical(worktreeRoot))
+        let invocation = Invocation.git(["rev-parse", "--show-toplevel", "--path-format=absolute", "--git-common-dir"], in: directory)
+        let out = try await runner.run(invocation)
+        let lines = out.stdoutString.split(separator: "\n").map(String.init)
+        guard out.succeeded, lines.count == 2 else { throw Self.failure(invocation, out, from: directory) }
+        let projectRoot = URL(fileURLWithPath: lines[1]).deletingLastPathComponent().path
+        return ProjectLocation(projectRoot: Paths.canonical(projectRoot), worktreeRoot: Paths.canonical(lines[0]))
     }
 
     /// Why git found no project from `directory`. Outside a project only when git

@@ -39,7 +39,7 @@ import XcdevTestSupport
     /// leaves a file) when it gets to its own end, 30 seconds on; that it never did shows what ended it.
     @Test func timeoutTerminatesAndThrows() async throws {
         let error = await #expect(throws: XcdError.self) {
-            try await runner.run(Invocation("/bin/sh", ["-c", "sleep 30; echo finished >&2"], timeout: .milliseconds(500)))
+            try await runner.run(Invocation("/bin/sh", ["-c", "sleep 30; echo finished >&2"], timeout: .milliseconds(100)))
         }
         #expect(error?.code == .timeout)
         #expect(error?.details.contains("finished") == false)

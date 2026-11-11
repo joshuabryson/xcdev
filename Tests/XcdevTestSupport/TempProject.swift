@@ -48,10 +48,30 @@ public struct TempProject: Sendable {
         return URL(fileURLWithPath: path).standardizedFileURL.path
     }
 
+    /// git itself, found once. `/usr/bin/git` stands in for it and asks xcrun where it is on every call, which in a
+    /// test's dozens of calls costs more than git's own work. git names its `<developer>/usr/libexec/git-core`
+    /// folder; it is `<developer>/usr/bin/git`.
+    static let gitExecutable: String = {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["--exec-path"]
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return "/usr/bin/git" }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let core = URL(fileURLWithPath: String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+        let git = core.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("bin/git").path
+        return process.terminationStatus == 0 && FileManager.default.isExecutableFile(atPath: git) ? git : "/usr/bin/git"
+    }()
+
+    /// Runs git in `directory`, with no maintenance after a commit: a test's repo never needs it, and it is a process
+    /// more per commit.
     public static func git(_ args: [String], in directory: String) throws {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["-C", directory] + args
+        process.executableURL = URL(fileURLWithPath: gitExecutable)
+        process.arguments = ["-c", "maintenance.auto=false", "-C", directory] + args
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()

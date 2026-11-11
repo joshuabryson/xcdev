@@ -287,7 +287,7 @@ import XcdevTestSupport
 }
 
 /// Runs everything for real and records each invocation.
-private final class RecordingRunner: ProcessRunning {
+final class RecordingRunner: ProcessRunning {
     private let recorded = Mutex<[Invocation]>([])
     var calls: [Invocation] { recorded.withLock { $0 } }
 
